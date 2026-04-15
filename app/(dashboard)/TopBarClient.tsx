@@ -18,6 +18,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/coupons': 'Coupons',
   '/tasks': 'Tasks',
   '/notifications-broadcast': 'Notifications Broadcast',
+  '/notification-templates': 'Notification Templates',
   '/platform-balance': 'Platform Balance',
   '/admin-accounts': 'Admin Accounts',
   '/user-activity-monitor': 'User Activity Monitor',

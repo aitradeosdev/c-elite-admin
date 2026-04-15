@@ -247,11 +247,11 @@ export async function POST(req: NextRequest) {
     const cardLabel = `${symbol}${amtStr} ${cardRow?.name || 'Gift card'}${typeRow?.name ? ` (${typeRow.name})` : ''}`;
     const rejectBody = `${cardLabel} was rejected. Reason: ${reason}`;
 
-    await supabaseAdmin.from('notifications').insert({
-      user_id: before.user_id,
-      title: 'Card Rejected',
-      body: rejectBody,
-      type: 'card_rejected',
+    await supabaseAdmin.rpc('emit_notification', {
+      p_user_id: before.user_id,
+      p_template_key: 'card_rejected',
+      p_type: 'card_rejected',
+      p_vars: { card_label: cardLabel, reason },
     });
 
     await logAction(admin.admin_id, 'REJECT_CARD', submission_id, before, { status: 'rejected', rejection_reason: reason }, ip);
@@ -268,11 +268,17 @@ export async function POST(req: NextRequest) {
       .eq('id', submission_id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    await supabaseAdmin.from('notifications').insert({
-      user_id: before.user_id,
-      title: 'Dispute Closed',
-      body: 'Your dispute has been reviewed and the original decision stands.',
-      type: 'dispute_closed',
+    await supabaseAdmin
+      .from('transactions')
+      .update({ status: 'failed' })
+      .eq('reference_id', submission_id)
+      .eq('type', 'giftcard_credit');
+
+    await supabaseAdmin.rpc('emit_notification', {
+      p_user_id: before.user_id,
+      p_template_key: 'dispute_closed',
+      p_type: 'dispute_closed',
+      p_vars: {},
     });
 
     await logAction(admin.admin_id, 'UPHOLD_DISPUTE', submission_id, before, { status: 'dispute_resolved' }, ip);
