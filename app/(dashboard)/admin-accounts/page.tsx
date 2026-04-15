@@ -18,6 +18,7 @@ const ASSIGNABLE_PAGES = [
   { key: 'coupons', label: 'Coupons' },
   { key: 'tasks', label: 'Tasks' },
   { key: 'notifications_broadcast', label: 'Notifications Broadcast' },
+  { key: 'notification_templates', label: 'Notification Templates' },
   { key: 'platform_balance', label: 'Platform Balance' },
 ];
 
