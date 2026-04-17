@@ -17,6 +17,7 @@ async function log(adminId: string, action: string, entity: string, entityId: st
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_type_builder')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
   const cardId = searchParams.get('card_id');
@@ -48,6 +49,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_type_builder')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
@@ -78,12 +80,17 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_type_builder')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
 
   if (body.type === 'card_type') {
-    const { id, ...updates } = body; delete updates.type;
+    const { id } = body;
+    const updates: any = {};
+    if (body.name !== undefined) updates.name = String(body.name);
+    if (body.is_active !== undefined) updates.is_active = !!body.is_active;
+    if (body.sort_order !== undefined) updates.sort_order = Number(body.sort_order);
     const { data: before } = await supabaseAdmin.from('card_types').select('*').eq('id', id).single();
     await supabaseAdmin.from('card_types').update(updates).eq('id', id);
     await log(admin.admin_id, 'UPDATE_CARD_TYPE', 'card_types', id, before, updates, ip);
@@ -91,7 +98,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (body.type === 'field') {
-    const { id, ...updates } = body; delete updates.type;
+    const { id } = body;
+    const updates: any = {};
+    if (body.label !== undefined) updates.label = String(body.label);
+    if (body.input_type !== undefined) updates.input_type = body.input_type;
+    if (body.is_required !== undefined) updates.is_required = !!body.is_required;
+    if (body.sort_order !== undefined) updates.sort_order = Number(body.sort_order);
     const { data: before } = await supabaseAdmin.from('card_type_fields').select('*').eq('id', id).single();
     await supabaseAdmin.from('card_type_fields').update(updates).eq('id', id);
     await log(admin.admin_id, 'UPDATE_FIELD', 'card_type_fields', id, before, updates, ip);
@@ -103,6 +115,7 @@ export async function PATCH(req: NextRequest) {
     await Promise.all(ids.map((id: string, index: number) =>
       supabaseAdmin.from('card_type_fields').update({ sort_order: index }).eq('id', id)
     ));
+    await log(admin.admin_id, 'REORDER_FIELDS', 'card_type_fields', 'batch', null, { ids }, ip);
     return NextResponse.json({ success: true });
   }
 
@@ -112,6 +125,7 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_type_builder')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';

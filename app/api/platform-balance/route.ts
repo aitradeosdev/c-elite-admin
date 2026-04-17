@@ -22,6 +22,7 @@ async function getAdmin() {
 export async function GET() {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('platform_balance')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const { data, error } = await supabaseAdmin.from('app_config').select('key, value').in('key', KEYS);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const config: Record<string, string> = {};
@@ -32,6 +33,7 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('platform_balance')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const { changes } = await req.json();
   if (!changes || typeof changes !== 'object') {
     return NextResponse.json({ error: 'No changes' }, { status: 400 });

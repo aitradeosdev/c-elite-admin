@@ -13,6 +13,7 @@ async function getAdmin() {
 export async function GET() {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const { data, error } = await supabaseAdmin
     .from('notification_broadcasts')
     .select('*')
@@ -25,11 +26,25 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const { title, message, type, audience, target_user_id } = body;
   if (!title || !message || !audience) {
     return NextResponse.json({ error: 'Missing title/message/audience' }, { status: 400 });
+  }
+
+  // Phase 35c: validate target_user_id when audience=user — the edge
+  // function blindly inserts into notifications with whatever it receives,
+  // so a non-UUID or unknown user would still be logged as "delivered".
+  if (audience === 'user') {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!target_user_id || !UUID_RE.test(String(target_user_id))) {
+      return NextResponse.json({ error: 'Invalid target_user_id' }, { status: 400 });
+    }
+    const { data: exists } = await supabaseAdmin
+      .from('users').select('id').eq('id', target_user_id).maybeSingle();
+    if (!exists) return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
   }
 
   const url = `${process.env.SUPABASE_URL}/functions/v1/broadcast-notification`;

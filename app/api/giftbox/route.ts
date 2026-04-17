@@ -14,6 +14,7 @@ async function getAdmin(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: items, error } = await supabaseAdmin
     .from('giftbox_items')
@@ -39,12 +40,17 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const { title, description, reward_naira, expiry_date, eligibility_condition, eligibility_rules, is_active } = body;
 
-  if (!title || !reward_naira) {
+  if (!title || reward_naira === undefined || reward_naira === null) {
     return NextResponse.json({ error: 'Missing title or reward' }, { status: 400 });
+  }
+  const rewardVal = Number(reward_naira);
+  if (!Number.isFinite(rewardVal) || rewardVal < 0) {
+    return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
   }
 
   const { data, error } = await supabaseAdmin
@@ -52,7 +58,7 @@ export async function POST(req: NextRequest) {
     .insert({
       title,
       description: description || null,
-      reward_naira: Number(reward_naira),
+      reward_naira: rewardVal,
       expiry_date: expiry_date || null,
       eligibility_condition: eligibility_condition || null,
       eligibility_rules: Array.isArray(eligibility_rules) ? eligibility_rules : [],
@@ -75,10 +81,24 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { id, ...updates } = body;
+  const { id } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  const updates: any = {};
+  if (body.title !== undefined) updates.title = String(body.title);
+  if (body.description !== undefined) updates.description = body.description || null;
+  if (body.reward_naira !== undefined) {
+    const n = Number(body.reward_naira);
+    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
+    updates.reward_naira = n;
+  }
+  if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null;
+  if (body.eligibility_condition !== undefined) updates.eligibility_condition = body.eligibility_condition || null;
+  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules : [];
+  if (body.is_active !== undefined) updates.is_active = !!body.is_active;
 
   const { data: before } = await supabaseAdmin.from('giftbox_items').select('*').eq('id', id).single();
 

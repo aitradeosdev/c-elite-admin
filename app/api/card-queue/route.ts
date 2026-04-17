@@ -35,7 +35,9 @@ async function signImagePaths(paths: string[] | null): Promise<string[]> {
 // GET — list submissions, optionally filter by status / search
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin || !(admin.page_permissions || []).includes('card_queue')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status');
@@ -135,7 +137,9 @@ export async function GET(req: NextRequest) {
 // POST — approve / reject / dispute_overturn / dispute_uphold
 export async function POST(req: NextRequest) {
   const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin || !(admin.page_permissions || []).includes('card_queue')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const body = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
@@ -154,7 +158,7 @@ export async function POST(req: NextRequest) {
   if (!before) return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
 
   if (action === 'approve' || action === 'overturn') {
-    const rpcArgs: any = { p_submission_id: submission_id };
+    const rpcArgs: any = { p_submission_id: submission_id, p_admin_id: admin.admin_id };
     if (card_type_id) rpcArgs.p_card_type_id = card_type_id;
     if (amount_foreign !== undefined && amount_foreign !== null && amount_foreign !== '') {
       const n = Number(amount_foreign);
@@ -168,19 +172,7 @@ export async function POST(req: NextRequest) {
     }
     const { data, error } = await supabaseAdmin.rpc('approve_card_submission', rpcArgs);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const { data: after } = await supabaseAdmin
-      .from('card_submissions')
-      .select('*')
-      .eq('id', submission_id)
-      .single();
-    await logAction(
-      admin.admin_id,
-      action === 'approve' ? 'APPROVE_CARD' : 'OVERTURN_DISPUTE',
-      submission_id,
-      before,
-      { ...after, _rpc: data, _override: { card_type_id: rpcArgs.p_card_type_id || null, amount_foreign: rpcArgs.p_amount_foreign ?? null } },
-      ip
-    );
+    await logAction(admin.admin_id, action === 'overturn' ? 'OVERTURN_DISPUTE' : 'APPROVE_CARD', submission_id, before, { status: 'approved', ...rpcArgs }, ip);
     return NextResponse.json({ success: true, result: data });
   }
 
@@ -191,11 +183,19 @@ export async function POST(req: NextRequest) {
     if (before.status !== 'pending') {
       return NextResponse.json({ error: 'Only pending submissions can be rejected' }, { status: 400 });
     }
-    const { error } = await supabaseAdmin
+    // Phase 35c: race guard — two admins clicking reject/approve at the
+    // same time would both pass the `before.status === 'pending'` check.
+    // Filter the UPDATE on the expected status and require 1 affected row.
+    const { data: updated, error } = await supabaseAdmin
       .from('card_submissions')
       .update({ status: 'rejected', rejection_reason: reason })
-      .eq('id', submission_id);
+      .eq('id', submission_id)
+      .eq('status', 'pending')
+      .select('id');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!updated || updated.length === 0) {
+      return NextResponse.json({ error: 'Submission is no longer pending' }, { status: 409 });
+    }
 
     const { data: existingTxn } = await supabaseAdmin
       .from('transactions')
@@ -262,11 +262,16 @@ export async function POST(req: NextRequest) {
     if (before.status !== 'disputed') {
       return NextResponse.json({ error: 'Only disputed submissions can be upheld' }, { status: 400 });
     }
-    const { error } = await supabaseAdmin
+    const { data: updated, error } = await supabaseAdmin
       .from('card_submissions')
       .update({ status: 'dispute_resolved' })
-      .eq('id', submission_id);
+      .eq('id', submission_id)
+      .eq('status', 'disputed')
+      .select('id');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!updated || updated.length === 0) {
+      return NextResponse.json({ error: 'Submission is no longer disputed' }, { status: 409 });
+    }
 
     await supabaseAdmin
       .from('transactions')

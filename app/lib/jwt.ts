@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose';
+import { supabaseAdmin } from './supabase';
 
 const secret = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET!);
 
@@ -21,7 +22,22 @@ export async function signAdminJWT(payload: AdminJWTPayload): Promise<string> {
 export async function verifyAdminJWT(token: string): Promise<AdminJWTPayload | null> {
   try {
     const { payload } = await jwtVerify(token, secret);
-    return payload as unknown as AdminJWTPayload;
+    const claims = payload as unknown as AdminJWTPayload;
+
+    const { data: admin } = await supabaseAdmin
+      .from('admin_users')
+      .select('id, is_active, is_super_admin, page_permissions')
+      .eq('id', claims.admin_id)
+      .eq('is_active', true)
+      .single();
+
+    if (!admin) return null;
+
+    return {
+      ...claims,
+      is_super_admin: admin.is_super_admin,
+      page_permissions: admin.page_permissions || [],
+    };
   } catch {
     return null;
   }

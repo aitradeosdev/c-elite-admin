@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { sanitizeSearch, clampPagination } from '../../lib/sanitize';
 
 async function getAdmin() {
   const cookieStore = await cookies();
@@ -11,11 +12,10 @@ async function getAdmin() {
 }
 
 function formatCSVField(val: any): string {
-  const s = String(val ?? '');
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-  return s;
+  const raw = String(val ?? '');
+  // Phase 35c: neutralise CSV-formula injection (=, +, -, @, TAB, CR prefix).
+  const s = /^[=+\-@\t\r]/.test(raw) ? "'" + raw : raw;
+  return '"' + s.replace(/"/g, '""') + '"';
 }
 
 export async function GET(req: NextRequest) {
@@ -29,11 +29,9 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get('status') || '';
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
-  const search = searchParams.get('search') || '';
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '25');
+  const search = sanitizeSearch(searchParams.get('search') || '');
   const csv = searchParams.get('csv') === '1';
-  const offset = (page - 1) * limit;
+  const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
   let query = supabaseAdmin
     .from('transfers')

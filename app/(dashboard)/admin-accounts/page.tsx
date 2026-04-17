@@ -16,7 +16,6 @@ const ASSIGNABLE_PAGES = [
   { key: 'bonuses_rewards', label: 'Bonuses & Rewards' },
   { key: 'referral_management', label: 'Referral Management' },
   { key: 'coupons', label: 'Coupons' },
-  { key: 'tasks', label: 'Tasks' },
   { key: 'notifications_broadcast', label: 'Notifications Broadcast' },
   { key: 'notification_templates', label: 'Notification Templates' },
   { key: 'platform_balance', label: 'Platform Balance' },
