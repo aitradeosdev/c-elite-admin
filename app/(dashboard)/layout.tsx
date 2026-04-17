@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { key: 'coupons', label: 'Coupons', href: '/coupons' },
   { key: 'notifications_broadcast', label: 'Notifications Broadcast', href: '/notifications-broadcast' },
   { key: 'notification_templates', label: 'Notification Templates', href: '/notification-templates' },
+  { key: 'email_templates', label: 'Email Templates', href: '/email-templates' },
   { key: 'platform_balance', label: 'Platform Balance', href: '/platform-balance' },
   { key: 'admin_accounts', label: 'Admin Accounts', href: '/admin-accounts' },
   { key: 'user_activity_monitor', label: 'User Activity Monitor', href: '/user-activity-monitor' },
