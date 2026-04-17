@@ -14,6 +14,7 @@ async function getAdmin(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('referral_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: rows, error } = await supabaseAdmin
     .from('referrals')

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { sanitizeSearch, clampPagination } from '../../lib/sanitize';
 
 async function getAdmin() {
   const cookieStore = await cookies();
@@ -20,10 +21,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const onlyOnline = searchParams.get('online') === '1';
-  const search = searchParams.get('search') || '';
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '25');
-  const offset = (page - 1) * limit;
+  const search = sanitizeSearch(searchParams.get('search') || '');
+  const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
   const onlineCutoff = new Date(Date.now() - ONLINE_WINDOW_SECS * 1000).toISOString();
 

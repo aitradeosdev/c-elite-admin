@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { sanitizeSearch } from '../../../lib/sanitize';
 
 async function getAdmin() {
   const cookieStore = await cookies();
@@ -13,8 +14,9 @@ async function getAdmin() {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const q = (new URL(req.url).searchParams.get('q') || '').trim();
+  const q = sanitizeSearch(new URL(req.url).searchParams.get('q') || '');
   if (!q) return NextResponse.json({ users: [] });
 
   const { data, error } = await supabaseAdmin

@@ -13,6 +13,7 @@ async function getAdmin() {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const audience = new URL(req.url).searchParams.get('audience') || 'all';
   if (audience === 'specific') return NextResponse.json({ count: 1 });

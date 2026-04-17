@@ -7,6 +7,7 @@ const KEYS = [
   'min_withdrawal_amount',
   'max_withdrawal_amount',
   'max_daily_withdrawal',
+  'withdraw_fee',
   'transfer_tag_fee',
   'transfer_bank_fee',
   'large_withdrawal_flag_threshold',
@@ -24,6 +25,7 @@ async function getAdmin() {
 export async function GET() {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const { data, error } = await supabaseAdmin.from('app_config').select('key, value').in('key', KEYS);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const config: Record<string, string> = {};
@@ -34,6 +36,7 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { changes } = await req.json();
   if (!changes || typeof changes !== 'object') {

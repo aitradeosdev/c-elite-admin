@@ -14,6 +14,7 @@ async function getAdmin(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: tiers, error } = await supabaseAdmin
     .from('level_tiers')
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const { id, ...updates } = body;

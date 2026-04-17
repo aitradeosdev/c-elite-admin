@@ -13,6 +13,7 @@ async function getAdmin() {
 export async function GET() {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('notification_templates')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data, error } = await supabaseAdmin
     .from('notification_templates')
@@ -26,6 +27,7 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('notification_templates')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { key, title, body, is_active } = await req.json();
   if (!key || typeof key !== 'string') {

@@ -14,6 +14,7 @@ async function getAdmin(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const url = new URL(req.url);
   const keys = url.searchParams.get('keys');
@@ -33,6 +34,7 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { changes } = await req.json();
   if (!changes || typeof changes !== 'object' || Object.keys(changes).length === 0) {

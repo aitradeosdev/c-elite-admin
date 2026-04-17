@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { sanitizeSearch, clampPagination } from '../../lib/sanitize';
 
 async function getAdmin() {
   const cookieStore = await cookies();
@@ -17,11 +18,9 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const search = searchParams.get('search') || '';
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '25');
+  const search = sanitizeSearch(searchParams.get('search') || '');
   const csv = searchParams.get('csv') === '1';
-  const offset = (page - 1) * limit;
+  const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
   let query = supabaseAdmin
     .from('users')
@@ -59,9 +58,18 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    // Phase 35c: escape each cell — a user-chosen full_name/username like
+    // `=cmd|'/c calc'!A1` executes in Excel when the CSV is opened.
+    const csvCell = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      const needsPrefix = /^[=+\-@\t\r]/.test(s);
+      const escaped = (needsPrefix ? "'" + s : s).replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
     const header = 'ID,Name,Username,Email,Phone,Balance,Trades,Joined,Status\n';
     const csvBody = rows.map((r: any) =>
-      `${r.id},"${r.full_name}","${r.username}","${r.email}","${r.phone}",${r.balance},${r.trades},${r.joined},${r.status}`
+      [r.id, r.full_name, r.username, r.email, r.phone, r.balance, r.trades, r.joined, r.status]
+        .map(csvCell).join(',')
     ).join('\n');
 
     return new Response(header + csvBody, {

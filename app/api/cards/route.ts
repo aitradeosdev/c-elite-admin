@@ -26,6 +26,7 @@ async function logAction(adminId: string, action: string, entityId: string, befo
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: cards, error } = await supabaseAdmin
     .from('cards')
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
@@ -84,13 +86,18 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
 
   if (body.type === 'card') {
-    const { id, ...updates } = body;
-    delete updates.type;
+    const { id } = body;
+    const updates: any = {};
+    if (body.name !== undefined) updates.name = String(body.name);
+    if (body.logo_url !== undefined) updates.logo_url = body.logo_url;
+    if (body.is_active !== undefined) updates.is_active = !!body.is_active;
+    if (body.sort_order !== undefined) updates.sort_order = Number(body.sort_order);
     const { data: before } = await supabaseAdmin.from('cards').select('*').eq('id', id).single();
     const { error } = await supabaseAdmin.from('cards').update(updates).eq('id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -99,8 +106,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (body.type === 'country') {
-    const { id, ...updates } = body;
-    delete updates.type;
+    const { id } = body;
+    const updates: any = {};
+    if (body.country_code !== undefined) updates.country_code = body.country_code;
+    if (body.country_name !== undefined) updates.country_name = body.country_name;
+    if (body.currency_symbol !== undefined) updates.currency_symbol = body.currency_symbol;
+    if (body.is_active !== undefined) updates.is_active = !!body.is_active;
     const { data: before } = await supabaseAdmin.from('card_countries').select('*').eq('id', id).single();
     const { error } = await supabaseAdmin.from('card_countries').update(updates).eq('id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -113,6 +124,7 @@ export async function PATCH(req: NextRequest) {
     await Promise.all(ids.map((id: string, index: number) =>
       supabaseAdmin.from('cards').update({ sort_order: index }).eq('id', id)
     ));
+    await logAction(admin.admin_id, 'REORDER_CARDS', 'batch', null, { ids }, ip);
     return NextResponse.json({ success: true });
   }
 
@@ -123,6 +135,7 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id, type } = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';

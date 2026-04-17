@@ -14,6 +14,7 @@ async function getAdmin(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('rates_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: cards } = await supabaseAdmin
     .from('cards')
@@ -63,11 +64,21 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('rates_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { card_type_id, range_label, min_value, max_value, rate_naira, is_active } = await req.json();
+
+  const minVal = Number(min_value);
+  const maxVal = Number(max_value);
+  const rateVal = Number(rate_naira);
+  if (!Number.isFinite(minVal) || minVal < 0) return NextResponse.json({ error: 'Invalid min_value' }, { status: 400 });
+  if (!Number.isFinite(maxVal) || maxVal < 0) return NextResponse.json({ error: 'Invalid max_value' }, { status: 400 });
+  if (!Number.isFinite(rateVal) || rateVal < 0) return NextResponse.json({ error: 'Invalid rate_naira' }, { status: 400 });
+  if (minVal > maxVal) return NextResponse.json({ error: 'min_value cannot exceed max_value' }, { status: 400 });
+
   const { data, error } = await supabaseAdmin
     .from('denominations')
-    .insert({ card_type_id, range_label, min_value, max_value, rate_naira, is_active: is_active ?? true })
+    .insert({ card_type_id, range_label, min_value: minVal, max_value: maxVal, rate_naira: rateVal, is_active: is_active ?? true })
     .select('id').single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -85,6 +96,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('rates_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { changes } = await req.json();
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
@@ -99,8 +111,13 @@ export async function PATCH(req: NextRequest) {
     beforeSnapshots[change.id] = data;
   }
 
-  const results = await Promise.all(changes.map(({ id, rate_naira, is_active }) =>
-    supabaseAdmin.from('denominations').update({ rate_naira, is_active }).eq('id', id)
+  for (const change of changes) {
+    const r = Number(change.rate_naira);
+    if (!Number.isFinite(r) || r < 0) return NextResponse.json({ error: `Invalid rate_naira for id ${change.id}` }, { status: 400 });
+  }
+
+  const results = await Promise.all(changes.map(({ id, rate_naira, is_active }: { id: string; rate_naira: number; is_active: boolean }) =>
+    supabaseAdmin.from('denominations').update({ rate_naira: Number(rate_naira), is_active }).eq('id', id)
   ));
 
   const hasError = results.some((r) => r.error);

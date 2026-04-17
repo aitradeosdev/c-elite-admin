@@ -13,6 +13,7 @@ async function getAdmin(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('coupons')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data, error } = await supabaseAdmin
     .from('coupons')
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('coupons')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const { code, min_trade_amount_usd, expiry_date, type, bonus_rate_naira, is_active, eligibility_rules, terms_of_use } = body;
@@ -33,15 +35,19 @@ export async function POST(req: NextRequest) {
   if (!code || !type) {
     return NextResponse.json({ error: 'Missing code or type' }, { status: 400 });
   }
+  const minTradeVal = Number(min_trade_amount_usd || 0);
+  const bonusVal = Number(bonus_rate_naira || 0);
+  if (!Number.isFinite(minTradeVal) || minTradeVal < 0) return NextResponse.json({ error: 'Invalid min_trade_amount_usd' }, { status: 400 });
+  if (!Number.isFinite(bonusVal) || bonusVal < 0) return NextResponse.json({ error: 'Invalid bonus_rate_naira' }, { status: 400 });
 
   const { data, error } = await supabaseAdmin
     .from('coupons')
     .insert({
       code: code.trim().toUpperCase(),
-      min_trade_amount_usd: Number(min_trade_amount_usd) || 0,
+      min_trade_amount_usd: minTradeVal,
       expiry_date: expiry_date || null,
       type,
-      bonus_rate_naira: Number(bonus_rate_naira) || 0,
+      bonus_rate_naira: bonusVal,
       is_active: is_active ?? true,
       eligibility_rules: Array.isArray(eligibility_rules) ? eligibility_rules : [],
       terms_of_use: terms_of_use || null,
@@ -62,12 +68,29 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('coupons')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { id, ...updates } = body;
+  const { id } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-  if (updates.code) updates.code = String(updates.code).trim().toUpperCase();
+  const updates: any = {};
+  if (body.code !== undefined) updates.code = String(body.code).trim().toUpperCase();
+  if (body.min_trade_amount_usd !== undefined) {
+    const n = Number(body.min_trade_amount_usd);
+    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: 'Invalid min_trade_amount_usd' }, { status: 400 });
+    updates.min_trade_amount_usd = n;
+  }
+  if (body.bonus_rate_naira !== undefined) {
+    const n = Number(body.bonus_rate_naira);
+    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: 'Invalid bonus_rate_naira' }, { status: 400 });
+    updates.bonus_rate_naira = n;
+  }
+  if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null;
+  if (body.type !== undefined) updates.type = body.type;
+  if (body.is_active !== undefined) updates.is_active = !!body.is_active;
+  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules : [];
+  if (body.terms_of_use !== undefined) updates.terms_of_use = body.terms_of_use || null;
 
   const { data: before } = await supabaseAdmin.from('coupons').select('*').eq('id', id).single();
 

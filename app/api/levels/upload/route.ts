@@ -2,25 +2,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from '../../../lib/uploadTypes';
 
-// POST — upload a badge image (SVG/PNG/JPG) to the level-badges bucket; return publicUrl.
+// POST — upload a badge image (PNG/JPG/WEBP) to the level-badges bucket; return publicUrl.
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   const token = cookieStore.get('admin_token')?.value;
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const admin = await verifyAdminJWT(token);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const formData = await req.formData();
   const file = formData.get('file') as File;
-  const tierOrder = formData.get('tier_order');
+  const tierOrderRaw = formData.get('tier_order');
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
-  const ext = (file.name.split('.').pop() || 'svg').toLowerCase();
-  const safeExt = ['svg', 'png', 'jpg', 'jpeg', 'webp'].includes(ext) ? ext : 'svg';
-  const contentType = safeExt === 'svg' ? 'image/svg+xml' : file.type || 'image/png';
+  const tierOrder = Number(tierOrderRaw);
+  if (!Number.isInteger(tierOrder) || tierOrder < 0 || tierOrder > 99) {
+    return NextResponse.json({ error: 'Invalid tier_order' }, { status: 400 });
+  }
 
-  const fileName = `tier-${tierOrder || 'x'}-${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const contentType = ALLOWED_IMAGE_TYPES[ext];
+  if (!contentType) {
+    return NextResponse.json({ error: `File type not allowed. Accepted: ${Object.keys(ALLOWED_IMAGE_TYPES).join(', ')}` }, { status: 400 });
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: 'File too large (max 5 MB)' }, { status: 400 });
+  }
+
+  const fileName = `tier-${tierOrder}-${crypto.randomUUID()}.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
 
   const { error } = await supabaseAdmin.storage
