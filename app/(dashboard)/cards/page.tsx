@@ -262,6 +262,20 @@ export default function CardsPage() {
   const [newCurrencyName, setNewCurrencyName] = useState('');
   const [newCountryActive, setNewCountryActive] = useState(true);
   const [addingCountry, setAddingCountry] = useState(false);
+  const [countryQuery, setCountryQuery] = useState('');
+  const [countryOpen, setCountryOpen] = useState(false);
+  const countryBoxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!countryOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (countryBoxRef.current && !countryBoxRef.current.contains(e.target as Node)) {
+        setCountryOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [countryOpen]);
 
   useEffect(() => { fetchCards(); }, []);
 
@@ -528,23 +542,47 @@ export default function CardsPage() {
 
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>COUNTRY</label>
-              <select style={styles.input} value={newCountryCode} onChange={(e) => {
-                const code = e.target.value;
-                setNewCountryCode(code);
-                const iso = ISO_COUNTRIES.find((c) => c.code === code);
-                if (iso) {
-                  setNewCurrencySymbol(iso.symbol);
-                  setNewCurrencyName(iso.currency);
-                } else {
-                  setNewCurrencySymbol('');
-                  setNewCurrencyName('');
-                }
-              }}>
-                <option value="">Select country</option>
-                {ISO_COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>{c.name}</option>
-                ))}
-              </select>
+              <div ref={countryBoxRef} style={{ position: 'relative' }}>
+                <input
+                  style={styles.input}
+                  placeholder="Search country"
+                  value={countryOpen ? countryQuery : (ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || '')}
+                  onFocus={() => { setCountryOpen(true); setCountryQuery(''); }}
+                  onChange={(e) => { setCountryQuery(e.target.value); setCountryOpen(true); }}
+                />
+                {countryOpen && (
+                  <div style={styles.dropdown}>
+                    {ISO_COUNTRIES.filter((c) =>
+                      c.name.toLowerCase().includes(countryQuery.toLowerCase()) ||
+                      c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
+                      c.currency.toLowerCase().includes(countryQuery.toLowerCase())
+                    ).map((c) => (
+                      <div
+                        key={c.code}
+                        style={styles.dropdownItem}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setNewCountryCode(c.code);
+                          setNewCurrencySymbol(c.symbol);
+                          setNewCurrencyName(c.currency);
+                          setCountryOpen(false);
+                          setCountryQuery('');
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{c.name}</span>
+                        <span style={{ color: '#888', fontSize: 11, marginLeft: 6 }}>{c.currency} {c.symbol}</span>
+                      </div>
+                    ))}
+                    {ISO_COUNTRIES.filter((c) =>
+                      c.name.toLowerCase().includes(countryQuery.toLowerCase()) ||
+                      c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
+                      c.currency.toLowerCase().includes(countryQuery.toLowerCase())
+                    ).length === 0 && (
+                      <div style={{ padding: '10px 12px', fontSize: 12, color: '#888' }}>No matches</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={styles.fieldGroup}>
@@ -618,5 +656,7 @@ const styles: Record<string, React.CSSProperties> = {
   countryRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F0F0F0' },
   countryName: { fontSize: 13, fontWeight: 600, color: '#111111' },
   currencySymbol: { fontSize: 12, color: '#888888' },
+  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, backgroundColor: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' },
+  dropdownItem: { padding: '10px 12px', fontSize: 13, color: '#111', cursor: 'pointer', borderBottom: '1px solid #F5F5F5', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   removeBtn: { backgroundColor: '#FFEBEE', color: '#C62828', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
 };
