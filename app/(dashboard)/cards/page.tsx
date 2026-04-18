@@ -3,21 +3,36 @@
 import { useEffect, useRef, useState } from 'react';
 
 const ISO_COUNTRIES = [
-  { code: 'US', name: 'United States' }, { code: 'GB', name: 'United Kingdom' },
-  { code: 'CA', name: 'Canada' }, { code: 'AU', name: 'Australia' },
-  { code: 'DE', name: 'Germany' }, { code: 'FR', name: 'France' },
-  { code: 'IT', name: 'Italy' }, { code: 'ES', name: 'Spain' },
-  { code: 'NL', name: 'Netherlands' }, { code: 'SE', name: 'Sweden' },
-  { code: 'NO', name: 'Norway' }, { code: 'DK', name: 'Denmark' },
-  { code: 'CH', name: 'Switzerland' }, { code: 'JP', name: 'Japan' },
-  { code: 'CN', name: 'China' }, { code: 'IN', name: 'India' },
-  { code: 'BR', name: 'Brazil' }, { code: 'MX', name: 'Mexico' },
-  { code: 'ZA', name: 'South Africa' }, { code: 'NG', name: 'Nigeria' },
-  { code: 'GH', name: 'Ghana' }, { code: 'KE', name: 'Kenya' },
-  { code: 'AE', name: 'United Arab Emirates' }, { code: 'SA', name: 'Saudi Arabia' },
-  { code: 'SG', name: 'Singapore' }, { code: 'NZ', name: 'New Zealand' },
-  { code: 'IE', name: 'Ireland' }, { code: 'PT', name: 'Portugal' },
-  { code: 'PL', name: 'Poland' }, { code: 'AT', name: 'Austria' },
+  { code: 'US', name: 'United States', symbol: '$', currency: 'USD' },
+  { code: 'GB', name: 'United Kingdom', symbol: '£', currency: 'GBP' },
+  { code: 'CA', name: 'Canada', symbol: 'C$', currency: 'CAD' },
+  { code: 'AU', name: 'Australia', symbol: 'A$', currency: 'AUD' },
+  { code: 'DE', name: 'Germany', symbol: '€', currency: 'EUR' },
+  { code: 'FR', name: 'France', symbol: '€', currency: 'EUR' },
+  { code: 'IT', name: 'Italy', symbol: '€', currency: 'EUR' },
+  { code: 'ES', name: 'Spain', symbol: '€', currency: 'EUR' },
+  { code: 'NL', name: 'Netherlands', symbol: '€', currency: 'EUR' },
+  { code: 'SE', name: 'Sweden', symbol: 'kr', currency: 'SEK' },
+  { code: 'NO', name: 'Norway', symbol: 'kr', currency: 'NOK' },
+  { code: 'DK', name: 'Denmark', symbol: 'kr', currency: 'DKK' },
+  { code: 'CH', name: 'Switzerland', symbol: 'CHF', currency: 'CHF' },
+  { code: 'JP', name: 'Japan', symbol: '¥', currency: 'JPY' },
+  { code: 'CN', name: 'China', symbol: '¥', currency: 'CNY' },
+  { code: 'IN', name: 'India', symbol: '₹', currency: 'INR' },
+  { code: 'BR', name: 'Brazil', symbol: 'R$', currency: 'BRL' },
+  { code: 'MX', name: 'Mexico', symbol: '$', currency: 'MXN' },
+  { code: 'ZA', name: 'South Africa', symbol: 'R', currency: 'ZAR' },
+  { code: 'NG', name: 'Nigeria', symbol: '₦', currency: 'NGN' },
+  { code: 'GH', name: 'Ghana', symbol: '₵', currency: 'GHS' },
+  { code: 'KE', name: 'Kenya', symbol: 'KSh', currency: 'KES' },
+  { code: 'AE', name: 'United Arab Emirates', symbol: 'AED', currency: 'AED' },
+  { code: 'SA', name: 'Saudi Arabia', symbol: 'SAR', currency: 'SAR' },
+  { code: 'SG', name: 'Singapore', symbol: 'S$', currency: 'SGD' },
+  { code: 'NZ', name: 'New Zealand', symbol: 'NZ$', currency: 'NZD' },
+  { code: 'IE', name: 'Ireland', symbol: '€', currency: 'EUR' },
+  { code: 'PT', name: 'Portugal', symbol: '€', currency: 'EUR' },
+  { code: 'PL', name: 'Poland', symbol: 'zł', currency: 'PLN' },
+  { code: 'AT', name: 'Austria', symbol: '€', currency: 'EUR' },
 ];
 
 interface Country {
@@ -326,7 +341,18 @@ export default function CardsPage() {
 
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>COUNTRY</label>
-              <select style={styles.input} value={newCountryCode} onChange={(e) => setNewCountryCode(e.target.value)}>
+              <select style={styles.input} value={newCountryCode} onChange={(e) => {
+                const code = e.target.value;
+                setNewCountryCode(code);
+                const iso = ISO_COUNTRIES.find((c) => c.code === code);
+                if (iso) {
+                  setNewCurrencySymbol(iso.symbol);
+                  setNewCurrencyName(iso.currency);
+                } else {
+                  setNewCurrencySymbol('');
+                  setNewCurrencyName('');
+                }
+              }}>
                 <option value="">Select country</option>
                 {ISO_COUNTRIES.map((c) => (
                   <option key={c.code} value={c.code}>{c.name}</option>
@@ -341,7 +367,7 @@ export default function CardsPage() {
 
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>CURRENCY NAME</label>
-              <input style={styles.input} placeholder="e.g. US Dollar" value={newCurrencyName} onChange={(e) => setNewCurrencyName(e.target.value)} />
+              <input style={styles.input} placeholder="e.g. USD" value={newCurrencyName} onChange={(e) => setNewCurrencyName(e.target.value)} />
             </div>
 
             <div style={styles.fieldGroup}>
