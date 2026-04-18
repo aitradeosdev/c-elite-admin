@@ -64,17 +64,9 @@ export default function NotificationsBroadcastPage() {
   const [userHits, setUserHits] = useState<UserHit[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserHit | null>(null);
 
-  const [cardNames, setCardNames] = useState<string[]>([]);
   const titleRef = useRef<HTMLInputElement | null>(null);
   const messageRef = useRef<HTMLTextAreaElement | null>(null);
   const lastFocused = useRef<'title' | 'message'>('message');
-
-  useEffect(() => {
-    fetch('/api/notifications/card-names')
-      .then((r) => r.json())
-      .then((d) => setCardNames((d.names || []) as string[]))
-      .catch(() => setCardNames([]));
-  }, []);
 
   const insertToken = (token: string) => {
     const wrapped = `{${token}}`;
@@ -264,26 +256,6 @@ export default function NotificationsBroadcastPage() {
             ))}
           </div>
 
-          <p style={styles.varsSection}>
-            Card rates <span style={styles.varsMuted}>(highest active rate for each card)</span>
-          </p>
-          <div style={styles.chipRow}>
-            {cardNames.length === 0 ? (
-              <span style={styles.varsMuted}>No active cards.</span>
-            ) : (
-              cardNames.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  style={styles.chip}
-                  title={`Highest active rate_naira for ${n}`}
-                  onClick={() => insertToken(`rate:${n}`)}
-                >
-                  {`{rate:${n}}`}
-                </button>
-              ))
-            )}
-          </div>
         </div>
 
         <div style={styles.sendRow}>
