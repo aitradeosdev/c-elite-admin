@@ -1,6 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+const PER_USER_VARS: { token: string; hint: string }[] = [
+  { token: 'first_name', hint: 'first word of full name' },
+  { token: 'full_name', hint: 'users.full_name' },
+  { token: 'username', hint: 'users.username' },
+  { token: 'email', hint: 'users.email' },
+  { token: 'phone', hint: 'users.phone' },
+  { token: 'country', hint: 'users.country' },
+  { token: 'referral_code', hint: 'users.referral_code' },
+  { token: 'balance', hint: 'wallet balance, comma-formatted' },
+];
+
+const GLOBAL_VARS: { token: string; hint: string }[] = [
+  { token: 'min_withdrawal', hint: 'app_config.min_withdrawal_amount' },
+  { token: 'max_withdrawal', hint: 'app_config.max_withdrawal_amount' },
+  { token: 'signup_bonus', hint: 'app_config.signup_bonus_amount' },
+  { token: 'referral_bonus', hint: 'app_config.referral_referrer_bonus' },
+  { token: 'app_version', hint: 'app_config.app_current_version' },
+];
 
 interface Broadcast {
   id: string;
@@ -44,6 +63,45 @@ export default function NotificationsBroadcastPage() {
   const [userQuery, setUserQuery] = useState('');
   const [userHits, setUserHits] = useState<UserHit[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserHit | null>(null);
+
+  const [cardNames, setCardNames] = useState<string[]>([]);
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  const messageRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastFocused = useRef<'title' | 'message'>('message');
+
+  useEffect(() => {
+    fetch('/api/notifications/card-names')
+      .then((r) => r.json())
+      .then((d) => setCardNames((d.names || []) as string[]))
+      .catch(() => setCardNames([]));
+  }, []);
+
+  const insertToken = (token: string) => {
+    const wrapped = `{${token}}`;
+    if (lastFocused.current === 'title') {
+      const el = titleRef.current;
+      const start = el?.selectionStart ?? title.length;
+      const end = el?.selectionEnd ?? title.length;
+      const next = title.slice(0, start) + wrapped + title.slice(end);
+      setTitle(next);
+      setTimeout(() => {
+        el?.focus();
+        const pos = start + wrapped.length;
+        el?.setSelectionRange(pos, pos);
+      }, 0);
+    } else {
+      const el = messageRef.current;
+      const start = el?.selectionStart ?? message.length;
+      const end = el?.selectionEnd ?? message.length;
+      const next = message.slice(0, start) + wrapped + message.slice(end);
+      setMessage(next);
+      setTimeout(() => {
+        el?.focus();
+        const pos = start + wrapped.length;
+        el?.setSelectionRange(pos, pos);
+      }, 0);
+    }
+  };
 
   useEffect(() => { fetchHistory(); }, []);
 
@@ -151,12 +209,81 @@ export default function NotificationsBroadcastPage() {
 
         <div style={{ marginTop: 12 }}>
           <label style={styles.label}>Title</label>
-          <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} />
+          <input
+            ref={titleRef}
+            style={styles.input}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onFocus={() => { lastFocused.current = 'title'; }}
+            maxLength={80}
+          />
         </div>
 
         <div style={{ marginTop: 12 }}>
           <label style={styles.label}>Message</label>
-          <textarea style={{ ...styles.input, minHeight: 90, resize: 'vertical' }} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={500} />
+          <textarea
+            ref={messageRef}
+            style={{ ...styles.input, minHeight: 90, resize: 'vertical' }}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onFocus={() => { lastFocused.current = 'message'; }}
+            maxLength={500}
+          />
+        </div>
+
+        <div style={styles.varsBox}>
+          <p style={styles.varsTitle}>Variables — click to insert at cursor</p>
+
+          <p style={styles.varsSection}>Per-user (substituted for each recipient)</p>
+          <div style={styles.chipRow}>
+            {PER_USER_VARS.map((v) => (
+              <button
+                key={v.token}
+                type="button"
+                style={styles.chip}
+                title={v.hint}
+                onClick={() => insertToken(v.token)}
+              >
+                {`{${v.token}}`}
+              </button>
+            ))}
+          </div>
+
+          <p style={styles.varsSection}>App config (same for everyone)</p>
+          <div style={styles.chipRow}>
+            {GLOBAL_VARS.map((v) => (
+              <button
+                key={v.token}
+                type="button"
+                style={styles.chip}
+                title={v.hint}
+                onClick={() => insertToken(v.token)}
+              >
+                {`{${v.token}}`}
+              </button>
+            ))}
+          </div>
+
+          <p style={styles.varsSection}>
+            Card rates <span style={styles.varsMuted}>(highest active rate for each card)</span>
+          </p>
+          <div style={styles.chipRow}>
+            {cardNames.length === 0 ? (
+              <span style={styles.varsMuted}>No active cards.</span>
+            ) : (
+              cardNames.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  style={styles.chip}
+                  title={`Highest active rate_naira for ${n}`}
+                  onClick={() => insertToken(`rate:${n}`)}
+                >
+                  {`{rate:${n}}`}
+                </button>
+              ))
+            )}
+          </div>
         </div>
 
         <div style={styles.sendRow}>
@@ -226,4 +353,10 @@ const styles: Record<string, React.CSSProperties> = {
   badge: { fontSize: 10, fontWeight: 600, padding: '2px 8px', backgroundColor: '#F2F2F2', borderRadius: 10 },
   empty: { fontSize: 12, color: '#888', margin: 0 },
   toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: '#111', color: '#FFF', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
+  varsBox: { marginTop: 14, padding: 12, border: '1px dashed #DDD', borderRadius: 8, backgroundColor: '#FAFAFA' },
+  varsTitle: { fontSize: 12, fontWeight: 700, color: '#111', margin: '0 0 8px' },
+  varsSection: { fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', margin: '8px 0 6px' },
+  varsMuted: { fontSize: 11, color: '#999' },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  chip: { fontSize: 11, fontWeight: 600, padding: '4px 8px', backgroundColor: '#FFF', border: '1px solid #DDD', borderRadius: 12, cursor: 'pointer', fontFamily: 'monospace', color: '#111' },
 };
