@@ -46,13 +46,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 
-  // Update last login
   await supabaseAdmin
     .from('admin_users')
     .update({ last_login_at: new Date().toISOString() })
     .eq('id', admin.id);
 
-  // Log to audit_log
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.id,
     action: 'LOGIN',

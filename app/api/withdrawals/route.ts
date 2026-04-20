@@ -19,8 +19,6 @@ function gated(admin: any): boolean {
 
 function formatCSVField(val: any): string {
   const raw = String(val ?? '');
-  // Prefix formula triggers (=+-@/tab/CR) with a quote to neutralise CSV
-  // injection when the file is opened in Excel.
   const s = /^[=+\-@\t\r]/.test(raw) ? "'" + raw : raw;
   return '"' + s.replace(/"/g, '""') + '"';
 }

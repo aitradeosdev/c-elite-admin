@@ -42,7 +42,6 @@ export default function TransactionsOverviewPage() {
   const [exporting, setExporting] = useState(false);
   const limit = 25;
 
-  // Filters
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -82,7 +81,6 @@ export default function TransactionsOverviewPage() {
     setDateTo('');
     setSearch('');
     setPage(1);
-    // Trigger load after state clears
     setTimeout(() => load(), 0);
   };
 
@@ -109,7 +107,6 @@ export default function TransactionsOverviewPage() {
 
   return (
     <div>
-      {/* Header */}
       <div style={s.header}>
         <span style={s.title}>Transactions Overview</span>
         <button style={s.exportBtn} onClick={exportCSV} disabled={exporting}>
@@ -117,7 +114,6 @@ export default function TransactionsOverviewPage() {
         </button>
       </div>
 
-      {/* Stats */}
       <div style={s.statsGrid}>
         <div style={s.statCard}>
           <p style={s.statLabel}>TOTAL TRANSACTIONS</p>
@@ -137,7 +133,6 @@ export default function TransactionsOverviewPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={s.filters}>
         <input
           placeholder="Search user"
@@ -163,7 +158,6 @@ export default function TransactionsOverviewPage() {
         <button style={s.clearBtn} onClick={clearFilters}>Clear</button>
       </div>
 
-      {/* Table */}
       <div style={s.tableWrap}>
         <table style={s.table}>
           <thead>
@@ -198,7 +192,6 @@ export default function TransactionsOverviewPage() {
         </table>
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div style={s.pagination}>
           <button

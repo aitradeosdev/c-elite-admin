@@ -73,7 +73,6 @@ export default function CardQueuePage() {
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
 
-  // Approval correction state
   const [corrType, setCorrType] = useState<string>('');
   const [corrAmount, setCorrAmount] = useState<string>('');
   const [correctOpen, setCorrectOpen] = useState(false);
@@ -236,7 +235,6 @@ export default function CardQueuePage() {
 
   return (
     <div>
-      {/* Tabs + Search */}
       <div style={s.tabBar}>
         <div style={s.tabs}>
           {TABS.map((t) => (
@@ -304,7 +302,6 @@ export default function CardQueuePage() {
         </table>
       </div>
 
-      {/* Side panel */}
       {detail && (
         <>
           <div style={s.panelDim} onClick={closeDetail} />
@@ -337,7 +334,6 @@ export default function CardQueuePage() {
               <p style={{ padding: 16, color: '#888' }}>Loading…</p>
             ) : (
               <div style={s.panelBody}>
-                {/* User */}
                 <div style={s.userRow}>
                   <div style={s.avatar}>{(detail.users.full_name || '?').charAt(0).toUpperCase()}</div>
                   <div>
@@ -347,7 +343,6 @@ export default function CardQueuePage() {
                   </div>
                 </div>
 
-                {/* Receipt */}
                 <div style={{ marginTop: 16 }}>
                   <Row label="Card" value={detail.cards?.name} />
                   <Row label="Country" value={detail.country_name || detail.card_types?.country_code} />
@@ -361,7 +356,6 @@ export default function CardQueuePage() {
                   <Row label="Status" value={detail.status} />
                 </div>
 
-                {/* Submitted fields */}
                 {detail.submitted_fields && Object.keys(detail.submitted_fields).length > 0 && (
                   <div style={{ marginTop: 16 }}>
                     <p style={s.sectionLabel}>Submitted Fields</p>
@@ -371,7 +365,6 @@ export default function CardQueuePage() {
                   </div>
                 )}
 
-                {/* Card images */}
                 {detail.card_images && detail.card_images.length > 0 && (
                   <div style={{ marginTop: 16 }}>
                     <p style={s.sectionLabel}>Card Images</p>
@@ -389,7 +382,6 @@ export default function CardQueuePage() {
                   </div>
                 )}
 
-                {/* Dispute */}
                 {detail.status === 'disputed' && (
                   <div style={{ marginTop: 16 }}>
                     <div style={s.disputeBox}>
@@ -415,7 +407,6 @@ export default function CardQueuePage() {
                   </div>
                 )}
 
-                {/* Original rejection reason */}
                 {detail.rejection_reason && detail.status !== 'pending' && (
                   <div style={{ marginTop: 16 }}>
                     <p style={s.sectionLabel}>Rejection Reason</p>
@@ -423,7 +414,6 @@ export default function CardQueuePage() {
                   </div>
                 )}
 
-                {/* Action buttons */}
                 <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
                   {detail.status === 'pending' && (
                     <>
@@ -439,7 +429,6 @@ export default function CardQueuePage() {
                   )}
                 </div>
 
-                {/* Reject form */}
                 {showReject && (
                   <div style={{ marginTop: 16, padding: 12, border: '1px solid #E8E8E8', borderRadius: 8 }}>
                     <p style={s.sectionLabel}>Rejection Reason</p>
@@ -462,7 +451,6 @@ export default function CardQueuePage() {
             )}
           </div>
 
-          {/* Approve confirm modal */}
           {showApprove && detail.users && (() => {
             const types: any[] = detail.card_types_for_card || [];
             const selectedType = types.find((t) => t.id === corrType);
@@ -573,7 +561,6 @@ export default function CardQueuePage() {
         </>
       )}
 
-      {/* Lightbox */}
       {lightbox && (
         <div style={s.lightboxDim} onClick={() => setLightbox(null)}>
           <button style={s.lbClose} onClick={() => setLightbox(null)}>×</button>

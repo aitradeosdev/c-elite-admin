@@ -10,7 +10,6 @@ async function getAdmin(req: NextRequest) {
   return verifyAdminJWT(token);
 }
 
-// GET — aggregate stats for the bonuses page
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

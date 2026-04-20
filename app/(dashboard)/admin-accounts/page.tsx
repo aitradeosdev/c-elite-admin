@@ -42,7 +42,6 @@ export default function AdminAccountsPage() {
   const [panelMode, setPanelMode] = useState<PanelMode>(null);
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
 
-  // Form state
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,7 +53,6 @@ export default function AdminAccountsPage() {
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleteInput, setDeleteInput] = useState('');
 
@@ -156,13 +154,11 @@ export default function AdminAccountsPage() {
 
   return (
     <div style={styles.page}>
-      {/* Header */}
       <div style={styles.header}>
         <span style={styles.title}>Admin Accounts</span>
         <button style={styles.createBtn} onClick={openCreate}>+ Create Admin</button>
       </div>
 
-      {/* Table */}
       <div style={styles.tableWrapper}>
         <table style={styles.table}>
           <thead>
@@ -210,7 +206,6 @@ export default function AdminAccountsPage() {
         </table>
       </div>
 
-      {/* Side Panel */}
       {panelMode && (
         <>
           <div style={styles.overlay} onClick={closePanel} />
@@ -278,7 +273,6 @@ export default function AdminAccountsPage() {
         </>
       )}
 
-      {/* Delete Confirm Modal */}
       {deleteTarget && (
         <>
           <div style={styles.modalOverlay} />

@@ -39,12 +39,10 @@ export default function FieldBuilderPage() {
   const [cardTypes, setCardTypes] = useState<CardType[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Add card type
   const [showAddType, setShowAddType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [savingType, setSavingType] = useState(false);
 
-  // Edit card type
   const [editTypeId, setEditTypeId] = useState<string | null>(null);
   const [editTypeName, setEditTypeName] = useState('');
 
@@ -184,7 +182,6 @@ export default function FieldBuilderPage() {
 
   return (
     <div style={styles.container}>
-      {/* Panel 1 — Card Brands */}
       <div style={styles.panel1}>
         <p style={styles.panelHeader}>Card Brands</p>
         {cards.map((card) => (
@@ -200,7 +197,6 @@ export default function FieldBuilderPage() {
         {cards.length === 0 && <p style={styles.emptyText}>No cards yet</p>}
       </div>
 
-      {/* Panel 2 — Countries */}
       <div style={styles.panel2}>
         <p style={styles.panelHeader}>Countries</p>
         {selectedCard ? (
@@ -221,7 +217,6 @@ export default function FieldBuilderPage() {
         )}
       </div>
 
-      {/* Panel 3 — Card Types + Fields */}
       <div style={styles.panel3}>
         {!selectedCard || !selectedCountry ? (
           <p style={styles.emptyText}>Select a card and country</p>
@@ -232,7 +227,6 @@ export default function FieldBuilderPage() {
               <button style={styles.addTypeBtn} onClick={() => setShowAddType(true)}>+ Add Card Type</button>
             </div>
 
-            {/* Add type form */}
             {showAddType && (
               <div style={styles.inlineForm}>
                 <input
@@ -253,7 +247,6 @@ export default function FieldBuilderPage() {
 
             {cardTypes.map((cardType) => (
               <div key={cardType.id} style={styles.typeBlock}>
-                {/* Type header */}
                 <div style={styles.typeHeader}>
                   {editTypeId === cardType.id ? (
                     <>
@@ -288,7 +281,6 @@ export default function FieldBuilderPage() {
                   )}
                 </div>
 
-                {/* Fields */}
                 {cardType.expanded && (
                   <div style={styles.fieldsBlock}>
                     {cardType.fields.map((field) => (
@@ -316,7 +308,6 @@ export default function FieldBuilderPage() {
                       </div>
                     ))}
 
-                    {/* Add field form */}
                     {fieldFormTypeId === cardType.id && fieldFormMode === 'add' ? (
                       <FieldForm
                         label={fieldLabel} setLabel={setFieldLabel}
@@ -339,7 +330,6 @@ export default function FieldBuilderPage() {
           </>
         )}
       </div>
-      {/* Delete Card Type Confirm Modal */}
       {deleteTypeId && (
         <>
           <div style={styles.modalOverlay} />

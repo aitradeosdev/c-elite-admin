@@ -10,7 +10,6 @@ async function getAdmin(req: NextRequest) {
   return verifyAdminJWT(token);
 }
 
-// GET — returns a map of requested keys (or all if no ?keys=)
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -30,7 +29,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ config: map });
 }
 
-// PATCH — batch upsert { changes: { key: value, ... } }
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

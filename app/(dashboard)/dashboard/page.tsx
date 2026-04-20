@@ -100,7 +100,6 @@ export default async function DashboardPage() {
   return (
     <div>
       <AutoRefresh />
-      {/* Stats Grid */}
       <div style={styles.statsGrid}>
         {STATS.map((stat) => (
           <div key={stat.key} style={styles.statCard}>
@@ -115,7 +114,6 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* Recent Submissions */}
       <p style={styles.tableTitle}>Recent Card Submissions</p>
       <div style={styles.tableWrapper}>
         <table style={styles.table}>

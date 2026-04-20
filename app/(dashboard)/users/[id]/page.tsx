@@ -89,12 +89,11 @@ export default function UserDetailPage() {
 
   return (
     <div>
-      {/* Back + Header */}
       <div style={s.topBar}>
         <a href="/users" style={s.backLink}>&larr; Back to Users</a>
       </div>
 
-      {/* Profile card */}
+
       <div style={s.profileCard}>
         <div style={s.avatarRow}>
           <div style={s.avatar}>{(user.full_name || '?').charAt(0).toUpperCase()}</div>
@@ -134,7 +133,6 @@ export default function UserDetailPage() {
           <InfoRow label="Joined" value={new Date(user.created_at).toLocaleDateString()} />
         </div>
 
-        {/* Stats */}
         <div style={s.statsGrid}>
           <div style={s.miniStat}>
             <p style={s.miniLabel}>TRADES</p>
@@ -151,7 +149,6 @@ export default function UserDetailPage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={s.tabs}>
         {(['transactions', 'devices', 'logins'] as const).map((t) => (
           <button
@@ -165,7 +162,6 @@ export default function UserDetailPage() {
         ))}
       </div>
 
-      {/* Tab content */}
       {activeTab === 'transactions' && (
         <div style={s.tableWrap}>
           <table style={s.table}>
@@ -248,7 +244,6 @@ export default function UserDetailPage() {
         </div>
       )}
 
-      {/* Freeze modal */}
       {showFreezeModal && (
         <>
           <div style={s.modalOverlay} onClick={() => setShowFreezeModal(false)} />
