@@ -10,8 +10,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Email, username and password required' }, { status: 400 });
   }
 
-  // Phase 35d: rate-limit admin login per-IP (20 attempts / 10 min) via
-  // the anon-keyed limiter (no user_id here — the caller isn't authed yet).
   const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
   const { data: rlOk } = await supabaseAdmin.rpc('check_rate_limit_by_key', {
     p_key: ip,
@@ -72,9 +70,6 @@ export async function POST(req: NextRequest) {
   });
 
   const response = NextResponse.json({ success: true });
-  // Phase 35d: sameSite=strict — `lax` already blocks cross-site POST in
-  // modern browsers, but `strict` also blocks top-level GET navigations
-  // carrying the cookie, closing the last residual CSRF edge case.
   response.cookies.set('admin_token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
