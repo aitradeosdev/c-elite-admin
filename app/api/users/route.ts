@@ -58,8 +58,8 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Phase 35c: escape each cell — a user-chosen full_name/username like
-    // `=cmd|'/c calc'!A1` executes in Excel when the CSV is opened.
+    // Escape each cell: a user-chosen value like `=cmd|'/c calc'!A1`
+    // would execute in Excel when the CSV is opened.
     const csvCell = (v: unknown) => {
       const s = v == null ? '' : String(v);
       const needsPrefix = /^[=+\-@\t\r]/.test(s);

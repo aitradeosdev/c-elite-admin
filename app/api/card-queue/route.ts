@@ -183,9 +183,8 @@ export async function POST(req: NextRequest) {
     if (before.status !== 'pending') {
       return NextResponse.json({ error: 'Only pending submissions can be rejected' }, { status: 400 });
     }
-    // Phase 35c: race guard — two admins clicking reject/approve at the
-    // same time would both pass the `before.status === 'pending'` check.
-    // Filter the UPDATE on the expected status and require 1 affected row.
+    // Race guard: two admins acting at once would both pass the earlier
+    // status check. Gate the UPDATE on status and require 1 affected row.
     const { data: updated, error } = await supabaseAdmin
       .from('card_submissions')
       .update({ status: 'rejected', rejection_reason: reason })
