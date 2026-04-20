@@ -28,7 +28,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   });
   if (rpcErr) return NextResponse.json({ error: rpcErr.message }, { status: 400 });
 
-  // Fire the gateway transfer via edge function
   const url = `${process.env.SUPABASE_URL}/functions/v1/resume-withdrawal`;
   const res = await fetch(url, {
     method: 'POST',

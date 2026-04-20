@@ -4,7 +4,6 @@ import { verifyAdminJWT } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from '../../../lib/uploadTypes';
 
-// POST — upload a badge image (PNG/JPG/WEBP) to the level-badges bucket; return publicUrl.
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   const token = cookieStore.get('admin_token')?.value;

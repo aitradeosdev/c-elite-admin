@@ -16,14 +16,12 @@ export default function AdminSettingsPage() {
   const [toast, setToast] = useState('');
   const [forbidden, setForbidden] = useState(false);
 
-  // Editable local state for non-toggle fields
   const [liveChatUrl, setLiveChatUrl] = useState('');
   const [curVer, setCurVer] = useState('');
   const [minVer, setMinVer] = useState('');
   const [updType, setUpdType] = useState('soft');
   const [updMsg, setUpdMsg] = useState('');
 
-  // Emergency confirm modal
   const [emergencyConfirm, setEmergencyConfirm] = useState<null | 'on' | 'off'>(null);
 
   useEffect(() => { fetchConfig(); }, []);
@@ -102,7 +100,6 @@ export default function AdminSettingsPage() {
     <div>
       <h1 style={styles.h1}>Admin Settings</h1>
 
-      {/* PAYMENT GATEWAYS */}
       <div style={styles.card}>
         <p style={styles.cardTitle}>Payment Gateways</p>
         <p style={styles.cardHint}>
@@ -132,7 +129,6 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      {/* BILL PAYMENT API */}
       <div style={styles.card}>
         <p style={styles.cardTitle}>Bill Payment API</p>
         <div style={styles.gwRow}>
@@ -145,7 +141,6 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      {/* LIVE CHAT */}
       <div style={styles.card}>
         <p style={styles.cardTitle}>Live Chat URL</p>
         <p style={styles.cardHint}>Direct chat link from your provider dashboard (e.g. Tawk/LiveChat/Smartsupp "Shareable Chat Link"). Opens full-screen in the Support tab.</p>
@@ -161,7 +156,6 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      {/* APP VERSION */}
       <div style={styles.card}>
         <p style={styles.cardTitle}>App Version</p>
         <div style={styles.grid2}>
@@ -190,7 +184,6 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      {/* EMERGENCY MODE */}
       <div style={{ ...styles.card, borderColor: emergencyOn ? '#E53935' : '#EEE' }}>
         <p style={{ ...styles.cardTitle, color: emergencyOn ? '#E53935' : '#111' }}>Emergency Mode</p>
         <p style={styles.cardHint}>

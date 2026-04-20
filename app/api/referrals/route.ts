@@ -10,7 +10,6 @@ async function getAdmin(req: NextRequest) {
   return verifyAdminJWT(token);
 }
 
-// GET — returns referral log (joined with usernames) + aggregate stats
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -49,7 +48,6 @@ export async function GET(req: NextRequest) {
     referee_credited: r.referee_credited,
   }));
 
-  // Stats — compute across the full table, not just the limit window.
   const [{ count: total }, pendingPayoutResult, paidOutResult] = await Promise.all([
     supabaseAdmin.from('referrals').select('id', { count: 'exact', head: true }),
     supabaseAdmin.from('referrals')

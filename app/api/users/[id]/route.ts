@@ -18,7 +18,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
 
-  // User profile + wallet
   const { data: user, error } = await supabaseAdmin
     .from('users')
     .select('id, full_name, username, email, phone, country, is_active, is_frozen, freeze_reason, referral_code, created_at, wallets(balance)')
@@ -27,14 +26,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (error || !user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  // Stats
   const [txRes, wdRes, trRes] = await Promise.all([
     supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', id),
     supabaseAdmin.from('withdrawals').select('id', { count: 'exact', head: true }).eq('user_id', id),
     supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }).eq('sender_id', id),
   ]);
 
-  // Device logs
   const { data: devices } = await supabaseAdmin
     .from('device_logs')
     .select('device_model, os_version, app_version, ip_address, created_at')
@@ -42,7 +39,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .order('created_at', { ascending: false })
     .limit(20);
 
-  // Login history
   const { data: logins } = await supabaseAdmin
     .from('login_history')
     .select('device_model, os_version, app_version, ip_address, created_at')
@@ -50,7 +46,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .order('created_at', { ascending: false })
     .limit(20);
 
-  // Recent 10 transactions
   const { data: recentTx } = await supabaseAdmin
     .from('transactions')
     .select('id, type, amount, status, created_at, metadata')

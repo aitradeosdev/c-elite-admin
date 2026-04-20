@@ -34,11 +34,9 @@ export async function GET(req: NextRequest) {
   }
 
   if (csv) {
-    // No pagination for CSV
     const { data, error } = await query.order('created_at', { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // Count transactions per user
     const userIds = (data || []).map((u: any) => u.id);
     const { data: txCounts } = await supabaseAdmin.rpc('count_user_transactions', {}) as any;
 
@@ -58,8 +56,6 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Escape each cell: a user-chosen value like `=cmd|'/c calc'!A1`
-    // would execute in Excel when the CSV is opened.
     const csvCell = (v: unknown) => {
       const s = v == null ? '' : String(v);
       const needsPrefix = /^[=+\-@\t\r]/.test(s);
@@ -86,7 +82,6 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Get transaction counts for these users
   const userIds = (data || []).map((u: any) => u.id);
   let tradeCounts: Record<string, number> = {};
   if (userIds.length > 0) {

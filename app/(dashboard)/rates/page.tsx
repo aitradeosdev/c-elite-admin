@@ -49,7 +49,6 @@ export default function RatesPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
 
-  // Add denomination modal
   const [addDenomTypeId, setAddDenomTypeId] = useState<string | null>(null);
   const [rangeLabel, setRangeLabel] = useState('');
   const [minValue, setMinValue] = useState('');
@@ -144,7 +143,6 @@ export default function RatesPage() {
 
       {cards.map((card) => (
         <div key={card.id} style={styles.cardBlock}>
-          {/* Level 1 — Card Brand */}
           <div style={styles.level1Row} onClick={() => setOpenCards(toggle(openCards, card.id))}>
             <div style={styles.level1Left}>
               {card.logo_url && <img src={card.logo_url} alt={card.name} style={styles.logo} />}
@@ -156,7 +154,6 @@ export default function RatesPage() {
 
           {openCards.has(card.id) && card.countries.map((country) => (
             <div key={country.id} style={styles.level2Block}>
-              {/* Level 2 — Country */}
               <div style={styles.level2Row} onClick={() => setOpenCountries(toggle(openCountries, country.id))}>
                 <div style={styles.level2Left}>
                   <span style={styles.level2Name}>{country.country_name}</span>
@@ -167,7 +164,6 @@ export default function RatesPage() {
 
               {openCountries.has(country.id) && country.card_types.map((type) => (
                 <div key={type.id} style={styles.level3Block}>
-                  {/* Level 3 — Card Type */}
                   <div style={styles.level3Row} onClick={() => setOpenTypes(toggle(openTypes, type.id))}>
                     <span style={styles.level3Name}>{type.name}</span>
                     <span style={{ ...styles.arrow, transform: openTypes.has(type.id) ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
@@ -202,7 +198,6 @@ export default function RatesPage() {
         </div>
       ))}
 
-      {/* Save All Changes — fixed bottom right */}
       <button
         style={{ ...styles.saveAllBtn, opacity: saving ? 0.7 : 1 }}
         onClick={handleSaveAll}
@@ -211,10 +206,8 @@ export default function RatesPage() {
         {saving ? 'Saving...' : `Save All Changes${hasChanges ? ` (${Object.keys(changes).length})` : ''}`}
       </button>
 
-      {/* Toast */}
       {toast && <div style={styles.toast}>{toast}</div>}
 
-      {/* Add Denomination Modal */}
       {addDenomTypeId && (
         <>
           <div style={styles.modalOverlay} onClick={() => setAddDenomTypeId(null)} />

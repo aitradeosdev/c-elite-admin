@@ -10,7 +10,6 @@ async function getAdmin(req: NextRequest) {
   return verifyAdminJWT(token);
 }
 
-// GET — return all 6 tiers in order, plus aggregate claim counts per tier.
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -22,7 +21,6 @@ export async function GET(req: NextRequest) {
     .order('tier_order', { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Count claims per tier_order for admin visibility
   const { data: claims } = await supabaseAdmin
     .from('user_level_claims')
     .select('tier_order');
@@ -34,7 +32,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ tiers: withCounts });
 }
 
-// PATCH — update a single tier by id. Accepts name, target_usd, bonus_naira, badge_url, is_active.
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -44,7 +41,6 @@ export async function PATCH(req: NextRequest) {
   const { id, ...updates } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-  // Whitelist mutable fields — tier_order is immutable (identity).
   const allowed: any = {};
   if (updates.name !== undefined) allowed.name = String(updates.name).trim();
   if (updates.target_usd !== undefined) allowed.target_usd = Number(updates.target_usd);

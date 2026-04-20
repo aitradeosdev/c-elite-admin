@@ -10,7 +10,6 @@ async function getAdmin(req: NextRequest) {
   return verifyAdminJWT(token);
 }
 
-// GET — all giftbox items with claim counts
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -36,7 +35,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ items: withCounts });
 }
 
-// POST — create new giftbox item
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -77,7 +75,6 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ success: true, id: data.id });
 }
 
-// PATCH — update existing giftbox item
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

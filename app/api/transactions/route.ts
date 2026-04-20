@@ -13,7 +13,6 @@ async function getAdmin() {
 
 function formatCSVField(val: any): string {
   const raw = String(val ?? '');
-  // Neutralise CSV-formula injection (=, +, -, @, TAB, CR prefix).
   const s = /^[=+\-@\t\r]/.test(raw) ? "'" + raw : raw;
   return '"' + s.replace(/"/g, '""') + '"';
 }
@@ -33,7 +32,6 @@ export async function GET(req: NextRequest) {
   const csv = searchParams.get('csv') === '1';
   const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
-  // Stats — always compute from the full (unfiltered) dataset
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayISO = today.toISOString();
@@ -53,7 +51,6 @@ export async function GET(req: NextRequest) {
   const totalAmount = (totalAmountData || []).reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
   const todayAmount = (todayAmountData || []).reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
 
-  // Build filtered query
   let query = supabaseAdmin
     .from('transactions')
     .select('id, user_id, type, amount, status, reference_id, metadata, created_at, users(username, full_name, email)', { count: 'exact' });
@@ -64,7 +61,6 @@ export async function GET(req: NextRequest) {
   if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59.999Z');
 
   if (search) {
-    // Search by user — need to find user IDs first
     const { data: matchedUsers } = await supabaseAdmin
       .from('users')
       .select('id')
@@ -72,7 +68,6 @@ export async function GET(req: NextRequest) {
     if (matchedUsers && matchedUsers.length > 0) {
       query = query.in('user_id', matchedUsers.map((u: any) => u.id));
     } else {
-      // No matching users — return empty
       return NextResponse.json({
         transactions: [],
         total: 0,

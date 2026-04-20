@@ -243,7 +243,6 @@ export default function CardsPage() {
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Card modal
   const [showCardModal, setShowCardModal] = useState(false);
   const [editCard, setEditCard] = useState<Card | null>(null);
   const [cardName, setCardName] = useState('');
@@ -255,7 +254,6 @@ export default function CardsPage() {
   const [cardError, setCardError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Countries panel
   const [countriesCard, setCountriesCard] = useState<Card | null>(null);
   const [newCountryCode, setNewCountryCode] = useState('');
   const [newCurrencySymbol, setNewCurrencySymbol] = useState('');
@@ -392,7 +390,6 @@ export default function CardsPage() {
     return names.slice(0, 2).join(', ') + '...';
   };
 
-  // Sync countriesCard when cards refresh
   useEffect(() => {
     if (countriesCard) {
       const updated = cards.find((c) => c.id === countriesCard.id);
@@ -402,13 +399,11 @@ export default function CardsPage() {
 
   return (
     <div style={styles.page}>
-      {/* Header */}
       <div style={styles.header}>
         <span style={styles.title}>Card & Country Management</span>
         <button style={styles.createBtn} onClick={openCreate}>+ Add Card Brand</button>
       </div>
 
-      {/* Table */}
       <div style={styles.tableWrapper}>
         <table style={styles.table}>
           <thead>
@@ -455,7 +450,6 @@ export default function CardsPage() {
         </table>
       </div>
 
-      {/* Add/Edit Card Modal */}
       {showCardModal && (
         <>
           <div style={styles.modalOverlay} onClick={() => setShowCardModal(false)} />
@@ -508,14 +502,12 @@ export default function CardsPage() {
         </>
       )}
 
-      {/* Manage Countries Panel */}
       {countriesCard && (
         <>
           <div style={styles.panelOverlay} onClick={() => setCountriesCard(null)} />
           <div style={styles.panel}>
             <p style={styles.panelTitle}>{countriesCard.name} — Countries</p>
 
-            {/* Existing countries */}
             <div style={styles.countriesList}>
               {countriesCard.countries.length === 0 && (
                 <p style={{ fontSize: 12, color: '#888888' }}>No countries added yet.</p>
@@ -537,7 +529,6 @@ export default function CardsPage() {
               ))}
             </div>
 
-            {/* Add country form */}
             <p style={{ ...styles.fieldLabel, marginTop: 16 }}>+ ADD COUNTRY</p>
 
             <div style={styles.fieldGroup}>

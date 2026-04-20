@@ -13,7 +13,6 @@ async function getAdmin() {
 
 function formatCSVField(val: any): string {
   const raw = String(val ?? '');
-  // Neutralise CSV-formula injection (=, +, -, @, TAB, CR prefix).
   const s = /^[=+\-@\t\r]/.test(raw) ? "'" + raw : raw;
   return '"' + s.replace(/"/g, '""') + '"';
 }

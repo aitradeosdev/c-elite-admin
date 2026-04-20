@@ -175,9 +175,7 @@ export default function BonusesPage() {
 
   return (
     <div style={styles.page}>
-      {/* Config cards grid */}
       <div style={styles.grid}>
-        {/* Levels — opens sub-page with full 6-tier CRUD + badge uploads */}
         <Link href="/bonuses-rewards/levels" style={{ ...styles.card, ...styles.levelsCard, textDecoration: 'none' }}>
           <div style={styles.cardHead}>
             <span style={styles.cardTitle}>Levels</span>
@@ -185,7 +183,7 @@ export default function BonusesPage() {
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleKey('levels_active'); }}
               style={{ display: 'inline-flex' }}
             >
-              <Toggle on={getToggle('levels_active')} onClick={() => { /* handled by wrapper */ }} />
+              <Toggle on={getToggle('levels_active')} onClick={() => {}} />
             </span>
           </div>
           <div style={styles.levelsBody}>
@@ -201,7 +199,6 @@ export default function BonusesPage() {
           <span style={styles.levelsCta}>Configure tiers & badges →</span>
         </Link>
 
-        {/* Signup bonus */}
         <div style={styles.card}>
           <div style={styles.cardHead}>
             <span style={styles.cardTitle}>Signup Bonus</span>
@@ -220,7 +217,6 @@ export default function BonusesPage() {
           <div style={styles.stat}>Awarded today: <b>{stats?.signup_awarded_today ?? 0}</b> · Total: <b>{stats?.signup_awarded_total ?? 0}</b></div>
         </div>
 
-        {/* Anniversary bonus */}
         <div style={styles.card}>
           <div style={styles.cardHead}>
             <span style={styles.cardTitle}>Anniversary Bonus</span>
@@ -232,7 +228,6 @@ export default function BonusesPage() {
           <div style={styles.stat}>Awarded today: <b>{stats?.anniversary_awarded_today ?? 0}</b></div>
         </div>
 
-        {/* Leaderboard — deferred, placeholder card */}
         <div style={{ ...styles.card, opacity: 0.5 }}>
           <div style={styles.cardHead}>
             <span style={styles.cardTitle}>Leaderboard</span>
@@ -242,7 +237,6 @@ export default function BonusesPage() {
         </div>
       </div>
 
-      {/* Save bar */}
       <button
         style={{ ...styles.saveAllBtn, opacity: saving ? 0.7 : 1 }}
         onClick={handleSaveAll}
@@ -251,7 +245,6 @@ export default function BonusesPage() {
         {saving ? 'Saving...' : `Save All Bonus Settings${hasChanges ? ` (${Object.keys(pending).length})` : ''}`}
       </button>
 
-      {/* Giftbox Items section */}
       <div style={styles.section}>
         <div style={styles.sectionHead}>
           <span style={styles.sectionTitle}>Giftbox Items</span>
@@ -305,7 +298,6 @@ export default function BonusesPage() {
         )}
       </div>
 
-      {/* Giftbox Item modal */}
       {showItemModal && (
         <>
           <div style={styles.modalOverlay} onClick={closeItemModal} />

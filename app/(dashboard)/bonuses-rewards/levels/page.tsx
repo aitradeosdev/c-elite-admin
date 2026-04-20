@@ -74,7 +74,6 @@ export default function LevelsPage() {
     if (!upRes.ok) { setUploadingId(null); const err = await upRes.json().catch(() => ({})); showToast(err.error || 'Upload failed.'); return; }
     const { url } = await upRes.json();
 
-    // Persist the new URL directly to the tier
     const patchRes = await fetch('/api/levels', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

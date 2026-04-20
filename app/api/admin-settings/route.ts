@@ -50,7 +50,6 @@ export async function PATCH(req: NextRequest) {
   const keys = Object.keys(changes).filter((k) => ALLOWED_UPDATE.has(k));
   if (keys.length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
 
-  // Validate primary gateway is enabled
   if (changes.active_payment_gateway) {
     const primary = String(changes.active_payment_gateway);
     if (!GATEWAYS.includes(primary)) {

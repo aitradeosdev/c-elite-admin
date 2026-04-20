@@ -34,8 +34,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing title/message/audience' }, { status: 400 });
   }
 
-  // Validate target_user_id for user audience — the edge function trusts
-  // whatever it receives, so a bad UUID would log as "delivered".
   if (audience === 'user') {
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!target_user_id || !UUID_RE.test(String(target_user_id))) {

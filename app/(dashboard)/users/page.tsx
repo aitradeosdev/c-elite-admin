@@ -54,7 +54,6 @@ export default function UsersPage() {
 
   return (
     <div>
-      {/* Header */}
       <div style={s.header}>
         <span style={s.title}>Users</span>
         <div style={s.headerRight}>
@@ -70,7 +69,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Stats */}
       <div style={s.statsRow}>
         <div style={s.statCard}>
           <p style={s.statLabel}>TOTAL USERS</p>
@@ -78,7 +76,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Table */}
       <div style={s.tableWrap}>
         <table style={s.table}>
           <thead>
@@ -120,7 +117,6 @@ export default function UsersPage() {
         </table>
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div style={s.pagination}>
           <button

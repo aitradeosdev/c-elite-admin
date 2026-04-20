@@ -78,7 +78,6 @@ export default function ReferralManagementPage() {
 
   return (
     <div style={styles.page}>
-      {/* Settings card */}
       <div style={styles.card}>
         <div style={styles.cardHead}>
           <span style={styles.cardTitle}>Settings</span>
@@ -106,7 +105,6 @@ export default function ReferralManagementPage() {
         </div>
       </div>
 
-      {/* Stats card */}
       <div style={styles.statCard}>
         <div style={styles.statItem}>
           <span style={styles.statLabel}>Total Referrals</span>
@@ -122,7 +120,6 @@ export default function ReferralManagementPage() {
         </div>
       </div>
 
-      {/* Log table */}
       <div style={styles.section}>
         <p style={styles.sectionTitle}>Referral Log</p>
         {log.length === 0 ? (

@@ -22,7 +22,6 @@ async function logAction(adminId: string, action: string, entityId: string, befo
   });
 }
 
-// GET — fetch all cards with country counts
 export async function GET(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -46,7 +45,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ cards: cardsWithCountries });
 }
 
-// POST — create card or add country
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -82,7 +80,6 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
 }
 
-// PATCH — update card or country
 export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -131,7 +128,6 @@ export async function PATCH(req: NextRequest) {
   return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
 }
 
-// DELETE — remove country
 export async function DELETE(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

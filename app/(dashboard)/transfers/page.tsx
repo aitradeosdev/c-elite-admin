@@ -35,7 +35,6 @@ export default function TransfersPage() {
   const [exporting, setExporting] = useState(false);
   const limit = 25;
 
-  // Filters
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -100,7 +99,6 @@ export default function TransfersPage() {
 
   return (
     <div>
-      {/* Header */}
       <div style={s.header}>
         <span style={s.title}>Transfers</span>
         <button style={s.exportBtn} onClick={exportCSV} disabled={exporting}>
@@ -108,7 +106,6 @@ export default function TransfersPage() {
         </button>
       </div>
 
-      {/* Filters */}
       <div style={s.filters}>
         <input
           placeholder="Search sender or recipient"
@@ -134,7 +131,6 @@ export default function TransfersPage() {
         <button style={s.clearBtn} onClick={clearFilters}>Clear</button>
       </div>
 
-      {/* Table */}
       <div style={s.tableWrap}>
         <table style={s.table}>
           <thead>
@@ -182,7 +178,6 @@ export default function TransfersPage() {
         </table>
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div style={s.pagination}>
           <button

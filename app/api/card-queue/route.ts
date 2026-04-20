@@ -32,7 +32,6 @@ async function signImagePaths(paths: string[] | null): Promise<string[]> {
   return out;
 }
 
-// GET — list submissions, optionally filter by status / search
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin || !(admin.page_permissions || []).includes('card_queue')) {
@@ -73,7 +72,6 @@ export async function GET(req: NextRequest) {
         .maybeSingle();
       country_name = cn?.country_name || cc;
     }
-    // Card types + denominations for this card, so admin can correct at approval
     const { data: cardIdRow } = await supabaseAdmin
       .from('card_submissions')
       .select('card_id')
@@ -134,7 +132,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ submissions: rows });
 }
 
-// POST — approve / reject / dispute_overturn / dispute_uphold
 export async function POST(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin || !(admin.page_permissions || []).includes('card_queue')) {
@@ -183,8 +180,6 @@ export async function POST(req: NextRequest) {
     if (before.status !== 'pending') {
       return NextResponse.json({ error: 'Only pending submissions can be rejected' }, { status: 400 });
     }
-    // Race guard: two admins acting at once would both pass the earlier
-    // status check. Gate the UPDATE on status and require 1 affected row.
     const { data: updated, error } = await supabaseAdmin
       .from('card_submissions')
       .update({ status: 'rejected', rejection_reason: reason })
