@@ -3,6 +3,13 @@ import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '../../lib/supabase';
 import { signAdminJWT } from '../../lib/jwt';
 
+function getClientIp(req: NextRequest): string {
+  return req.headers.get('cf-connecting-ip')
+      || req.headers.get('x-real-ip')
+      || (req.headers.get('x-forwarded-for') || '').split(',').pop()?.trim()
+      || 'unknown';
+}
+
 export async function POST(req: NextRequest) {
   const { email, username, password } = await req.json();
 
@@ -10,7 +17,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Email, username and password required' }, { status: 400 });
   }
 
-  const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+  const ip = getClientIp(req);
   const { data: rlOk } = await supabaseAdmin.rpc('check_rate_limit_by_key', {
     p_key: ip,
     p_action: 'admin_login',
@@ -41,7 +48,7 @@ export async function POST(req: NextRequest) {
       action: 'LOGIN_FAILED',
       entity: 'admin_users',
       entity_id: admin.id,
-      ip_address: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown',
+      ip_address: ip,
     });
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
@@ -56,7 +63,7 @@ export async function POST(req: NextRequest) {
     action: 'LOGIN',
     entity: 'admin_users',
     entity_id: admin.id,
-    ip_address: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown',
+    ip_address: ip,
   });
 
   const token = await signAdminJWT({

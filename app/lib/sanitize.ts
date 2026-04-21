@@ -1,5 +1,9 @@
-export function sanitizeSearch(raw: string): string {
-  return raw.replace(/[,()\\]/g, '').replace(/\.\w+\./g, ' ').trim();
+export function sanitizeSearch(raw: string, maxLen = 64): string {
+  return raw
+    .replace(/[,()\\%_*:]/g, '')
+    .replace(/\.\w+\./g, ' ')
+    .trim()
+    .slice(0, maxLen);
 }
 
 export function clampPagination(page: string | null, limit: string | null, maxLimit = 100) {
