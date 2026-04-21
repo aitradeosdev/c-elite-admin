@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CardElite Admin Panel
 
-## Getting Started
+Next.js 15 (App Router) dashboard for moderating the CardElite platform. Connects to the shared Supabase project (`kkfnlbatolfmmpyksdvz`) with the service-role key server-side only.
 
-First, run the development server:
+## Stack
+
+- Next.js 15 App Router, React 19, TypeScript
+- Supabase JS v2 (service-role on server; never exposed to browser)
+- Tailwind CSS
+- HTTP-only cookie session
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create `.env.local` at the admin root:
 
-## Learn More
+```
+NEXT_PUBLIC_SUPABASE_URL=https://kkfnlbatolfmmpyksdvz.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
+SUPABASE_SERVICE_ROLE_KEY=<service role key>
+ADMIN_FUNCTION_SECRET=<same value set as Supabase function secret>
+```
 
-To learn more about Next.js, take a look at the following resources:
+`ADMIN_FUNCTION_SECRET` must match the value stored in Supabase secrets — API routes that trigger edge functions (broadcast, platform-balance refresh) send it as the `x-admin-secret` header.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Layout
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `app/login/` — sign-in page (email + password against `auth.users` backing an `admin_users` row).
+- `app/(dashboard)/` — protected admin pages. Every page calls `requireAdmin([permission])`.
+- `app/api/` — server route handlers. Same guard; mutating routes write an `audit_log` entry.
+- `app/lib/` — shared server utilities (`session.ts`, `supabase.ts`, `uploadTypes.ts`).
 
-## Deploy on Vercel
+## Permissions
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `super_admin` — all permissions.
+- `admin` — fine-grained strings in `admin_users.permissions` jsonb array. See the full list in the root [README.md](../README.md#44-permissions--audit-logging).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Bootstrapping the first admin
+
+Run [create_admin.sql](../create_admin.sql) against the Supabase SQL editor after inserting an auth user manually.
+
+## Related docs
+
+The root [README.md](../README.md) documents dashboard pages, API routes, the permissions catalog, and audit-log actions in detail. This file only covers local setup.
