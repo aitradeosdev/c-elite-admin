@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
-import { verifyAdminJWT } from '../../lib/jwt';
+import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 
-async function getAdmin(req: NextRequest) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return null;
-  return verifyAdminJWT(token);
+async function getAdmin() {
+  return verifyAdminFromRequest();
 }
 
 export async function GET(req: NextRequest) {
