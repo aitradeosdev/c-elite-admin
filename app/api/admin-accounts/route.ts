@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 
-async function getAdmin() {
+async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 

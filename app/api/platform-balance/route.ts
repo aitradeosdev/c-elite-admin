@@ -12,7 +12,7 @@ const KEYS = [
   'active_payment_gateway',
 ];
 
-async function getAdmin() {
+async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 

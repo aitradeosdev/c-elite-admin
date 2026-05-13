@@ -5,7 +5,7 @@ import { supabaseAdmin } from '../../lib/supabase';
 
 const ALLOWED_FEATURES = new Set(['tag_transfer']);
 
-async function getAdmin() {
+async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 

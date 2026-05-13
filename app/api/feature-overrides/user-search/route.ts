@@ -4,7 +4,7 @@ import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sanitizeSearch } from '../../../lib/sanitize';
 
-async function getAdmin() {
+async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 

@@ -15,7 +15,7 @@ const KEYS = [
 
 const ALLOWED = new Set(KEYS);
 
-async function getAdmin() {
+async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 
