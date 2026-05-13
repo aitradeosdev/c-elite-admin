@@ -31,7 +31,7 @@ async function signImagePaths(paths: string[] | null): Promise<string[]> {
 
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
-  if (!admin || !(admin.page_permissions || []).includes('card_queue')) {
+  if (!admin || (!admin.is_super_admin && !(admin.page_permissions || []).includes('card_queue'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const admin = await getAdmin();
-  if (!admin || !(admin.page_permissions || []).includes('card_queue')) {
+  if (!admin || (!admin.is_super_admin && !(admin.page_permissions || []).includes('card_queue'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
