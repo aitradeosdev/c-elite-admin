@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifyAdminJWT } from '../../../lib/jwt';
+import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from '../../../lib/uploadTypes';
 
