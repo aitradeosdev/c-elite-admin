@@ -16,7 +16,7 @@ function formatCSVField(val: any): string {
 
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
-  if (!admin || !admin.page_permissions?.includes('transactions_overview')) {
+  if (!admin || (!admin.is_super_admin && !admin.page_permissions?.includes('transactions_overview'))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
