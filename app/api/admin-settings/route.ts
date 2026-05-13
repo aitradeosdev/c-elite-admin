@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifyAdminJWT } from '../../lib/jwt';
+import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 
 const GATEWAYS = ['paystack', 'monnify'];
@@ -9,6 +9,7 @@ const KEYS = [
   ...GATEWAYS.map((g) => `gateway_${g}_enabled`),
   'active_payment_gateway',
   'bill_vtpass_enabled',
+  'tag_transfer_enabled',
   'live_chat_url',
   'app_current_version',
   'app_minimum_version',
@@ -20,10 +21,7 @@ const KEYS = [
 const ALLOWED_UPDATE = new Set(KEYS);
 
 async function getAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return null;
-  return verifyAdminJWT(token);
+  return verifyAdminFromRequest();
 }
 
 export async function GET() {

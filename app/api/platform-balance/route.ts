@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifyAdminJWT } from '../../lib/jwt';
+import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 
 const KEYS = [
@@ -13,10 +13,7 @@ const KEYS = [
 ];
 
 async function getAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return null;
-  return verifyAdminJWT(token);
+  return verifyAdminFromRequest();
 }
 
 export async function GET() {

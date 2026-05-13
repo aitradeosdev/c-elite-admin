@@ -66,13 +66,31 @@ export async function POST(req: NextRequest) {
     ip_address: ip,
   });
 
+  const isMobile = req.headers.get('x-client') === 'mobile-admin';
+  // Mobile gets a 30-day token (lives in SecureStore); web gets 8h cookie.
   const token = await signAdminJWT({
     admin_id: admin.id,
     role_title: admin.role_title,
     is_super_admin: admin.is_super_admin,
     page_permissions: admin.page_permissions || [],
     username: admin.username,
-  });
+  }, isMobile ? '30d' : '8h');
+
+  if (isMobile) {
+    // No cookie for mobile — token is returned in body for SecureStore.
+    return NextResponse.json({
+      success: true,
+      token,
+      admin: {
+        id: admin.id,
+        username: admin.username,
+        email: admin.email,
+        role_title: admin.role_title,
+        is_super_admin: admin.is_super_admin,
+        page_permissions: admin.page_permissions || [],
+      },
+    });
+  }
 
   const response = NextResponse.json({ success: true });
   response.cookies.set('admin_token', token, {
