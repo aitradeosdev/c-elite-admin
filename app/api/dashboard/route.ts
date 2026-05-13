@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 
-async function getAdmin() {
+async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 
