@@ -1,0 +1,27 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
+import { supabaseAdmin } from '../../../lib/supabase';
+import { sanitizeSearch } from '../../../lib/sanitize';
+
+async function getAdmin() {
+  return verifyAdminFromRequest();
+}
+
+export async function GET(req: NextRequest) {
+  const admin = await getAdmin();
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const q = sanitizeSearch(new URL(req.url).searchParams.get('q') || '');
+  if (!q) return NextResponse.json({ users: [] });
+
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('id, full_name, username, email')
+    .or(`username.ilike.%${q}%,email.ilike.%${q}%,full_name.ilike.%${q}%`)
+    .is('deleted_at', null)
+    .limit(10);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ users: data || [] });
+}

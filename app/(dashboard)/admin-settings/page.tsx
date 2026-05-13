@@ -76,6 +76,7 @@ export default function AdminSettingsPage() {
   };
 
   const toggleVtpass = (v: boolean) => save({ bill_vtpass_enabled: v ? 'true' : 'false' });
+  const toggleTagTransfer = (v: boolean) => save({ tag_transfer_enabled: v ? 'true' : 'false' });
   const saveLiveChat = () => save({ live_chat_url: liveChatUrl });
   const saveVersion = () => save({
     app_current_version: curVer,
@@ -140,6 +141,13 @@ export default function AdminSettingsPage() {
           />
         </div>
       </div>
+
+      <TagTransferSection
+        enabled={config.tag_transfer_enabled !== 'false'}
+        onToggle={toggleTagTransfer}
+        saving={saving}
+        showToast={showToast}
+      />
 
       <div style={styles.card}>
         <p style={styles.cardTitle}>Live Chat URL</p>
@@ -227,6 +235,180 @@ export default function AdminSettingsPage() {
       )}
 
       {toast && <div style={styles.toast}>{toast}</div>}
+    </div>
+  );
+}
+
+type Override = {
+  id: string;
+  user_id: string;
+  enabled: boolean;
+  granted_at: string;
+  reason: string | null;
+  username: string;
+  email: string;
+  full_name: string;
+  granted_by_username: string;
+};
+
+type UserHit = { id: string; full_name: string; username: string; email: string };
+
+function TagTransferSection({
+  enabled, onToggle, saving, showToast,
+}: { enabled: boolean; onToggle: (v: boolean) => void; saving: boolean; showToast: (m: string) => void }) {
+  const [overrides, setOverrides] = useState<Override[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState<UserHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [busyId, setBusyId] = useState<string>('');
+  const [reason, setReason] = useState('');
+
+  const fetchOverrides = async () => {
+    setLoadingList(true);
+    const res = await fetch('/api/feature-overrides?feature=tag_transfer');
+    const data = await res.json().catch(() => ({}));
+    setOverrides(data.overrides || []);
+    setLoadingList(false);
+  };
+
+  useEffect(() => { fetchOverrides(); }, []);
+
+  useEffect(() => {
+    if (!search.trim()) { setResults([]); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      const res = await fetch(`/api/feature-overrides/user-search?q=${encodeURIComponent(search.trim())}`);
+      const data = await res.json().catch(() => ({}));
+      setResults((data.users || []).filter((u: UserHit) => !overrides.some((o) => o.user_id === u.id)));
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search, overrides]);
+
+  const addUser = async (u: UserHit) => {
+    setBusyId(u.id);
+    const res = await fetch('/api/feature-overrides', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: u.id, feature_key: 'tag_transfer', reason: reason.trim() || null }),
+    });
+    setBusyId('');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Could not add');
+      return;
+    }
+    setSearch(''); setResults([]); setReason('');
+    showToast(`Added ${u.username || u.email}`);
+    await fetchOverrides();
+  };
+
+  const removeOverride = async (o: Override) => {
+    if (!confirm(`Remove ${o.username || o.email} from the tag-transfer allow-list?`)) return;
+    setBusyId(o.id);
+    const res = await fetch(`/api/feature-overrides/${o.id}`, { method: 'DELETE' });
+    setBusyId('');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || 'Could not remove');
+      return;
+    }
+    showToast(`Removed ${o.username || o.email}`);
+    await fetchOverrides();
+  };
+
+  return (
+    <div style={styles.card}>
+      <p style={styles.cardTitle}>Tag Transfer</p>
+      <p style={styles.cardHint}>
+        Controls peer-to-peer @username transfers globally. When disabled, ONLY users on the allow-list below
+        can still send tag transfers. Hides the Transfer button in the mobile app and blocks the RPC server-side.
+      </p>
+      <div style={styles.gwRow}>
+        <span style={styles.gwLabel}>{enabled ? 'Enabled globally' : 'Disabled globally'}</span>
+        <Toggle value={enabled} onChange={onToggle} disabled={saving} />
+      </div>
+
+      {!enabled && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #EEE' }}>
+          <p style={{ ...styles.cardTitle, marginBottom: 8 }}>Allow-list ({overrides.length})</p>
+          <p style={styles.cardHint}>These users can transfer even with the global toggle OFF.</p>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <input
+              style={{ ...styles.input, flex: 2 }}
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by username, email, or full name…"
+            />
+            <input
+              style={{ ...styles.input, flex: 1 }}
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (optional)"
+              maxLength={500}
+            />
+          </div>
+
+          {search.trim() ? (
+            <div style={{ border: '1px solid #EEE', borderRadius: 6, marginBottom: 12, maxHeight: 200, overflowY: 'auto' }}>
+              {searching ? (
+                <div style={{ padding: 12, fontSize: 12, color: '#888' }}>Searching…</div>
+              ) : results.length === 0 ? (
+                <div style={{ padding: 12, fontSize: 12, color: '#888' }}>No matches.</div>
+              ) : (
+                results.map((u) => (
+                  <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #F5F5F5' }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{u.full_name || u.username}</div>
+                      <div style={{ fontSize: 11, color: '#888' }}>@{u.username} · {u.email}</div>
+                    </div>
+                    <button
+                      style={styles.saveBtn}
+                      onClick={() => addUser(u)}
+                      disabled={busyId === u.id}
+                    >
+                      {busyId === u.id ? 'Adding…' : 'Add'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {loadingList ? (
+            <p style={styles.empty}>Loading allow-list…</p>
+          ) : overrides.length === 0 ? (
+            <p style={styles.empty}>No users on the allow-list. Tag transfer is fully blocked.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {overrides.map((o) => (
+                <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#F9F9F9', borderRadius: 6 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{o.full_name || o.username}</div>
+                    <div style={{ fontSize: 11, color: '#888' }}>
+                      @{o.username} · {o.email}
+                      {o.reason ? ` · "${o.reason}"` : ''}
+                      {o.granted_by_username ? ` · by ${o.granted_by_username}` : ''}
+                      {' · '}{new Date(o.granted_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <button
+                    style={styles.cancelBtn}
+                    onClick={() => removeOverride(o)}
+                    disabled={busyId === o.id}
+                  >
+                    {busyId === o.id ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
