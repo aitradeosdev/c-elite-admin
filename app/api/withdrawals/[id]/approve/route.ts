@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifyAdminJWT } from '../../../../lib/jwt';
+import { verifyAdminJWT, verifyAdminFromRequest } from '../../../../lib/jwt';
 import { supabaseAdmin } from '../../../../lib/supabase';
 
 async function getAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return null;
-  return verifyAdminJWT(token);
+  return verifyAdminFromRequest();
 }
 
 function gated(admin: any): boolean {
@@ -31,7 +28,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const url = `${process.env.SUPABASE_URL}/functions/v1/resume-withdrawal`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-secret': process.env.ADMIN_FUNCTION_SECRET || '',
+    },
     body: JSON.stringify({ withdrawal_id: id, admin_id: admin!.admin_id }),
   });
   const data = await res.json().catch(() => ({}));
