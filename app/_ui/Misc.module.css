@@ -102,6 +102,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* min-width:0 lets long content shrink/wrap instead of pushing the tile
+   * wider than its grid track — without this, a long Naira amount breaks
+   * out of the right edge of the card. overflow:hidden is the seatbelt. */
+  min-width: 0;
+  overflow: hidden;
 }
 .kpiLabel {
   font-size: var(--text-sm);
@@ -110,14 +115,21 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
 }
 .kpiValue {
-  font-size: var(--text-3xl);
+  /* clamp() lets the number shrink down to text-xl on narrow tiles
+   * without falling off the right edge, while keeping the dramatic
+   * display size on roomy layouts. */
+  font-size: clamp(var(--text-xl), 4.2vw, var(--text-3xl));
   font-weight: var(--weight-bold);
   letter-spacing: -0.02em;
   color: var(--fg-primary);
   font-variant-numeric: tabular-nums;
   line-height: var(--leading-tight);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .kpiDelta {
   display: inline-flex;
