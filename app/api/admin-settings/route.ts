@@ -21,7 +21,19 @@ const KEYS = [
   // to a super-admin. Read server-side by schema.sql:615 with a 5,000,000
   // fallback if the row is missing. Adjustable by super-admins only.
   'max_card_approval_naira',
+  // Legal URLs shown on the user-app registration screen. Set by super-admin
+  // here, exposed to the user app via the default anonymous read of
+  // app_config. URL_KEYS validation below restricts to http/https + 2KB.
+  'terms_url',
+  'privacy_url',
 ];
+
+// Subset of KEYS that store a URL. PATCH validates each against URL_RE +
+// length cap so an admin cannot save javascript:, data:, or other schemes
+// that would later be opened by the user app via Linking.openURL().
+const URL_KEYS = new Set(['live_chat_url', 'terms_url', 'privacy_url']);
+const URL_MAX_LEN = 2048;
+const URL_RE = /^https?:\/\/[^\s<>"']{3,}$/i;
 
 const ALLOWED_UPDATE = new Set(KEYS);
 
@@ -71,6 +83,23 @@ export async function PATCH(req: NextRequest) {
     if (!Number.isFinite(n) || n < 1000 || n > 1_000_000_000_000) {
       return NextResponse.json({
         error: 'Max approval amount must be a number between 1,000 and 1,000,000,000,000 NGN',
+      }, { status: 400 });
+    }
+  }
+
+  // Validate every URL-typed change so we never persist a non-http(s) link.
+  // Empty string is allowed and treated by the user app as "no link
+  // configured" (the surface stays a non-clickable label in that case).
+  for (const k of keys) {
+    if (!URL_KEYS.has(k)) continue;
+    const raw = String(changes[k] ?? '');
+    if (raw.length === 0) continue;
+    if (raw.length > URL_MAX_LEN) {
+      return NextResponse.json({ error: `${k} exceeds ${URL_MAX_LEN} characters` }, { status: 400 });
+    }
+    if (!URL_RE.test(raw)) {
+      return NextResponse.json({
+        error: `${k} must be a valid https:// (or http://) URL`,
       }, { status: 400 });
     }
   }
