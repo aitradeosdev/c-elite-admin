@@ -21,6 +21,7 @@ export default function AdminSettingsPage() {
   const [minVer, setMinVer] = useState('');
   const [updType, setUpdType] = useState('soft');
   const [updMsg, setUpdMsg] = useState('');
+  const [maxApproval, setMaxApproval] = useState('');
 
   const [emergencyConfirm, setEmergencyConfirm] = useState<null | 'on' | 'off'>(null);
 
@@ -38,6 +39,7 @@ export default function AdminSettingsPage() {
     setMinVer(cfg.app_minimum_version || '');
     setUpdType(cfg.app_update_type || 'soft');
     setUpdMsg(cfg.app_update_message || '');
+    setMaxApproval(cfg.max_card_approval_naira || '5000000');
     setLoading(false);
   };
 
@@ -78,6 +80,14 @@ export default function AdminSettingsPage() {
   const toggleVtpass = (v: boolean) => save({ bill_vtpass_enabled: v ? 'true' : 'false' });
   const toggleTagTransfer = (v: boolean) => save({ tag_transfer_enabled: v ? 'true' : 'false' });
   const saveLiveChat = () => save({ live_chat_url: liveChatUrl });
+  const saveMaxApproval = () => {
+    const n = Number(maxApproval);
+    if (!Number.isFinite(n) || n < 1000) {
+      showToast('Enter a valid amount (minimum ₦1,000)');
+      return;
+    }
+    save({ max_card_approval_naira: String(Math.floor(n)) });
+  };
   const saveVersion = () => save({
     app_current_version: curVer,
     app_minimum_version: minVer,
@@ -128,6 +138,28 @@ export default function AdminSettingsPage() {
             );
           })}
         </div>
+      </div>
+
+      <div style={styles.card}>
+        <p style={styles.cardTitle}>Risk Limits</p>
+        <p style={styles.cardHint}>
+          Maximum gift-card approval amount (NGN) any non-super admin can authorise. Approvals above this threshold are
+          rejected by the server with an "escalate to super admin" error. Default 5,000,000.
+        </p>
+        <label style={styles.label}>Max card approval (NGN)</label>
+        <input
+          style={styles.input}
+          type="number"
+          inputMode="numeric"
+          min={1000}
+          step={1000}
+          value={maxApproval}
+          onChange={(e) => setMaxApproval(e.target.value)}
+          placeholder="5000000"
+        />
+        <button style={styles.saveBtn} onClick={saveMaxApproval} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
       </div>
 
       <div style={styles.card}>
