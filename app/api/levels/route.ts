@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -53,7 +54,7 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_LEVEL_TIER', entity: 'level_tiers',
-    entity_id: id, before_value: before, after_value: allowed,
+    entity_id: id, before_value: redactAudit(before), after_value: redactAudit(allowed),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
 }
 
 async function log(adminId: string, action: string, entity: string, entityId: string, before: any, after: any, ip: string) {
-  await supabaseAdmin.from('audit_log').insert({ admin_id: adminId, action, entity, entity_id: entityId, before_value: before, after_value: after, ip_address: ip });
+  await supabaseAdmin.from('audit_log').insert({ admin_id: adminId, action, entity, entity_id: entityId, before_value: redactAudit(before), after_value: redactAudit(after), ip_address: ip });
 }
 
 export async function GET(req: NextRequest) {

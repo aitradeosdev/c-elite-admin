@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -13,8 +14,8 @@ async function logAction(adminId: string, action: string, entityId: string, befo
     action,
     entity: 'card_submissions',
     entity_id: entityId,
-    before_value: before,
-    after_value: after,
+    before_value: redactAudit(before),
+    after_value: redactAudit(after),
     ip_address: ip,
   });
 }

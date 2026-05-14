@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'CREATE_DENOMINATION', entity: 'denominations',
-    entity_id: data.id, after_value: { card_type_id, range_label, min_value, max_value, rate_naira },
+    entity_id: data.id, after_value: redactAudit({ card_type_id, range_label, min_value, max_value, rate_naira }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
@@ -119,8 +120,8 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'BATCH_UPDATE_RATES', entity: 'denominations',
-    entity_id: 'batch', before_value: beforeSnapshots,
-    after_value: changes,
+    entity_id: 'batch', before_value: redactAudit(beforeSnapshots),
+    after_value: redactAudit(changes),
     ip_address: ip,
   });
 

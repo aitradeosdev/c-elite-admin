@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { redactAudit } from '../../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'BROADCAST_NOTIFICATION', entity: 'notification_broadcasts',
     entity_id: data.broadcast_id || null,
-    after_value: { title, audience, recipient_count: data.recipient_count, delivered: data.delivered },
+    after_value: redactAudit({ title, audience, recipient_count: data.recipient_count, delivered: data.delivered }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

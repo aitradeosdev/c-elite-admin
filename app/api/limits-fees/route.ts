@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 const KEYS = [
   'min_withdrawal_amount',
@@ -55,7 +56,7 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_LIMITS_FEES', entity: 'app_config',
-    entity_id: 'batch', after_value: changes,
+    entity_id: 'batch', after_value: redactAudit(changes),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
   return NextResponse.json({ success: true });

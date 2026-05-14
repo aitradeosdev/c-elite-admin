@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -63,8 +64,8 @@ export async function PATCH(req: NextRequest) {
     action: 'UPDATE_EMAIL_TEMPLATE',
     entity: 'email_templates',
     entity_id: key,
-    before_value: before,
-    after_value: patch,
+    before_value: redactAudit(before),
+    after_value: redactAudit(patch),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
     action: 'CREATE_ADMIN',
     entity: 'admin_users',
     entity_id: data.id,
-    after_value: { username, email, role_title, page_permissions },
+    after_value: redactAudit({ username, email, role_title, page_permissions }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
@@ -63,7 +64,9 @@ export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin || !admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, username, email, password, role_title, page_permissions, is_active } = await req.json();
+  // username is intentionally NOT pulled out — PATCH doesn't accept username changes
+  // (the web admin disables the field in edit mode; this is the server-side mirror).
+  const { id, email, password, role_title, page_permissions, is_active } = await req.json();
   if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 
   const { data: before } = await supabaseAdmin
@@ -92,8 +95,8 @@ export async function PATCH(req: NextRequest) {
     action: is_active !== undefined ? (is_active ? 'REACTIVATE_ADMIN' : 'DEACTIVATE_ADMIN') : 'EDIT_ADMIN',
     entity: 'admin_users',
     entity_id: id,
-    before_value: before,
-    after_value: updates,
+    before_value: redactAudit(before),
+    after_value: redactAudit(updates),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
@@ -124,7 +127,7 @@ export async function DELETE(req: NextRequest) {
     action: 'DELETE_ADMIN',
     entity: 'admin_users',
     entity_id: id,
-    before_value: target,
+    before_value: redactAudit(target),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
