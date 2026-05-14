@@ -1,0 +1,118 @@
+/* shared form-control styles for Input, Textarea, Select */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-secondary);
+  letter-spacing: 0.005em;
+}
+.required::after {
+  content: ' *';
+  color: var(--tone-danger-fg);
+}
+
+.help {
+  font-size: var(--text-sm);
+  color: var(--fg-tertiary);
+  line-height: var(--leading-snug);
+}
+.error {
+  font-size: var(--text-sm);
+  color: var(--tone-danger-fg);
+  line-height: var(--leading-snug);
+}
+
+.control {
+  display: block;
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading-tight);
+  color: var(--fg-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 8px var(--space-3);
+  height: 34px;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.control::placeholder { color: var(--fg-tertiary); }
+.control:hover:not(:disabled) { border-color: var(--border-strong); }
+.control:focus:not(:disabled) {
+  outline: none;
+  border-color: var(--accent-base);
+  box-shadow: 0 0 0 3px var(--ring-color);
+}
+.control:disabled {
+  background: var(--bg-muted);
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+.control.invalid {
+  border-color: var(--tone-danger-border);
+}
+.control.invalid:focus {
+  border-color: var(--tone-danger-fg);
+  box-shadow: 0 0 0 3px rgba(225, 73, 73, 0.20);
+}
+
+/* mono numeric input — for amounts / IDs */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* textarea — auto height-grows */
+.textarea {
+  height: auto;
+  min-height: 96px;
+  resize: vertical;
+  padding: var(--space-3);
+  line-height: var(--leading-normal);
+}
+
+/* select — keep native arrow but space for it */
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  padding-right: var(--space-8);
+}
+
+/* prefix / suffix slots (e.g. ₦, %, "/day") */
+.fieldWithAffix {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.affix {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--fg-tertiary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+}
+.affix:first-child {
+  border-right: 0;
+  border-top-left-radius: var(--radius-md);
+  border-bottom-left-radius: var(--radius-md);
+}
+.affix:last-child {
+  border-left: 0;
+  border-top-right-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+.fieldWithAffix .control { border-radius: 0; }
+.fieldWithAffix > .control:first-child { border-top-left-radius: var(--radius-md); border-bottom-left-radius: var(--radius-md); }
+.fieldWithAffix > .control:last-child  { border-top-right-radius: var(--radius-md); border-bottom-right-radius: var(--radius-md); }

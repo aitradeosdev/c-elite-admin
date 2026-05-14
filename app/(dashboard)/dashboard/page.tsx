@@ -1,4 +1,14 @@
+import Link from 'next/link';
+import {
+  ClipboardList, Wallet, Users as UsersIcon, ArrowDownToLine,
+  TrendingUp, TicketPercent, Gift, Share2,
+} from 'lucide-react';
 import { supabaseAdmin } from '../../lib/supabase';
+import AutoRefresh from './AutoRefresh';
+import {
+  PageHeader, Kpi, KpiGrid, SectionTitle, Card, CardHeader, CardBody, Badge,
+  Table, THead, TBody, Tr, Th, Td, TableEmpty, Button,
+} from '../../_ui';
 
 async function getDashboardStats() {
   const today = new Date();
@@ -58,41 +68,22 @@ function formatNaira(amount: number) {
   return '₦' + amount.toLocaleString('en-NG', { minimumFractionDigits: 2 });
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; color: string }> = {
-    pending: { bg: '#FFF8E1', color: '#F9A825' },
-    approved: { bg: '#E8F5E9', color: '#2E7D32' },
-    rejected: { bg: '#FFEBEE', color: '#C62828' },
-    disputed: { bg: '#FFF8E1', color: '#F9A825' },
-    dispute_resolved: { bg: '#E8F5E9', color: '#2E7D32' },
-  };
-  const style = map[status] || map.pending;
-  return (
-    <span style={{
-      backgroundColor: style.bg,
-      color: style.color,
-      padding: '3px 8px',
-      borderRadius: 100,
-      fontSize: 11,
-      fontWeight: 600,
-    }}>
-      {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
-    </span>
-  );
+function formatCount(n: number) {
+  return n.toLocaleString();
 }
 
-const STATS = [
-  { key: 'pendingCards', label: 'Pending Cards' },
-  { key: 'todayPayouts', label: 'Today Payouts (₦)', format: true },
-  { key: 'totalUsers', label: 'Total Users' },
-  { key: 'pendingWithdrawals', label: 'Pending Withdrawals' },
-  { key: 'cardsToday', label: 'Cards Today' },
-  { key: 'activeCoupons', label: 'Active Coupons' },
-  { key: 'bonusPool', label: 'Bonus Pool', format: true },
-  { key: 'referralsToday', label: 'Referrals Today' },
-];
+function statusTone(status: string): 'success' | 'warning' | 'danger' | 'info' | 'purple' | 'neutral' {
+  switch (status) {
+    case 'approved': case 'dispute_resolved': return 'success';
+    case 'pending': case 'disputed': return 'warning';
+    case 'rejected': return 'danger';
+    default: return 'neutral';
+  }
+}
 
-import AutoRefresh from './AutoRefresh';
+function statusLabel(status: string) {
+  return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+}
 
 export default async function DashboardPage() {
   const [stats, submissions] = await Promise.all([getDashboardStats(), getRecentSubmissions()]);
@@ -100,155 +91,113 @@ export default async function DashboardPage() {
   return (
     <div>
       <AutoRefresh />
-      <div style={styles.statsGrid}>
-        {STATS.map((stat) => (
-          <div key={stat.key} style={styles.statCard}>
-            <p style={styles.statLabel}>{stat.label}</p>
-            <p style={styles.statValue}>
-              {stat.format
-                ? formatNaira(stats[stat.key as keyof typeof stats] as number)
-                : (stats[stat.key as keyof typeof stats] as number).toLocaleString()
-              }
-            </p>
-          </div>
-        ))}
-      </div>
 
-      <p style={styles.tableTitle}>Recent Card Submissions</p>
-      <div style={styles.tableWrapper}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              {['User', 'Card', 'Country', 'Value', 'Submitted', 'Status', 'Actions'].map((col) => (
-                <th key={col} style={styles.th}>{col}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {submissions.map((row: any, i: number) => (
-              <tr key={row.id} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
-                <td style={styles.td}>{row.users?.username || '-'}</td>
-                <td style={styles.td}>{row.cards?.name || '-'}</td>
-                <td style={styles.td}>{row.card_countries?.country_name || '-'}</td>
-                <td style={styles.td}>{formatNaira(row.payout_naira)}</td>
-                <td style={styles.td}>{new Date(row.created_at).toLocaleDateString()}</td>
-                <td style={styles.td}><StatusBadge status={row.status} /></td>
-                <td style={styles.td}>
-                  <div style={styles.actions}>
-                    {row.status === 'pending' && (
-                      <>
-                        <button style={styles.approveBtn}>Approve</button>
-                        <button style={styles.rejectBtn}>Reject</button>
-                      </>
-                    )}
-                    <button style={styles.viewBtn}>View</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {submissions.length === 0 && (
-              <tr>
-                <td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: '#888888' }}>No submissions yet</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PageHeader
+        title="Overview"
+        subtitle="Today's activity across the CardElite platform."
+      />
+
+      <KpiGrid>
+        <Kpi
+          label="Pending cards"
+          icon={<ClipboardList size={14} />}
+          value={formatCount(stats.pendingCards)}
+          hint="Awaiting admin review"
+        />
+        <Kpi
+          label="Today's payouts"
+          icon={<Wallet size={14} />}
+          value={formatNaira(stats.todayPayouts)}
+          hint="Withdrawals settled today"
+        />
+        <Kpi
+          label="Total users"
+          icon={<UsersIcon size={14} />}
+          value={formatCount(stats.totalUsers)}
+          hint="All-time registrations"
+        />
+        <Kpi
+          label="Pending withdrawals"
+          icon={<ArrowDownToLine size={14} />}
+          value={formatCount(stats.pendingWithdrawals)}
+          hint="In the approval queue"
+        />
+        <Kpi
+          label="Cards today"
+          icon={<TrendingUp size={14} />}
+          value={formatCount(stats.cardsToday)}
+          hint="Submissions in the last 24h"
+        />
+        <Kpi
+          label="Active coupons"
+          icon={<TicketPercent size={14} />}
+          value={formatCount(stats.activeCoupons)}
+          hint="Currently redeemable"
+        />
+        <Kpi
+          label="Bonus pool"
+          icon={<Gift size={14} />}
+          value={formatNaira(stats.bonusPool)}
+          hint="Pending across all wallets"
+        />
+        <Kpi
+          label="Referrals today"
+          icon={<Share2 size={14} />}
+          value={formatCount(stats.referralsToday)}
+          hint="New referral signups"
+        />
+      </KpiGrid>
+
+      <SectionTitle>Recent card submissions</SectionTitle>
+      <Card>
+        <CardHeader
+          title="Latest 10"
+          subtitle="Real-time feed — auto-refreshes every 30 seconds."
+          actions={
+            <Link href="/card-queue">
+              <Button variant="secondary" size="sm">Open queue</Button>
+            </Link>
+          }
+        />
+        <CardBody flush>
+          <Table flush>
+            <THead>
+              <Tr>
+                <Th>User</Th>
+                <Th>Card</Th>
+                <Th>Country</Th>
+                <Th align="right">Payout</Th>
+                <Th>Submitted</Th>
+                <Th>Status</Th>
+                <Th align="right">Actions</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {submissions.length === 0 ? (
+                <TableEmpty colSpan={7}>No submissions yet</TableEmpty>
+              ) : (
+                submissions.map((row: any) => (
+                  <Tr key={row.id}>
+                    <Td emphasis="primary">{row.users?.username || '—'}</Td>
+                    <Td>{row.cards?.name || '—'}</Td>
+                    <Td emphasis="secondary">{row.card_countries?.country_name || '—'}</Td>
+                    <Td align="right" mono>{formatNaira(row.payout_naira)}</Td>
+                    <Td emphasis="secondary">{new Date(row.created_at).toLocaleDateString()}</Td>
+                    <Td>
+                      <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
+                    </Td>
+                    <Td align="right">
+                      <Link href="/card-queue">
+                        <Button variant="ghost" size="sm">Open</Button>
+                      </Link>
+                    </Td>
+                  </Tr>
+                ))
+              )}
+            </TBody>
+          </Table>
+        </CardBody>
+      </Card>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: 12,
-    marginBottom: 0,
-  },
-  statCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 16,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#888888',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    marginBottom: 6,
-    margin: '0 0 6px',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 800,
-    color: '#111111',
-    margin: 0,
-  },
-  tableTitle: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#111111',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  tableWrapper: {
-    overflowX: 'auto',
-    borderRadius: 10,
-    border: '1px solid #EEEEEE',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: 12,
-  },
-  th: {
-    backgroundColor: '#111111',
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 700,
-    padding: '10px 12px',
-    textAlign: 'left',
-    whiteSpace: 'nowrap',
-  },
-  td: {
-    padding: '10px 12px',
-    color: '#333333',
-    fontSize: 12,
-    minHeight: 52,
-    verticalAlign: 'middle',
-  },
-  actions: {
-    display: 'flex',
-    gap: 6,
-  },
-  approveBtn: {
-    backgroundColor: '#E8F5E9',
-    color: '#2E7D32',
-    border: 'none',
-    borderRadius: 6,
-    padding: '4px 10px',
-    fontSize: 11,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  rejectBtn: {
-    backgroundColor: '#FFEBEE',
-    color: '#C62828',
-    border: 'none',
-    borderRadius: 6,
-    padding: '4px 10px',
-    fontSize: 11,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  viewBtn: {
-    backgroundColor: '#E3F2FD',
-    color: '#1565C0',
-    border: 'none',
-    borderRadius: 6,
-    padding: '4px 10px',
-    fontSize: 11,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-};

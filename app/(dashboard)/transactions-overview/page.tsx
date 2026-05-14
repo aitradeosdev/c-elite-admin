@@ -1,33 +1,29 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
+import { Download, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
+import {
+  PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Select, Kpi, KpiGrid,
+} from '../../_ui';
 
 function formatNaira(n: number | string | null | undefined) {
   const v = Number(n || 0);
   return '₦' + v.toLocaleString('en-NG', { minimumFractionDigits: 2 });
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; color: string }> = {
-    success: { bg: '#E8F5E9', color: '#2E7D32' },
-    completed: { bg: '#E8F5E9', color: '#2E7D32' },
-    pending: { bg: '#FFF8E1', color: '#F9A825' },
-    processing: { bg: '#FFF8E1', color: '#F9A825' },
-    failed: { bg: '#FFEBEE', color: '#C62828' },
-    refunded: { bg: '#F3E5F5', color: '#6A1B9A' },
-    pending_review: { bg: '#FFF8E1', color: '#F9A825' },
-  };
-  const s = map[status] || { bg: '#EBEBEB', color: '#888888' };
-  return (
-    <span style={{
-      backgroundColor: s.bg,
-      color: s.color,
-      padding: '3px 8px',
-      borderRadius: 100,
-      fontSize: 10,
-      fontWeight: 700,
-    }}>{status?.replace(/_/g, ' ') || '-'}</span>
-  );
+function statusTone(status: string): 'success' | 'warning' | 'danger' | 'purple' | 'neutral' {
+  switch (status) {
+    case 'success':
+    case 'completed': return 'success';
+    case 'pending':
+    case 'processing':
+    case 'pending_review': return 'warning';
+    case 'failed': return 'danger';
+    case 'refunded': return 'purple';
+    default: return 'neutral';
+  }
 }
 
 const TYPE_OPTIONS = ['', 'card_trade', 'withdrawal', 'transfer', 'bill_payment', 'referral_bonus', 'coupon_bonus', 'manual_credit', 'task_reward', 'giftbox'];
@@ -107,129 +103,128 @@ export default function TransactionsOverviewPage() {
 
   return (
     <div>
-      <div style={s.header}>
-        <span style={s.title}>Transactions Overview</span>
-        <button style={s.exportBtn} onClick={exportCSV} disabled={exporting}>
-          {exporting ? 'Exporting...' : 'Export CSV'}
-        </button>
-      </div>
+      <PageHeader
+        title="Transactions"
+        subtitle="Full audit-log view of every money movement on the platform."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<Download size={14} />}
+            onClick={exportCSV}
+            loading={exporting}
+          >
+            {exporting ? 'Exporting' : 'Export CSV'}
+          </Button>
+        }
+      />
 
-      <div style={s.statsGrid}>
-        <div style={s.statCard}>
-          <p style={s.statLabel}>TOTAL TRANSACTIONS</p>
-          <p style={s.statValue}>{stats.totalCount.toLocaleString()}</p>
-        </div>
-        <div style={s.statCard}>
-          <p style={s.statLabel}>TOTAL VOLUME</p>
-          <p style={s.statValue}>{formatNaira(stats.totalAmount)}</p>
-        </div>
-        <div style={s.statCard}>
-          <p style={s.statLabel}>TODAY TRANSACTIONS</p>
-          <p style={s.statValue}>{stats.todayCount.toLocaleString()}</p>
-        </div>
-        <div style={s.statCard}>
-          <p style={s.statLabel}>TODAY VOLUME</p>
-          <p style={s.statValue}>{formatNaira(stats.todayAmount)}</p>
-        </div>
-      </div>
+      <KpiGrid style={{ marginBottom: 'var(--space-6)' }}>
+        <Kpi label="Total transactions" value={stats.totalCount.toLocaleString()} />
+        <Kpi label="Total volume" value={formatNaira(stats.totalAmount)} />
+        <Kpi label="Today transactions" value={stats.todayCount.toLocaleString()} />
+        <Kpi label="Today volume" value={formatNaira(stats.todayAmount)} />
+      </KpiGrid>
 
-      <div style={s.filters}>
-        <input
-          placeholder="Search user"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={s.filterInput}
-        />
-        <select value={type} onChange={(e) => setType(e.target.value)} style={s.filterSelect}>
-          <option value="">All Types</option>
-          {TYPE_OPTIONS.filter(Boolean).map((t) => (
-            <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={s.filterSelect}>
-          <option value="">All Statuses</option>
-          {STATUS_OPTIONS.filter(Boolean).map((st) => (
-            <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={s.filterInput} />
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={s.filterInput} />
-        <button style={s.applyBtn} onClick={applyFilters}>Apply</button>
-        <button style={s.clearBtn} onClick={clearFilters}>Clear</button>
-      </div>
-
-      <div style={s.tableWrap}>
-        <table style={s.table}>
-          <thead>
-            <tr>
-              {['User', 'Type', 'Amount', 'Status', 'Reference', 'Date'].map((col) => (
-                <th key={col} style={s.th}>{col}</th>
+      <Card>
+        <CardBody tight>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Input
+              placeholder="Search user"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ minWidth: 200, maxWidth: 240 }}
+            />
+            <Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 160 }}>
+              <option value="">All types</option>
+              {TYPE_OPTIONS.filter(Boolean).map((t) => (
+                <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={6} style={{ ...s.td, textAlign: 'center', color: '#888' }}>Loading...</td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={6} style={{ ...s.td, textAlign: 'center', color: '#888' }}>No transactions found</td></tr>
-            ) : rows.map((t: any, i: number) => (
-              <tr key={t.id} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
-                <td style={{ ...s.td, fontWeight: 600 }}>
-                  {t.users?.username ? (
-                    <a href={`/users/${t.user_id}`} style={{ color: '#1565C0', textDecoration: 'none' }}>@{t.users.username}</a>
-                  ) : '-'}
-                </td>
-                <td style={s.td}>
-                  <span style={s.typeBadge}>{(t.type || '-').replace(/_/g, ' ')}</span>
-                </td>
-                <td style={{ ...s.td, fontWeight: 700 }}>{formatNaira(t.amount)}</td>
-                <td style={s.td}><StatusBadge status={t.status} /></td>
-                <td style={{ ...s.td, fontSize: 11, color: '#888', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.reference_id || '-'}</td>
-                <td style={s.td}>{new Date(t.created_at).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </Select>
+            <Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 160 }}>
+              <option value="">All statuses</option>
+              {STATUS_OPTIONS.filter(Boolean).map((st) => (
+                <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
+              ))}
+            </Select>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ minWidth: 150 }} />
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ minWidth: 150 }} />
+            <Button variant="primary" size="sm" leftIcon={<Filter size={14} />} onClick={applyFilters}>Apply</Button>
+            <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>Clear</Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>User</Th>
+                  <Th>Type</Th>
+                  <Th align="right">Amount</Th>
+                  <Th>Status</Th>
+                  <Th>Reference</Th>
+                  <Th>Date</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {loading ? (
+                  <TableEmpty colSpan={6}>Loading…</TableEmpty>
+                ) : rows.length === 0 ? (
+                  <TableEmpty colSpan={6}>No transactions found</TableEmpty>
+                ) : rows.map((t: any) => (
+                  <Tr key={t.id}>
+                    <Td emphasis="primary">
+                      {t.users?.username ? (
+                        <Link href={`/users/${t.user_id}`} style={{ color: 'var(--fg-link)' }}>
+                          @{t.users.username}
+                        </Link>
+                      ) : '—'}
+                    </Td>
+                    <Td>
+                      <Badge tone="purple" size="sm">{(t.type || '-').replace(/_/g, ' ')}</Badge>
+                    </Td>
+                    <Td align="right" mono emphasis="primary">{formatNaira(t.amount)}</Td>
+                    <Td><Badge tone={statusTone(t.status)}>{(t.status || '-').replace(/_/g, ' ')}</Badge></Td>
+                    <Td emphasis="muted" mono style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.reference_id || '—'}
+                    </Td>
+                    <Td emphasis="secondary">{new Date(t.created_at).toLocaleString()}</Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
       </div>
 
       {totalPages > 1 && (
-        <div style={s.pagination}>
-          <button
-            style={{ ...s.pageBtn, opacity: page <= 1 ? 0.4 : 1 }}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 }}>
+          <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={<ChevronLeft size={14} />}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-          >Previous</button>
-          <span style={s.pageInfo}>Page {page} of {totalPages} ({total.toLocaleString()} results)</span>
-          <button
-            style={{ ...s.pageBtn, opacity: page >= totalPages ? 0.4 : 1 }}
+          >
+            Previous
+          </Button>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>
+            Page {page} of {totalPages} ({total.toLocaleString()} results)
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            rightIcon={<ChevronRight size={14} />}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
-          >Next</button>
+          >
+            Next
+          </Button>
         </div>
       )}
     </div>
   );
 }
-
-const s: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  title: { fontSize: 15, fontWeight: 800, color: '#111111' },
-  exportBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 },
-  statCard: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 16 },
-  statLabel: { fontSize: 11, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 6px' },
-  statValue: { fontSize: 24, fontWeight: 800, color: '#111111', margin: 0 },
-  filters: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
-  filterInput: { border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', minWidth: 140 },
-  filterSelect: { border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', backgroundColor: '#FFFFFF', minWidth: 120 },
-  applyBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  clearBtn: { backgroundColor: '#F7F7F7', color: '#333333', border: '1px solid #E8E8E8', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  tableWrap: { overflowX: 'auto', borderRadius: 10, border: '1px solid #EEEEEE', backgroundColor: '#FFF' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '12px 12px', color: '#333333', fontSize: 12, verticalAlign: 'middle' },
-  typeBadge: { backgroundColor: '#F3E5F5', color: '#6A1B9A', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 600, textTransform: 'capitalize' },
-  pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 },
-  pageBtn: { backgroundColor: '#F7F7F7', color: '#333', border: '1px solid #E8E8E8', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  pageInfo: { fontSize: 12, color: '#888' },
-};
