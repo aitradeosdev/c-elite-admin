@@ -2,23 +2,24 @@
 
 // Theme system for the admin dashboard.
 //
-// Three modes: 'light' | 'dark' | 'system'. Persisted to localStorage as
-// `cardelite-admin-theme`. When mode is 'system', listens to the OS preference
-// and flips the resolved theme on change.
+// Per-user, server-persisted theme:
+//   - Stored on admin_users.theme_preference (DB)
+//   - Mirrored to the `admin_theme` cookie so the server can set
+//     <html data-theme="..."> during SSR (root layout reads the cookie)
+//   - Cross-device: log in on a new browser/phone, the login API reads
+//     the DB value and seeds the cookie before the first dashboard render
 //
-// The applied attribute is `data-theme="light|dark"` on <html>. Components
-// never read 'system' — they only ever see the RESOLVED theme via this hook.
-//
-// Pre-paint FOUC prevention: ThemeScript() emits a tiny IIFE that runs in
-// <head> before React hydrates and sets data-theme synchronously. Without it
-// dark-mode users would see a white flash on every cold load.
+// Modes: 'light' | 'dark' | 'system'. 'system' is never the value of
+// data-theme on <html> — it resolves to light/dark via matchMedia. Only
+// the resolved value ever reaches the DOM.
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
 
-const STORAGE_KEY = 'cardelite-admin-theme';
+const COOKIE_NAME = 'admin_theme';
+const COOKIE_MAX_AGE_DAYS = 365;
 
 interface ThemeContextValue {
   mode: ThemeMode;          // what the user picked
@@ -28,18 +29,19 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-/**
- * Inline script — emitted in <head> by RootLayout so it runs BEFORE first paint.
- * Reads the user's saved preference (or system fallback) and sets the
- * `data-theme` attribute on <html> so the right token set is in effect for
- * the very first frame. Without this, dark-mode users see a white flash.
- *
- * Wrapped in a try/catch because storage access can throw in private-mode
- * browsers; a failure just falls back to 'light'.
- */
-export function ThemeScript() {
-  const script = `(function(){try{var k="${STORAGE_KEY}";var s=localStorage.getItem(k);var sys=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";var r=(s==="dark"||s==="light")?s:sys;document.documentElement.setAttribute("data-theme",r);}catch(e){document.documentElement.setAttribute("data-theme","light");}})();`;
-  return <script dangerouslySetInnerHTML={{ __html: script }} />;
+function readCookieTheme(): ThemeMode {
+  if (typeof document === 'undefined') return 'system';
+  const match = document.cookie.split('; ').find((p) => p.startsWith(COOKIE_NAME + '='));
+  if (!match) return 'system';
+  const raw = decodeURIComponent(match.slice(COOKIE_NAME.length + 1));
+  return raw === 'dark' || raw === 'light' || raw === 'system' ? raw : 'system';
+}
+
+function writeCookieTheme(mode: ThemeMode): void {
+  if (typeof document === 'undefined') return;
+  const maxAge = 60 * 60 * 24 * COOKIE_MAX_AGE_DAYS;
+  const secure = location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${COOKIE_NAME}=${encodeURIComponent(mode)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
 }
 
 function getSystemTheme(): ResolvedTheme {
@@ -56,53 +58,57 @@ function applyTheme(resolved: ResolvedTheme) {
   document.documentElement.setAttribute('data-theme', resolved);
 }
 
+/**
+ * Best-effort POST to the server. Theme persistence is server-of-truth,
+ * but the cookie + DOM apply synchronously so a slow network never blocks
+ * the UI. Failures are silently swallowed — the cookie still wins for the
+ * current session, and the next page load will re-sync from the DB.
+ */
+async function persistThemeToServer(mode: ThemeMode): Promise<void> {
+  try {
+    await fetch('/api/admin/theme', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: mode }),
+      credentials: 'same-origin',
+    });
+  } catch { /* swallow — cookie + UI are already updated */ }
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Initial mode: from localStorage if set, else 'system'. We cannot read
-  // localStorage during SSR, so initial render is always 'system' — the
-  // inline ThemeScript has already applied the correct data-theme, so this
-  // mismatch is invisible to the user.
+  // Initial state defaults to 'system' — overwritten on mount with the actual
+  // cookie value. The DOM already has the right data-theme from SSR (root
+  // layout read the cookie), so this state lag is invisible to the user.
   const [mode, setModeState] = useState<ThemeMode>('system');
   const [resolved, setResolved] = useState<ResolvedTheme>('light');
 
-  // Hydrate from localStorage on mount.
+  // Hydrate from the cookie on mount.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-      const initialMode: ThemeMode = saved === 'dark' || saved === 'light' || saved === 'system' ? saved : 'system';
-      setModeState(initialMode);
-      setResolved(resolveTheme(initialMode));
-    } catch {
-      setResolved('light');
-    }
+    const initial = readCookieTheme();
+    setModeState(initial);
+    setResolved(resolveTheme(initial));
   }, []);
 
-  // When mode is 'system', track OS preference changes.
+  // When mode is 'system', track OS preference changes live.
   useEffect(() => {
     if (mode !== 'system' || typeof window === 'undefined') return;
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = () => {
-      const next = mql.matches ? 'dark' : 'light';
+      const next: ResolvedTheme = mql.matches ? 'dark' : 'light';
       setResolved(next);
       applyTheme(next);
     };
-    // Initial sync in case OS changed between mount and listener attach.
     handler();
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
   }, [mode]);
 
   const setMode = useCallback((next: ThemeMode) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      /* ignore — non-persistent mode in private browsing */
-    }
+    writeCookieTheme(next);
     setModeState(next);
     const r = resolveTheme(next);
     setResolved(r);
-    // Briefly enable a CSS class on <html> that animates the theme swap so
-    // the colour change feels intentional instead of jarring. Removed after
-    // 250ms so it doesn't impose transitions on regular interactions.
+    // Brief CSS-driven transition flash so the swap feels intentional.
     if (typeof document !== 'undefined') {
       document.documentElement.classList.add('theme-transitioning');
       window.setTimeout(() => {
@@ -110,6 +116,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }, 250);
     }
     applyTheme(r);
+    // Fire-and-forget DB persistence so cross-device sync works.
+    persistThemeToServer(next);
   }, []);
 
   return (

@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   const { data: admin, error } = await supabaseAdmin
     .from('admin_users')
-    .select('id, username, email, password_hash, role_title, is_super_admin, is_active, page_permissions')
+    .select('id, username, email, password_hash, role_title, is_super_admin, is_active, page_permissions, theme_preference')
     .eq('username', username)
     .eq('email', email)
     .eq('is_active', true)
@@ -76,8 +76,15 @@ export async function POST(req: NextRequest) {
     username: admin.username,
   }, isMobile ? '30d' : '8h');
 
+  // Normalised theme preference — DB default is 'system' but tolerate
+  // anything unexpected by falling back to 'system'.
+  const themePref: 'light' | 'dark' | 'system' =
+    admin.theme_preference === 'light' || admin.theme_preference === 'dark' ? admin.theme_preference : 'system';
+
   if (isMobile) {
-    // No cookie for mobile — token is returned in body for SecureStore.
+    // No cookie for mobile — token + preferences returned in body for
+    // SecureStore. theme_preference lets the mobile admin app honour the
+    // same per-user theme that the web admin uses.
     return NextResponse.json({
       success: true,
       token,
@@ -88,6 +95,7 @@ export async function POST(req: NextRequest) {
         role_title: admin.role_title,
         is_super_admin: admin.is_super_admin,
         page_permissions: admin.page_permissions || [],
+        theme_preference: themePref,
       },
     });
   }
@@ -98,6 +106,18 @@ export async function POST(req: NextRequest) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
     maxAge: 60 * 60 * 8,
+    path: '/',
+  });
+  // Theme cookie is intentionally NOT httpOnly so the client-side
+  // ThemeProvider can read/write it; server reads it during SSR to
+  // render <html data-theme=...> on the very first frame (no flash,
+  // no inline script needed). Long max-age so it survives any token
+  // expiry — theme isn't sensitive and should persist across re-logins.
+  response.cookies.set('admin_theme', themePref, {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 365,
     path: '/',
   });
 
