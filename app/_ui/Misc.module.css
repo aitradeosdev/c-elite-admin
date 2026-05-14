@@ -117,11 +117,14 @@
   min-width: 0;
 }
 .kpiValue {
-  /* 11cqi = 11% of tile inline size. Combined with tabular-nums (every
-   * digit is the same width) this auto-shrinks a long Naira amount to
-   * fit on ONE line — no wrap, no overflow. min/max clamp keeps small
-   * values from rendering tiny and huge values from breaking the layout. */
-  font-size: clamp(var(--text-lg), 11cqi, var(--text-3xl));
+  /* Sized to fit the LONGEST realistic amount (17 chars like
+   * ₦1,904,590,187.94) on a single line at the typical 6-per-row tile
+   * width (~190px content). 7cqi at 190px = 13.3px font; Inter Bold
+   * tabular at 13.3px is ~8px per digit; 17 × 8 = 136px which fits in
+   * the ~150px content area. On wider tiles it scales up to text-2xl
+   * so short values still feel substantial. ellipsis is a last-resort
+   * safety net for trillion+ figures we don't actually expect. */
+  font-size: clamp(var(--text-base), 7cqi, var(--text-2xl));
   font-weight: var(--weight-bold);
   letter-spacing: -0.02em;
   color: var(--fg-primary);
