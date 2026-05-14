@@ -1,17 +1,22 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { Download, AlertTriangle } from 'lucide-react';
+import {
+  PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Textarea, Tabs, SidePanel,
+} from '../../_ui';
 
 type Tab = 'all' | 'pending_review' | 'held' | 'processing' | 'success' | 'failed' | 'refunded';
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'pending_review', label: 'Review Queue' },
-  { key: 'held', label: 'Held' },
-  { key: 'processing', label: 'Processing' },
-  { key: 'success', label: 'Success' },
-  { key: 'failed', label: 'Failed' },
-  { key: 'refunded', label: 'Refunded' },
-  { key: 'all', label: 'All' },
+const TAB_ITEMS: ReadonlyArray<{ value: Tab; label: string }> = [
+  { value: 'pending_review', label: 'Review' },
+  { value: 'held',           label: 'Held' },
+  { value: 'processing',     label: 'Processing' },
+  { value: 'success',        label: 'Success' },
+  { value: 'failed',         label: 'Failed' },
+  { value: 'refunded',       label: 'Refunded' },
+  { value: 'all',            label: 'All' },
 ];
 
 const REJECT_REASONS = [
@@ -27,23 +32,17 @@ function formatNaira(n: number | string | null | undefined) {
   return '₦' + v.toLocaleString('en-NG', { minimumFractionDigits: 2 });
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; color: string }> = {
-    success: { bg: '#E8F5E9', color: '#2E7D32' },
-    processing: { bg: '#FFF8E1', color: '#F9A825' },
-    initiated: { bg: '#FFF8E1', color: '#F9A825' },
-    pending_review: { bg: '#FFF3E0', color: '#EF6C00' },
-    held: { bg: '#FFEBEE', color: '#C62828' },
-    failed: { bg: '#FFEBEE', color: '#C62828' },
-    refunded: { bg: '#F3E5F5', color: '#6A1B9A' },
-  };
-  const st = map[status] || { bg: '#EBEBEB', color: '#888888' };
-  return (
-    <span style={{
-      display: 'inline-block', backgroundColor: st.bg, color: st.color,
-      padding: '3px 10px', borderRadius: 100, fontSize: 10, fontWeight: 700,
-    }}>{(status || '-').replace(/_/g, ' ')}</span>
-  );
+function statusTone(status: string): 'success' | 'warning' | 'danger' | 'purple' | 'neutral' {
+  switch (status) {
+    case 'success': return 'success';
+    case 'processing':
+    case 'initiated':
+    case 'pending_review': return 'warning';
+    case 'held':
+    case 'failed': return 'danger';
+    case 'refunded': return 'purple';
+    default: return 'neutral';
+  }
 }
 
 export default function WithdrawalsPage() {
@@ -145,240 +144,233 @@ export default function WithdrawalsPage() {
 
   return (
     <div>
-      <div style={s.header}>
-        <span style={s.title}>Withdrawals</span>
-        <button style={s.exportBtn} onClick={exportCSV}>Export CSV</button>
-      </div>
+      <PageHeader
+        title="Withdrawals"
+        subtitle="Live withdrawal queue across all statuses. Auto-refreshes every 5 seconds."
+        actions={
+          <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={exportCSV}>
+            Export CSV
+          </Button>
+        }
+      />
 
-      <div style={s.tabBar}>
-        <div style={s.tabs}>
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              style={{ ...s.tabBtn, ...(tab === t.key ? s.tabBtnActive : {}) }}
-            >{t.label}</button>
-          ))}
-        </div>
-        <input
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <Tabs<Tab> value={tab} onChange={setTab} items={TAB_ITEMS} />
+        <Input
           placeholder="Search user or account"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={s.search}
+          style={{ minWidth: 260, maxWidth: 320 }}
         />
       </div>
 
-      <div style={s.tableWrap}>
-        <table style={s.table}>
-          <thead>
-            <tr>
-              {['User', 'Amount', 'Bank', 'Account', 'Gateway Ref', 'Requested', 'Status', 'Actions'].map((c) => (
-                <th key={c} style={s.th}>{c}</th>
+      <Card>
+        <CardBody flush>
+          <Table flush>
+            <THead>
+              <Tr>
+                <Th>User</Th>
+                <Th align="right">Amount</Th>
+                <Th>Bank</Th>
+                <Th>Account</Th>
+                <Th>Gateway ref</Th>
+                <Th>Requested</Th>
+                <Th>Status</Th>
+                <Th align="right">Actions</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {loading ? (
+                <TableEmpty colSpan={8}>Loading…</TableEmpty>
+              ) : rows.length === 0 ? (
+                <TableEmpty colSpan={8}>No withdrawals</TableEmpty>
+              ) : rows.map((w: any) => (
+                <Tr key={w.id}>
+                  <Td emphasis="primary">@{w.user?.username || w.user?.full_name || '—'}</Td>
+                  <Td align="right" mono emphasis="primary">{formatNaira(w.amount)}</Td>
+                  <Td emphasis="secondary">{w.bank_name || '—'}</Td>
+                  <Td>
+                    <div>{w.account_name || '—'}</div>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>
+                      {w.account_number || '—'}
+                    </div>
+                  </Td>
+                  <Td emphasis="muted" mono>{w.gateway_reference || '—'}</Td>
+                  <Td emphasis="secondary">{new Date(w.created_at).toLocaleString()}</Td>
+                  <Td><Badge tone={statusTone(w.status)}>{(w.status || '-').replace(/_/g, ' ')}</Badge></Td>
+                  <Td align="right">
+                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                      {canAct(w.status) && (
+                        <>
+                          <Button variant="success" size="sm" onClick={() => { openDetail(w.id); setShowApprove(true); }}>
+                            Approve
+                          </Button>
+                          <Button variant="dangerSubtle" size="sm" onClick={() => { openDetail(w.id); setShowReject(true); }}>
+                            Reject
+                          </Button>
+                        </>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={() => openDetail(w.id)}>View</Button>
+                    </div>
+                  </Td>
+                </Tr>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={8} style={{ ...s.td, textAlign: 'center', color: '#888' }}>Loading…</td></tr>
-            )}
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={8} style={{ ...s.td, textAlign: 'center', color: '#888' }}>No withdrawals</td></tr>
-            )}
-            {rows.map((w: any) => (
-              <tr key={w.id} style={{ backgroundColor: canAct(w.status) ? '#FFFDE7' : '#FFFFFF' }}>
-                <td style={{ ...s.td, fontWeight: 600 }}>
-                  @{w.user?.username || w.user?.full_name || '-'}
-                </td>
-                <td style={{ ...s.td, fontWeight: 700, color: '#2E7D32' }}>{formatNaira(w.amount)}</td>
-                <td style={s.td}>{w.bank_name || '-'}</td>
-                <td style={s.td}>
-                  <div>{w.account_name || '-'}</div>
-                  <div style={s.sub}>{w.account_number || '-'}</div>
-                </td>
-                <td style={s.td}>{w.gateway_reference || '-'}</td>
-                <td style={s.td}>{new Date(w.created_at).toLocaleString()}</td>
-                <td style={s.td}><StatusBadge status={w.status} /></td>
-                <td style={s.td}>
-                  <div style={s.actions}>
-                    {canAct(w.status) && (
-                      <>
-                        <button style={s.approveBtn} onClick={() => { openDetail(w.id); setShowApprove(true); }}>Approve</button>
-                        <button style={s.rejectBtn} onClick={() => { openDetail(w.id); setShowReject(true); }}>Reject</button>
-                      </>
-                    )}
-                    <button style={s.viewBtn} onClick={() => openDetail(w.id)}>View</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </TBody>
+          </Table>
+        </CardBody>
+      </Card>
 
       {total > 0 && (
-        <div style={s.totalBar}>{total.toLocaleString()} total</div>
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', marginTop: 12, textAlign: 'right' }}>
+          {total.toLocaleString()} total
+        </div>
       )}
 
-      {detail && (
-        <>
-          <div style={s.panelDim} onClick={closeDetail} />
-          <div style={s.panel}>
-            <div style={s.panelHead}>
-              <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Withdrawal</p>
-              <button style={s.closeBtn} onClick={closeDetail}>×</button>
+      <SidePanel
+        open={!!detail}
+        onClose={closeDetail}
+        title="Withdrawal"
+        subtitle={detail?.user ? `@${detail.user.username || ''}` : undefined}
+      >
+        {detailLoading || !detail?.user ? (
+          <p style={{ color: 'var(--fg-tertiary)' }}>Loading…</p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 'var(--radius-md)',
+                background: 'var(--accent-base)', color: 'var(--accent-fg)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 16, fontWeight: 700, flex: 'none',
+              }}>
+                {(detail.user.full_name || '?').charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p style={{ fontSize: 'var(--text-md)', fontWeight: 700, margin: 0, color: 'var(--fg-primary)' }}>{detail.user.full_name}</p>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', margin: '2px 0 0' }}>{detail.user.email}</p>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: '2px 0 0' }}>@{detail.user.username}</p>
+                {detail.user.phone && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: '2px 0 0' }}>{detail.user.phone}</p>}
+              </div>
             </div>
-            {detailLoading || !detail.user ? (
-              <p style={{ padding: 16, color: '#888' }}>Loading…</p>
-            ) : (
-              <div style={s.panelBody}>
-                <div style={s.userRow}>
-                  <div style={s.avatar}>{(detail.user.full_name || '?').charAt(0).toUpperCase()}</div>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{detail.user.full_name}</p>
-                    <p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>{detail.user.email}</p>
-                    <p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>@{detail.user.username}</p>
-                    {detail.user.phone && <p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>{detail.user.phone}</p>}
-                  </div>
+
+            <div style={{ marginTop: 16 }}>
+              <DetailRow label="Amount" value={formatNaira(detail.amount)} bold />
+              <DetailRow label="Bank" value={detail.bank_name} />
+              <DetailRow label="Account name" value={detail.account_name} />
+              <DetailRow label="Account number" value={detail.account_number} />
+              <DetailRow label="Gateway" value={detail.gateway || '—'} />
+              <DetailRow label="Gateway ref" value={detail.gateway_reference || '—'} />
+              <DetailRow label="Status" value={<Badge tone={statusTone(detail.status)}>{(detail.status || '-').replace(/_/g, ' ')}</Badge>} />
+              {detail.failure_reason && <DetailRow label="Reason" value={detail.failure_reason} />}
+              <DetailRow label="Requested" value={new Date(detail.created_at).toLocaleString()} />
+            </div>
+
+            {detail.flag && (
+              <div style={{
+                marginTop: 16, padding: 14, background: 'var(--tone-warning-bg)',
+                border: '1px solid var(--tone-warning-border)', borderRadius: 'var(--radius-lg)',
+              }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--tone-warning-fg)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                  <AlertTriangle size={12} /> Flagged
                 </div>
-
-                <div style={{ marginTop: 16 }}>
-                  <Row label="Amount" value={formatNaira(detail.amount)} bold />
-                  <Row label="Bank" value={detail.bank_name} />
-                  <Row label="Account Name" value={detail.account_name} />
-                  <Row label="Account Number" value={detail.account_number} />
-                  <Row label="Gateway" value={detail.gateway || '-'} />
-                  <Row label="Gateway Ref" value={detail.gateway_reference || '-'} />
-                  <Row label="Status" value={<StatusBadge status={detail.status} />} />
-                  {detail.failure_reason && <Row label="Reason" value={detail.failure_reason} />}
-                  <Row label="Requested" value={new Date(detail.created_at).toLocaleString()} />
+                <div style={{ fontSize: 'var(--text-md)', color: 'var(--tone-warning-fg)', fontWeight: 600 }}>{detail.flag.flag_reason}</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', marginTop: 6 }}>
+                  at {new Date(detail.flag.created_at).toLocaleString()}
                 </div>
-
-                {detail.flag && (
-                  <div style={s.flagBox}>
-                    <div style={s.flagTitle}>Flagged</div>
-                    <div style={s.flagText}>{detail.flag.flag_reason}</div>
-                    <div style={s.flagMeta}>at {new Date(detail.flag.created_at).toLocaleString()}</div>
-                  </div>
-                )}
-
-                {err && <div style={s.errorBar}>{err}</div>}
-
-                {canAct(detail.status) && (
-                  <>
-                    {showApprove && (
-                      <div style={s.confirmBox}>
-                        <p style={s.confirmTitle}>Approve withdrawal of {formatNaira(detail.amount)}?</p>
-                        <p style={s.confirmBody}>This will fire the gateway transfer to {detail.account_name} ({detail.bank_name}).</p>
-                        <div style={s.confirmRow}>
-                          <button style={s.cancelBtn} onClick={() => setShowApprove(false)} disabled={busy}>Cancel</button>
-                          <button style={{ ...s.approveBtnLg, opacity: busy ? 0.5 : 1 }} onClick={doApprove} disabled={busy}>
-                            {busy ? 'Approving…' : 'Confirm Approve'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {showReject && (
-                      <div style={s.confirmBox}>
-                        <p style={s.confirmTitle}>Reject withdrawal</p>
-                        <p style={s.confirmBody}>Funds ({formatNaira(detail.amount)}) will be refunded to the user&apos;s wallet.</p>
-                        <div style={s.reasonList}>
-                          {REJECT_REASONS.map((r) => (
-                            <label key={r} style={s.reasonRow}>
-                              <input
-                                type="radio"
-                                name="reason"
-                                value={r}
-                                checked={rejectReason === r}
-                                onChange={() => { setRejectReason(r); setRejectCustom(''); }}
-                              />
-                              <span>{r}</span>
-                            </label>
-                          ))}
-                        </div>
-                        <textarea
-                          placeholder="Or custom reason"
-                          value={rejectCustom}
-                          onChange={(e) => { setRejectCustom(e.target.value); setRejectReason(''); }}
-                          style={s.textarea}
-                          rows={3}
-                          maxLength={500}
-                        />
-                        <div style={s.confirmRow}>
-                          <button style={s.cancelBtn} onClick={() => setShowReject(false)} disabled={busy}>Cancel</button>
-                          <button style={{ ...s.rejectBtnLg, opacity: busy ? 0.5 : 1 }} onClick={doReject} disabled={busy}>
-                            {busy ? 'Rejecting…' : 'Confirm Reject'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {!showApprove && !showReject && (
-                      <div style={s.actionRow}>
-                        <button style={s.approveBtnLg} onClick={() => setShowApprove(true)}>Approve</button>
-                        <button style={s.rejectBtnLg} onClick={() => setShowReject(true)}>Reject</button>
-                      </div>
-                    )}
-                  </>
-                )}
               </div>
             )}
-          </div>
-        </>
-      )}
+
+            {err && (
+              <div style={{
+                background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)',
+                border: '1px solid var(--tone-danger-border)', padding: '10px 12px',
+                borderRadius: 'var(--radius-md)', fontSize: 'var(--text-md)', marginTop: 14,
+              }}>{err}</div>
+            )}
+
+            {canAct(detail.status) && (
+              <>
+                {showApprove && (
+                  <ConfirmBox
+                    title={`Approve withdrawal of ${formatNaira(detail.amount)}?`}
+                    body={`This will fire the gateway transfer to ${detail.account_name} (${detail.bank_name}).`}
+                  >
+                    <Button variant="secondary" onClick={() => setShowApprove(false)} disabled={busy}>Cancel</Button>
+                    <Button variant="success" onClick={doApprove} loading={busy}>Confirm approve</Button>
+                  </ConfirmBox>
+                )}
+
+                {showReject && (
+                  <ConfirmBox
+                    title="Reject withdrawal"
+                    body={`Funds (${formatNaira(detail.amount)}) will be refunded to the user's wallet.`}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12, width: '100%' }}>
+                      {REJECT_REASONS.map((r) => (
+                        <label key={r} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-md)', color: 'var(--fg-primary)', cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="reason"
+                            value={r}
+                            checked={rejectReason === r}
+                            onChange={() => { setRejectReason(r); setRejectCustom(''); }}
+                          />
+                          <span>{r}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <Textarea
+                      placeholder="Or custom reason"
+                      value={rejectCustom}
+                      onChange={(e) => { setRejectCustom(e.target.value); setRejectReason(''); }}
+                      rows={3}
+                      maxLength={500}
+                      style={{ marginBottom: 12 }}
+                    />
+                    <Button variant="secondary" onClick={() => setShowReject(false)} disabled={busy}>Cancel</Button>
+                    <Button variant="danger" onClick={doReject} loading={busy}>Confirm reject</Button>
+                  </ConfirmBox>
+                )}
+
+                {!showApprove && !showReject && (
+                  <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+                    <Button variant="success" style={{ flex: 1 }} onClick={() => setShowApprove(true)}>Approve</Button>
+                    <Button variant="dangerSubtle" style={{ flex: 1 }} onClick={() => setShowReject(true)}>Reject</Button>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </SidePanel>
     </div>
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: any; bold?: boolean }) {
+function DetailRow({ label, value, bold }: { label: string; value: any; bold?: boolean }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #F0F0F0' }}>
-      <span style={{ fontSize: 12, color: '#888' }}>{label}</span>
-      <span style={{ fontSize: 13, color: '#111', fontWeight: bold ? 800 : 500, textAlign: 'right' }}>{value ?? '-'}</span>
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '10px 0', borderBottom: '1px solid var(--border-subtle)', gap: 16,
+    }}>
+      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)' }}>{label}</span>
+      <span style={{
+        fontSize: 'var(--text-md)', color: 'var(--fg-primary)',
+        fontWeight: bold ? 700 : 500, textAlign: 'right',
+      }}>{value ?? '—'}</span>
     </div>
   );
 }
 
-const s: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  title: { fontSize: 15, fontWeight: 800, color: '#111111' },
-  exportBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  tabBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' },
-  tabs: { display: 'flex', gap: 6, flexWrap: 'wrap' },
-  tabBtn: { backgroundColor: '#F7F7F7', color: '#333', borderWidth: 1, borderStyle: 'solid', borderColor: '#E8E8E8', borderRadius: 100, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  tabBtnActive: { backgroundColor: '#111', color: '#FFF', borderColor: '#111' },
-  search: { border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', minWidth: 240 },
-  tableWrap: { overflowX: 'auto', borderRadius: 10, border: '1px solid #EEEEEE', backgroundColor: '#FFF' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '12px 12px', color: '#333333', fontSize: 12, verticalAlign: 'middle' },
-  sub: { fontSize: 10, color: '#888', marginTop: 2 },
-  actions: { display: 'flex', gap: 6, flexWrap: 'wrap' },
-  approveBtn: { backgroundColor: '#2E7D32', color: '#FFF', border: 'none', borderRadius: 100, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' },
-  rejectBtn: { backgroundColor: '#C62828', color: '#FFF', border: 'none', borderRadius: 100, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' },
-  viewBtn: { backgroundColor: '#F7F7F7', color: '#333', border: '1px solid #E8E8E8', borderRadius: 100, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  totalBar: { fontSize: 11, color: '#888', marginTop: 12, textAlign: 'right' },
-  panelDim: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)', zIndex: 40 },
-  panel: { position: 'fixed', top: 0, right: 0, height: '100vh', width: 520, maxWidth: '90vw', backgroundColor: '#FFF', boxShadow: '-6px 0 30px rgba(0,0,0,0.15)', zIndex: 50, overflowY: 'auto' },
-  panelHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottom: '1px solid #EEE' },
-  closeBtn: { backgroundColor: 'transparent', border: 'none', fontSize: 22, cursor: 'pointer', color: '#666' },
-  panelBody: { padding: 16 },
-  userRow: { display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 14, borderBottom: '1px solid #EEE' },
-  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#111', color: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800 },
-  flagBox: { marginTop: 16, padding: 12, backgroundColor: '#FFF3E0', border: '1px solid #FFE0B2', borderRadius: 10 },
-  flagTitle: { fontSize: 11, fontWeight: 800, color: '#EF6C00', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 },
-  flagText: { fontSize: 13, color: '#BF360C', fontWeight: 600 },
-  flagMeta: { fontSize: 11, color: '#888', marginTop: 4 },
-  actionRow: { display: 'flex', gap: 10, marginTop: 18 },
-  approveBtnLg: { flex: 1, backgroundColor: '#2E7D32', color: '#FFF', border: 'none', borderRadius: 100, padding: '12px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
-  rejectBtnLg: { flex: 1, backgroundColor: '#C62828', color: '#FFF', border: 'none', borderRadius: 100, padding: '12px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
-  confirmBox: { marginTop: 18, padding: 14, backgroundColor: '#FAFAFA', border: '1px solid #EEE', borderRadius: 10 },
-  confirmTitle: { fontSize: 13, fontWeight: 700, color: '#111', margin: '0 0 6px' },
-  confirmBody: { fontSize: 12, color: '#666', margin: '0 0 12px', lineHeight: 1.5 },
-  confirmRow: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 },
-  cancelBtn: { backgroundColor: '#F7F7F7', color: '#333', border: '1px solid #E8E8E8', borderRadius: 100, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  reasonList: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 },
-  reasonRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#333', cursor: 'pointer' },
-  textarea: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: 10, fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' },
-  errorBar: { backgroundColor: '#FFEBEE', color: '#C62828', padding: '10px 12px', borderRadius: 8, fontSize: 12, marginTop: 12 },
-};
+function ConfirmBox({ title, body, children }: { title: string; body: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      marginTop: 18, padding: 16, background: 'var(--bg-subtle)',
+      border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)',
+    }}>
+      <p style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--fg-primary)', margin: '0 0 6px' }}>{title}</p>
+      <p style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)', margin: '0 0 12px', lineHeight: 1.5 }}>{body}</p>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>{children}</div>
+    </div>
+  );
+}

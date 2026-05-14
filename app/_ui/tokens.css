@@ -1,0 +1,267 @@
+/*
+ * Design tokens for the CardElite admin. Values are written as CSS custom
+ * properties so they swap with the theme via [data-theme="..."] on <html>.
+ *
+ * Naming convention:
+ *  --bg-*   surface backgrounds, lowest to highest elevation
+ *  --fg-*   foreground (text / icon) at varying emphasis
+ *  --border-*  borders, hairlines
+ *  --accent-* the single brand accent (used sparingly)
+ *  --tone-*  semantic status tones (success / warning / danger / info)
+ *
+ *  --space-*  4px-based spacing scale (use exclusively for padding/gap)
+ *  --radius-* corner-radius scale
+ *  --shadow-* very few, very subtle (enterprise admins are not skeumorphic)
+ *  --font-*   font stacks (set from app/layout via next/font)
+ *  --text-*   font sizes (rem-based, 16px root)
+ *  --weight-* font weights (only 4 in use across the system)
+ *  --leading-* line heights
+ *  --ease-/--dur-*  motion primitives
+ *  --z-*  z-index scale
+ *
+ * Every color exists in both light and dark themes. NEVER hard-code a hex
+ * in a component; reference a token. If you need a one-off color, add it
+ * to this file first.
+ */
+
+:root,
+[data-theme='light'] {
+  /* surfaces */
+  --bg-app:        #FAFAF9;        /* page background */
+  --bg-surface:    #FFFFFF;        /* cards, panels, inputs */
+  --bg-subtle:     #F4F4F2;        /* hover backgrounds, table zebras */
+  --bg-muted:      #ECECEA;        /* pressed, disabled tracks */
+  --bg-inverse:    #131316;        /* tooltips, command palette */
+
+  /* foreground */
+  --fg-primary:    #131316;        /* body text, headings */
+  --fg-secondary:  #57575A;        /* labels, captions */
+  --fg-tertiary:   #8A8A8E;        /* placeholders, helper text */
+  --fg-disabled:   #B5B5B8;
+  --fg-inverse:    #FAFAF9;        /* text on --bg-inverse */
+  --fg-link:       #5B5BD6;
+
+  /* borders */
+  --border-default:#E5E5E2;        /* card edges, table dividers */
+  --border-subtle: #EFEFEC;        /* very faint hairlines */
+  --border-strong: #D4D4D1;        /* focus outline, emphasized */
+
+  /* accent (used sparingly — CTAs, active nav, primary buttons) */
+  --accent-base:   #5B5BD6;
+  --accent-hover:  #4A4ACC;
+  --accent-active: #3F3FB8;
+  --accent-soft:   #EFEFFC;        /* tinted backgrounds */
+  --accent-fg:     #FFFFFF;        /* text on accent-base */
+
+  /* semantic tones — bg is the tinted pill background, fg is text on that */
+  --tone-success-bg: #E6F4EA;
+  --tone-success-fg: #1E6F3E;
+  --tone-success-border: #BCDFC7;
+
+  --tone-warning-bg: #FEF3DC;
+  --tone-warning-fg: #8A5A00;
+  --tone-warning-border: #F2D589;
+
+  --tone-danger-bg:  #FCE9E9;
+  --tone-danger-fg:  #A11B1B;
+  --tone-danger-border: #F2BDBD;
+
+  --tone-info-bg:    #E5EFFD;
+  --tone-info-fg:    #1554A8;
+  --tone-info-border:#B7D1F2;
+
+  --tone-neutral-bg: #F0F0EE;
+  --tone-neutral-fg: #57575A;
+  --tone-neutral-border: #DCDCDA;
+
+  --tone-purple-bg: #F3EAFB;
+  --tone-purple-fg: #6E2BB0;
+  --tone-purple-border: #DCC4F0;
+
+  /* focus ring (3-layer offset, theme-aware) */
+  --ring-color:    rgba(91, 91, 214, 0.35);
+  --ring-offset:   var(--bg-app);
+
+  /* shadows — enterprise: almost none */
+  --shadow-xs:     0 1px 2px rgba(20, 20, 22, 0.04);
+  --shadow-sm:     0 2px 4px rgba(20, 20, 22, 0.05), 0 1px 2px rgba(20, 20, 22, 0.04);
+  --shadow-md:     0 4px 12px rgba(20, 20, 22, 0.08), 0 2px 4px rgba(20, 20, 22, 0.04);
+  --shadow-lg:     0 8px 24px rgba(20, 20, 22, 0.10), 0 4px 8px rgba(20, 20, 22, 0.04);
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  /* surfaces */
+  --bg-app:        #0B0B0D;
+  --bg-surface:    #131317;
+  --bg-subtle:     #1A1A1F;
+  --bg-muted:      #232328;
+  --bg-inverse:    #FAFAF9;
+
+  /* foreground */
+  --fg-primary:    #ECECEA;
+  --fg-secondary:  #A5A5AA;
+  --fg-tertiary:   #6F6F75;
+  --fg-disabled:   #45454A;
+  --fg-inverse:    #131316;
+  --fg-link:       #9D9DEC;
+
+  /* borders */
+  --border-default:#26262C;
+  --border-subtle: #1E1E23;
+  --border-strong: #32323A;
+
+  /* accent */
+  --accent-base:   #7373E8;
+  --accent-hover:  #8585F0;
+  --accent-active: #6262DC;
+  --accent-soft:   rgba(115, 115, 232, 0.14);
+  --accent-fg:     #FAFAF9;
+
+  /* tones */
+  --tone-success-bg: rgba(46, 160, 91, 0.16);
+  --tone-success-fg: #6EE0A0;
+  --tone-success-border: rgba(46, 160, 91, 0.30);
+
+  --tone-warning-bg: rgba(214, 158, 33, 0.16);
+  --tone-warning-fg: #F5C969;
+  --tone-warning-border: rgba(214, 158, 33, 0.32);
+
+  --tone-danger-bg:  rgba(225, 73, 73, 0.16);
+  --tone-danger-fg:  #F18A8A;
+  --tone-danger-border: rgba(225, 73, 73, 0.32);
+
+  --tone-info-bg:    rgba(85, 132, 220, 0.16);
+  --tone-info-fg:    #91B5F2;
+  --tone-info-border: rgba(85, 132, 220, 0.32);
+
+  --tone-neutral-bg: rgba(140, 140, 148, 0.14);
+  --tone-neutral-fg: #A5A5AA;
+  --tone-neutral-border: rgba(140, 140, 148, 0.28);
+
+  --tone-purple-bg:  rgba(160, 99, 215, 0.16);
+  --tone-purple-fg:  #C49CF0;
+  --tone-purple-border: rgba(160, 99, 215, 0.32);
+
+  /* focus ring */
+  --ring-color:    rgba(115, 115, 232, 0.40);
+  --ring-offset:   var(--bg-app);
+
+  /* shadows — softer + larger spread on dark */
+  --shadow-xs:     0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-sm:     0 2px 4px rgba(0, 0, 0, 0.30), 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-md:     0 4px 12px rgba(0, 0, 0, 0.40), 0 2px 4px rgba(0, 0, 0, 0.28);
+  --shadow-lg:     0 8px 24px rgba(0, 0, 0, 0.50), 0 4px 8px rgba(0, 0, 0, 0.30);
+
+  color-scheme: dark;
+}
+
+/* theme-agnostic tokens (same in both themes) */
+:root {
+  /* spacing — 4px base */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  28px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* corner radius */
+  --radius-xs:   3px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-2xl:  16px;
+  --radius-pill: 9999px;
+
+  /* fonts — actual stacks bound by next/font in app/layout.tsx */
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* font sizes — rem at 16px root */
+  --text-xs:    0.6875rem;  /* 11px — pill badges, micro labels */
+  --text-sm:    0.75rem;    /* 12px — table cells, captions */
+  --text-base:  0.8125rem;  /* 13px — body */
+  --text-md:    0.875rem;   /* 14px — buttons, default UI */
+  --text-lg:    1rem;       /* 16px — emphasized body */
+  --text-xl:    1.125rem;   /* 18px — section titles */
+  --text-2xl:   1.375rem;   /* 22px — page titles */
+  --text-3xl:   1.875rem;   /* 30px — KPI numbers */
+  --text-4xl:   2.5rem;     /* 40px — display */
+
+  /* weights — only these four are blessed */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* line heights */
+  --leading-tight:   1.2;
+  --leading-snug:    1.35;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+
+  /* motion */
+  --dur-fast:    120ms;
+  --dur-base:    180ms;
+  --dur-slow:    240ms;
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1);
+
+  /* z-index scale */
+  --z-base:     0;
+  --z-raised:   10;
+  --z-sticky:   100;
+  --z-overlay:  500;
+  --z-modal:    1000;
+  --z-toast:    2000;
+  --z-tooltip:  3000;
+}
+
+/* reset / base */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-app);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: var(--fg-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* universal focus ring — only on keyboard focus */
+:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* numeric / monospace utility for amounts, IDs */
+.mono, .tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* prevent transition flash when theme switches */
+.theme-transitioning * {
+  transition: background-color var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out) !important;
+}
