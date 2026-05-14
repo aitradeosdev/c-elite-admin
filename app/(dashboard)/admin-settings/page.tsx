@@ -22,6 +22,8 @@ export default function AdminSettingsPage() {
   const [updType, setUpdType] = useState('soft');
   const [updMsg, setUpdMsg] = useState('');
   const [maxApproval, setMaxApproval] = useState('');
+  const [termsUrl, setTermsUrl] = useState('');
+  const [privacyUrl, setPrivacyUrl] = useState('');
 
   const [emergencyConfirm, setEmergencyConfirm] = useState<null | 'on' | 'off'>(null);
 
@@ -40,6 +42,8 @@ export default function AdminSettingsPage() {
     setUpdType(cfg.app_update_type || 'soft');
     setUpdMsg(cfg.app_update_message || '');
     setMaxApproval(cfg.max_card_approval_naira || '5000000');
+    setTermsUrl(cfg.terms_url || '');
+    setPrivacyUrl(cfg.privacy_url || '');
     setLoading(false);
   };
 
@@ -94,6 +98,18 @@ export default function AdminSettingsPage() {
     app_update_type: updType,
     app_update_message: updMsg,
   });
+
+  // Client-side defense matching the server-side URL_RE in route.ts. Server
+  // is authoritative; this just gives faster feedback before a round-trip.
+  const isValidUrl = (u: string) => u.length === 0 || /^https?:\/\/[^\s<>"']{3,}$/i.test(u.trim());
+  const saveTerms = () => {
+    if (!isValidUrl(termsUrl)) { showToast('Terms URL must start with https://'); return; }
+    save({ terms_url: termsUrl.trim() });
+  };
+  const savePrivacy = () => {
+    if (!isValidUrl(privacyUrl)) { showToast('Privacy URL must start with https://'); return; }
+    save({ privacy_url: privacyUrl.trim() });
+  };
 
   const confirmEmergency = async () => {
     if (!emergencyConfirm) return;
@@ -193,6 +209,39 @@ export default function AdminSettingsPage() {
         />
         <button style={styles.saveBtn} onClick={saveLiveChat} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      <div style={styles.card}>
+        <p style={styles.cardTitle}>Legal</p>
+        <p style={styles.cardHint}>
+          Public URLs to your Terms of Use and Privacy Policy. Linked from the
+          user-app registration screen. Must be HTTPS — anything else (or a
+          missing value) is treated as &quot;not configured&quot; and the labels stay
+          non-clickable.
+        </p>
+        <label style={styles.label}>Terms of Use URL</label>
+        <input
+          style={styles.input}
+          type="url"
+          value={termsUrl}
+          onChange={(e) => setTermsUrl(e.target.value)}
+          placeholder="https://your-site.com/terms"
+        />
+        <button style={{ ...styles.saveBtn, marginBottom: 12 }} onClick={saveTerms} disabled={saving}>
+          {saving ? 'Saving…' : 'Save Terms URL'}
+        </button>
+
+        <label style={styles.label}>Privacy Policy URL</label>
+        <input
+          style={styles.input}
+          type="url"
+          value={privacyUrl}
+          onChange={(e) => setPrivacyUrl(e.target.value)}
+          placeholder="https://your-site.com/privacy"
+        />
+        <button style={styles.saveBtn} onClick={savePrivacy} disabled={saving}>
+          {saving ? 'Saving…' : 'Save Privacy URL'}
         </button>
       </div>
 
