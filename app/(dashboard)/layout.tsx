@@ -2,7 +2,6 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifyAdminJWT } from '../lib/jwt';
 import { Shell } from './_shell/Shell';
-import { filterNavByPermissions } from './_shell/nav';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
@@ -12,11 +11,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const admin = await verifyAdminJWT(token);
   if (!admin) redirect('/login');
 
-  const navGroups = filterNavByPermissions(admin.page_permissions, admin.is_super_admin);
-
+  // IMPORTANT: only pass serialisable values across the server/client boundary.
+  // Nav icons are function components (not serialisable) so the Shell client
+  // must do its own filtering against the in-module nav config — server just
+  // hands it the permission keys.
   return (
     <Shell
-      navGroups={navGroups}
+      allowedKeys={admin.page_permissions}
+      isSuperAdmin={admin.is_super_admin}
       username={admin.username}
       roleTitle={admin.role_title}
     >

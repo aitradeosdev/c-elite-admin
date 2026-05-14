@@ -1,18 +1,22 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronsLeft, ChevronsRight, LogOut } from 'lucide-react';
 import { ToastProvider } from '../../_ui/Misc';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { findBreadcrumb, type NavGroup } from './nav';
+import { findBreadcrumb, filterNavByPermissions } from './nav';
 import s from './Shell.module.css';
 
 const COLLAPSE_KEY = 'cardelite-admin-sidebar-collapsed';
 
 interface ShellProps {
-  navGroups: NavGroup[];
+  /** Permission keys (plain strings) — function components like icons can't
+   *  cross the server/client boundary, so the server passes the keys and the
+   *  Shell resolves them against the in-module NAV_GROUPS itself. */
+  allowedKeys: string[];
+  isSuperAdmin: boolean;
   username: string;
   roleTitle: string;
   children: ReactNode;
@@ -23,10 +27,14 @@ interface ShellProps {
  * user pill), sticky top bar (breadcrumb + theme switch), scrollable content
  * area. Wraps everything in <ToastProvider> so pages can call useToast().
  */
-export function Shell({ navGroups, username, roleTitle, children }: ShellProps) {
+export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const navGroups = useMemo(
+    () => filterNavByPermissions(allowedKeys, isSuperAdmin),
+    [allowedKeys, isSuperAdmin],
+  );
 
   // Hydrate sidebar collapse state from localStorage on mount.
   useEffect(() => {
