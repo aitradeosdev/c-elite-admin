@@ -31,6 +31,16 @@
   border-bottom: 1px solid var(--border-subtle);
   min-height: 56px;
 }
+/* When collapsed there's only 32px of horizontal space inside the head —
+ * the brand mark + button can't both fit, so we hide the brand and centre
+ * just the expand button. The brand still appears at full width as soon
+ * as the user expands the sidebar again. */
+.collapsed .sidebarHead {
+  padding: var(--space-4) var(--space-2);
+  justify-content: center;
+  gap: 0;
+}
+.collapsed .brandMark { display: none; }
 .brandMark {
   width: 32px;
   height: 32px;
