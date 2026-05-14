@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 const GATEWAYS = ['paystack', 'monnify'];
 
@@ -16,6 +17,10 @@ const KEYS = [
   'app_update_type',
   'app_update_message',
   'emergency_mode',
+  // Threshold (NGN) above which approve_card_submission requires escalation
+  // to a super-admin. Read server-side by schema.sql:615 with a 5,000,000
+  // fallback if the row is missing. Adjustable by super-admins only.
+  'max_card_approval_naira',
 ];
 
 const ALLOWED_UPDATE = new Set(KEYS);
@@ -61,6 +66,15 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  if (changes.max_card_approval_naira !== undefined) {
+    const n = Number(changes.max_card_approval_naira);
+    if (!Number.isFinite(n) || n < 1000 || n > 1_000_000_000_000) {
+      return NextResponse.json({
+        error: 'Max approval amount must be a number between 1,000 and 1,000,000,000,000 NGN',
+      }, { status: 400 });
+    }
+  }
+
   const rows = keys.map((k) => ({
     key: k, value: String(changes[k]), updated_at: new Date().toISOString(),
   }));
@@ -69,7 +83,7 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_ADMIN_SETTINGS', entity: 'app_config',
-    entity_id: 'batch', after_value: changes,
+    entity_id: 'batch', after_value: redactAudit(changes),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
   return NextResponse.json({ success: true });
