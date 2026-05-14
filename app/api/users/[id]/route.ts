@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { redactAudit } from '../../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -97,8 +98,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       action: 'FREEZE_USER',
       entity: 'users',
       entity_id: id,
-      before_value: before,
-      after_value: { is_frozen: true, freeze_reason: reason.trim() },
+      before_value: redactAudit(before),
+      after_value: redactAudit({ is_frozen: true, freeze_reason: reason.trim() }),
       ip_address: req.headers.get('x-forwarded-for') || 'unknown',
     });
 
@@ -122,8 +123,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       action: 'UNFREEZE_USER',
       entity: 'users',
       entity_id: id,
-      before_value: before,
-      after_value: { is_frozen: false, freeze_reason: null },
+      before_value: redactAudit(before),
+      after_value: redactAudit({ is_frozen: false, freeze_reason: null }),
       ip_address: req.headers.get('x-forwarded-for') || 'unknown',
     });
 

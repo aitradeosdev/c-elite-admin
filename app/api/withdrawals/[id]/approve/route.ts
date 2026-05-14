@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../../../lib/jwt';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { redactAudit } from '../../../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     action: 'APPROVE_WITHDRAWAL',
     entity: 'withdrawals',
     entity_id: id,
-    after_value: { gateway_reference: data.gateway_reference },
+    after_value: redactAudit({ gateway_reference: data.gateway_reference }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { redactAudit } from '../../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -30,7 +31,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     action: 'REVOKE_FEATURE_OVERRIDE',
     entity: 'feature_overrides',
     entity_id: id,
-    before_value: row,
+    before_value: redactAudit(row),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

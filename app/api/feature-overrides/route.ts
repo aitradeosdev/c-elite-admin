@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 const ALLOWED_FEATURES = new Set(['tag_transfer']);
 
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
     action: 'GRANT_FEATURE_OVERRIDE',
     entity: 'feature_overrides',
     entity_id: data.id,
-    after_value: { user_id, feature_key, reason },
+    after_value: redactAudit({ user_id, feature_key, reason }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

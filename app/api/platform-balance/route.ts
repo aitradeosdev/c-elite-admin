@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 const KEYS = [
   'platform_balance_mode',
@@ -45,7 +46,7 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_PLATFORM_BALANCE', entity: 'app_config',
-    entity_id: 'batch', after_value: changes,
+    entity_id: 'batch', after_value: redactAudit(changes),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
   return NextResponse.json({ success: true });

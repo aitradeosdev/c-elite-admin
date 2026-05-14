@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     action: action === 'clear' ? 'CLEAR_FLAG' : 'ESCALATE_FLAG',
     entity: 'flagged_transactions',
     entity_id: flagId,
-    after_value: { status: newStatus },
+    after_value: redactAudit({ status: newStatus }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

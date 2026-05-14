@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminFromRequest } from '../../../../lib/jwt';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { redactAudit } from '../../../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -43,8 +44,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     action: 'REFUND_TRANSFER',
     entity: 'transfers',
     entity_id: id,
-    before_value: before,
-    after_value: { status: 'failed', reason },
+    before_value: redactAudit(before),
+    after_value: redactAudit({ status: 'failed', reason }),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 

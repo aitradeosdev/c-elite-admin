@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
+import { redactAudit } from '../../lib/redact';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'CREATE_COUPON', entity: 'coupons',
-    entity_id: data.id, after_value: body,
+    entity_id: data.id, after_value: redactAudit(body),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
@@ -96,7 +97,7 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_COUPON', entity: 'coupons',
-    entity_id: id, before_value: before, after_value: updates,
+    entity_id: id, before_value: redactAudit(before), after_value: redactAudit(updates),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
