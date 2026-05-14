@@ -34,5 +34,5 @@ export type {
   SkeletonProps, EmptyStateProps, PageHeaderProps, KpiProps, ToastTone,
 } from './Misc';
 
-export { ThemeProvider, ThemeScript, useTheme } from './theme';
+export { ThemeProvider, useTheme } from './theme';
 export type { ThemeMode, ResolvedTheme } from './theme';
