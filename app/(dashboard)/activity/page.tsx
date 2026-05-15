@@ -1,10 +1,38 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Download, Printer } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Select, Modal,
 } from '../../_ui';
+
+export type RangeKey = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month';
+
+function rangeBounds(key: RangeKey): { from: Date | null; to: Date | null; label: string } {
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (key === 'today') {
+    return { from: startOfDay(now), to: null, label: 'Today' };
+  }
+  if (key === 'yesterday') {
+    const y = startOfDay(new Date(now.getTime() - 86_400_000));
+    const t = startOfDay(now);
+    return { from: y, to: t, label: 'Yesterday' };
+  }
+  if (key === '7d') {
+    const f = startOfDay(new Date(now.getTime() - 6 * 86_400_000));
+    return { from: f, to: null, label: 'Last 7 days' };
+  }
+  if (key === '30d') {
+    const f = startOfDay(new Date(now.getTime() - 29 * 86_400_000));
+    return { from: f, to: null, label: 'Last 30 days' };
+  }
+  if (key === 'month') {
+    return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: null, label: 'This month' };
+  }
+  return { from: null, to: null, label: 'All time' };
+}
 
 interface ActivityRow {
   id: string;
@@ -130,6 +158,9 @@ export default function ActivityPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [detail, setDetail] = useState<ActivityRow | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRange, setExportRange] = useState<RangeKey>('7d');
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -147,6 +178,66 @@ export default function ActivityPage() {
   };
 
   useEffect(() => { load(); }, [filter]);
+
+  function buildExportQuery(format: 'csv' | 'json'): string {
+    const p = new URLSearchParams();
+    p.set('format', format);
+    if (filter !== 'all') p.set('admin_filter', filter);
+    const { from, to } = rangeBounds(exportRange);
+    if (from) p.set('after', from.toISOString());
+    if (to) p.set('before', to.toISOString());
+    p.set('limit', '5000');
+    return p.toString();
+  }
+
+  async function exportCsv() {
+    setExporting('csv');
+    try {
+      const res = await fetch('/api/activity?' + buildExportQuery('csv'));
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j?.error || 'Export failed');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `admin-activity-${exportRange}-${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function exportPdf() {
+    setExporting('pdf');
+    try {
+      const res = await fetch('/api/activity?' + buildExportQuery('json'));
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j?.error || 'Export failed');
+        return;
+      }
+      const json = await res.json();
+      const rows = (json.activity || []) as ActivityRow[];
+      const html = buildPrintHtml(rows, rangeBounds(exportRange).label, filter, admins);
+      const win = window.open('', '_blank', 'width=900,height=700');
+      if (!win) { alert('Pop-up blocked — allow pop-ups to export PDF.'); return; }
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => { win.print(); }, 300);
+      setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
+  }
 
   const grouped = useMemo(() => {
     const out: Array<{ key: string; label: string; items: ActivityRow[] }> = [];
@@ -180,6 +271,14 @@ export default function ActivityPage() {
             </Select>
           </div>
           <div style={{ flex: 1 }} />
+          <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={<Download size={14} />}
+            onClick={() => setExportOpen(true)}
+          >
+            Export
+          </Button>
           <Button variant="secondary" size="sm" onClick={load}>Refresh</Button>
         </CardBody>
       </Card>
@@ -294,8 +393,121 @@ export default function ActivityPage() {
           </div>
         )}
       </Modal>
+
+      <Modal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        title="Export activity"
+        subtitle="Choose a time frame, then download CSV or print PDF."
+        size="md"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label style={{ fontSize: 11, fontWeight: 800, color: 'var(--fg-tertiary)', letterSpacing: 1.2 }}>
+              TIME FRAME
+            </label>
+            <Select
+              value={exportRange}
+              onChange={(e) => setExportRange((e.target as HTMLSelectElement).value as RangeKey)}
+            >
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="month">This month</option>
+              <option value="all">All time</option>
+            </Select>
+            <span style={{ fontSize: 12, color: 'var(--fg-tertiary)' }}>
+              {filter === 'all'
+                ? 'All admins'
+                : `@${admins.find((a) => a.id === filter)?.username || 'unknown'}`}{' · '}
+              up to 5,000 rows
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <Button
+              variant="primary"
+              leftIcon={<Download size={14} />}
+              onClick={exportCsv}
+              loading={exporting === 'csv'}
+              style={{ flex: 1 }}
+            >
+              Download CSV
+            </Button>
+            <Button
+              variant="secondary"
+              leftIcon={<Printer size={14} />}
+              onClick={exportPdf}
+              loading={exporting === 'pdf'}
+              style={{ flex: 1 }}
+            >
+              Print / PDF
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
+}
+
+function buildPrintHtml(rows: ActivityRow[], rangeLabel: string, filter: string, admins: AdminRow[]): string {
+  const adminLabel = filter === 'all'
+    ? 'All admins'
+    : `@${admins.find((a) => a.id === filter)?.username || 'unknown'}`;
+  const grouped: Array<{ label: string; items: ActivityRow[] }> = [];
+  const map = new Map<string, ActivityRow[]>();
+  for (const r of rows) {
+    const k = dayKey(r.created_at);
+    const bucket = map.get(k) || [];
+    bucket.push(r);
+    map.set(k, bucket);
+  }
+  for (const k of Array.from(map.keys()).sort().reverse()) {
+    grouped.push({ label: dayLabel(k), items: map.get(k)! });
+  }
+  const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+  const sections = grouped.map((g) => `
+    <h2 class="day">${esc(g.label)} <span class="count">${g.items.length}</span></h2>
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Admin</th><th>Action</th><th>Target</th><th>IP</th></tr>
+      </thead>
+      <tbody>
+        ${g.items.map((r) => `
+          <tr>
+            <td>${esc(new Date(r.created_at).toLocaleTimeString())}</td>
+            <td>@${esc(r.admin_username || 'unknown')}${r.admin_is_super ? ' <span class="super">SUPER</span>' : ''}</td>
+            <td>${esc(actionLabel(r.action))}</td>
+            <td>${esc(r.target_label || r.entity || '—')}${r.target_username ? ` · @${esc(r.target_username)}` : ''}</td>
+            <td class="mono">${esc(r.ip_address || '—')}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `).join('');
+  return `<!doctype html>
+<html><head>
+<meta charset="utf-8" />
+<title>Admin Activity — ${esc(rangeLabel)}</title>
+<style>
+  body { font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif; color: #111; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .meta { color: #666; font-size: 11px; margin-bottom: 18px; }
+  h2.day { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #111; margin: 22px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .count { color: #888; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th, td { text-align: left; padding: 6px 8px; vertical-align: top; border-bottom: 1px solid #eee; }
+  th { color: #666; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .super { background: #F5B040; color: #fff; padding: 1px 4px; border-radius: 3px; font-size: 9px; font-weight: 800; margin-left: 4px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+  @media print { body { padding: 12px; } h2.day { break-after: avoid; } tr { break-inside: avoid; } }
+</style>
+</head><body>
+<h1>Admin Activity</h1>
+<div class="meta">${esc(rangeLabel)} · ${esc(adminLabel)} · ${rows.length} rows · generated ${esc(new Date().toLocaleString())}</div>
+${sections || '<div style="color:#666;padding:32px;text-align:center;">No activity in this window.</div>'}
+</body></html>`;
 }
 
 function ActivitySection({
