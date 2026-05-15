@@ -1,11 +1,4 @@
-// Sidebar navigation grouping for the admin dashboard.
-//
-// Each top-level group renders as a labeled section with icon-prefixed items
-// underneath. Item `key` MUST match the value in `admin.page_permissions` so
-// the server-side filter in layout.tsx works correctly — DO NOT rename keys
-// without updating the underlying permissions seed in the database.
-//
-// Icon set: lucide-react. Use 16px in the sidebar.
+
 
 import {
   LayoutDashboard, ClipboardList, ArrowDownToLine, ArrowLeftRight,
@@ -18,7 +11,7 @@ import {
 } from 'lucide-react';
 
 export interface NavLeaf {
-  /** Permission key — must match admin.page_permissions value. */
+  
   key: string;
   label: string;
   href: string;
@@ -46,6 +39,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: 'users',                  label: 'Users',          href: '/users',                  icon: Users },
       { key: 'user_activity_monitor',  label: 'Activity Log',   href: '/user-activity-monitor',  icon: Activity },
+      { key: 'activity',               label: 'Admin Activity', href: '/activity',               icon: Activity },
       { key: 'admin_accounts',         label: 'Admins',         href: '/admin-accounts',         icon: ShieldCheck },
     ],
   },
@@ -61,8 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Rewards',
     items: [
       { key: 'bonuses_rewards',        label: 'Bonuses',        href: '/bonuses-rewards',        icon: Gift },
-      // Levels lives under /bonuses-rewards and inherits the same permission
-      // key as its parent — both visible together to keep navigation simple.
+
       { key: 'bonuses_rewards',        label: 'Levels',         href: '/bonuses-rewards/levels', icon: Trophy },
       { key: 'coupons',                label: 'Coupons',        href: '/coupons',                icon: TicketPercent },
       { key: 'referral_management',    label: 'Referrals',      href: '/referral-management',    icon: Share2 },
@@ -86,11 +79,6 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/**
- * Build the breadcrumb for the current pathname: [groupLabel, itemLabel].
- * Returns `null` if the pathname isn't in the nav (e.g. /users/[id] detail
- * pages — callers can fall back to a generic title for those).
- */
 export function findBreadcrumb(pathname: string): { group: string; item: string } | null {
   for (const group of NAV_GROUPS) {
     for (const leaf of group.items) {
@@ -102,11 +90,6 @@ export function findBreadcrumb(pathname: string): { group: string; item: string 
   return null;
 }
 
-/**
- * Filter the nav by the permission set the admin has. Super admins get
- * everything; everyone else only sees groups containing at least one item
- * whose `key` is in their `page_permissions` array.
- */
 export function filterNavByPermissions(allowedKeys: string[], isSuperAdmin: boolean): NavGroup[] {
   if (isSuperAdmin) return NAV_GROUPS;
   const allowed = new Set(allowedKeys);

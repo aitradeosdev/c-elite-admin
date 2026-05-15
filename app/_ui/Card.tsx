@@ -3,7 +3,7 @@ import s from './Card.module.css';
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   elevated?: boolean;
-  /** Remove the rounded corners. Use when the card spans a full panel width. */
+  
   flush?: boolean;
 }
 
@@ -16,7 +16,7 @@ export interface CardHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, 't
   title?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
-  /** Drop the border-bottom separator. */
+  
   bare?: boolean;
 }
 
@@ -37,9 +37,9 @@ export function CardHeader({ title, subtitle, actions, bare, className, children
 }
 
 export interface CardBodyProps extends HTMLAttributes<HTMLDivElement> {
-  /** Tighter padding for dense content like tables. */
+  
   tight?: boolean;
-  /** No padding. Use for embedded full-bleed tables. */
+  
   flush?: boolean;
 }
 

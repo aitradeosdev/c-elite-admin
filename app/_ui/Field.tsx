@@ -11,11 +11,6 @@ interface FieldShellProps {
   className?: string;
 }
 
-/**
- * Wraps a labelled form control with optional help text and error state.
- * Use the FieldShell only when you need the label/help/error decorations —
- * otherwise drop the wrapper and render Input/Select/Textarea bare.
- */
 export function FieldShell({ label, htmlFor, required, help, error, children, className }: FieldShellProps) {
   return (
     <div className={[s.wrap, className].filter(Boolean).join(' ')}>

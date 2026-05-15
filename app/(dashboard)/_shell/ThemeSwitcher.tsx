@@ -4,10 +4,6 @@ import { Monitor, Moon, Sun } from 'lucide-react';
 import { useTheme, type ThemeMode } from '../../_ui/theme';
 import s from './Shell.module.css';
 
-/**
- * Three-state segmented control: Light / System / Dark.
- * The icons match the convention used by every modern dev tool dashboard.
- */
 export function ThemeSwitcher() {
   const { mode, setMode } = useTheme();
   const options: Array<{ value: ThemeMode; label: string; icon: React.ComponentType<{ size?: number }> }> = [

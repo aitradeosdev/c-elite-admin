@@ -64,8 +64,6 @@ export async function PATCH(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin || !admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  // username is intentionally NOT pulled out — PATCH doesn't accept username changes
-  // (the web admin disables the field in edit mode; this is the server-side mirror).
   const { id, email, password, role_title, page_permissions, is_active } = await req.json();
   if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 

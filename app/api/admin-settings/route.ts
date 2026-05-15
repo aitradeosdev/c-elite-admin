@@ -17,20 +17,13 @@ const KEYS = [
   'app_update_type',
   'app_update_message',
   'emergency_mode',
-  // Threshold (NGN) above which approve_card_submission requires escalation
-  // to a super-admin. Read server-side by schema.sql:615 with a 5,000,000
-  // fallback if the row is missing. Adjustable by super-admins only.
+
   'max_card_approval_naira',
-  // Legal URLs shown on the user-app registration screen. Set by super-admin
-  // here, exposed to the user app via the default anonymous read of
-  // app_config. URL_KEYS validation below restricts to http/https + 2KB.
+
   'terms_url',
   'privacy_url',
 ];
 
-// Subset of KEYS that store a URL. PATCH validates each against URL_RE +
-// length cap so an admin cannot save javascript:, data:, or other schemes
-// that would later be opened by the user app via Linking.openURL().
 const URL_KEYS = new Set(['live_chat_url', 'terms_url', 'privacy_url']);
 const URL_MAX_LEN = 2048;
 const URL_RE = /^https?:\/\/[^\s<>"']{3,}$/i;
@@ -87,9 +80,6 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // Validate every URL-typed change so we never persist a non-http(s) link.
-  // Empty string is allowed and treated by the user app as "no link
-  // configured" (the surface stays a non-clickable label in that case).
   for (const k of keys) {
     if (!URL_KEYS.has(k)) continue;
     const raw = String(changes[k] ?? '');

@@ -1,6 +1,4 @@
-// Single import surface for the admin design system. Pages do:
-//   import { Button, Card, Badge, Table, Tr, Td, Modal, useToast } from '@/app/_ui';
-// instead of remembering which file each lives in.
+
 
 export { Button } from './Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';

@@ -3,9 +3,6 @@
 import { CSSProperties, HTMLAttributes, ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import s from './Misc.module.css';
 
-/* ============================================================
- * Skeleton — block placeholder shown while data loads
- * ============================================================ */
 export interface SkeletonProps extends HTMLAttributes<HTMLDivElement> {
   width?: number | string;
   height?: number | string;
@@ -21,9 +18,6 @@ export function Skeleton({ width, height = 14, rounded, style, className, ...res
   return <div className={[s.skeleton, className].filter(Boolean).join(' ')} style={merged} {...rest} />;
 }
 
-/* ============================================================
- * EmptyState — centered "no data" with optional icon + actions
- * ============================================================ */
 export interface EmptyStateProps {
   icon?: ReactNode;
   title?: ReactNode;
@@ -42,9 +36,6 @@ export function EmptyState({ icon, title, hint, actions, className }: EmptyState
   );
 }
 
-/* ============================================================
- * PageHeader — title + subtitle + actions, top of every page
- * ============================================================ */
 export interface PageHeaderProps {
   title: ReactNode;
   subtitle?: ReactNode;
@@ -63,16 +54,10 @@ export function PageHeader({ title, subtitle, actions, className }: PageHeaderPr
   );
 }
 
-/* ============================================================
- * SectionTitle — small label preceding a Card / group
- * ============================================================ */
 export function SectionTitle({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return <div className={[s.sectionTitle, className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }
 
-/* ============================================================
- * KPI — single big-number stat tile
- * ============================================================ */
 export interface KpiProps {
   label: ReactNode;
   value: ReactNode;
@@ -103,16 +88,10 @@ export function KpiGrid({ children, className, ...rest }: HTMLAttributes<HTMLDiv
   return <div className={[s.kpiGrid, className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }
 
-/* ============================================================
- * Spinner — small inline loading indicator
- * ============================================================ */
 export function Spinner({ size = 16, className }: { size?: number; className?: string }) {
   return <span className={[s.spinner, className].filter(Boolean).join(' ')} style={{ width: size, height: size }} aria-label="Loading" />;
 }
 
-/* ============================================================
- * Toast — flash messages via useToast()
- * ============================================================ */
 export type ToastTone = 'default' | 'success' | 'error' | 'warning';
 interface ToastItem { id: number; tone: ToastTone; text: string; }
 
@@ -158,8 +137,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) {
-    // Defensive fallback so a page that calls useToast outside the provider
-    // tree (e.g. an error page) doesn't crash — it just no-ops.
+
     return { show: () => {} } as ToastContextValue;
   }
   return ctx;

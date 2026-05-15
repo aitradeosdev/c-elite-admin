@@ -50,10 +50,8 @@
 .dense .td { padding: 8px var(--space-4); }
 .relaxed .td { padding: var(--space-4); }
 
-/* numeric cells often use mono */
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-/* primary cell — usually first column with subject identifier */
 .primary {
   font-weight: var(--weight-semibold);
   color: var(--fg-primary);

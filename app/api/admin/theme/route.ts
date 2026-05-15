@@ -2,14 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
 
-// PATCH /api/admin/theme — persist the calling admin's UI theme preference.
-//
-// Auth: any authenticated admin can change their OWN preference (no
-// super-admin gate). Body: { theme: 'light' | 'dark' | 'system' }. The
-// route also refreshes the admin_theme cookie so the next SSR render
-// uses the new value immediately, eliminating a flash if the admin
-// refreshes right after toggling.
-
 const VALID = new Set(['light', 'dark', 'system']);
 
 export async function PATCH(req: NextRequest) {
@@ -17,7 +9,7 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   let body: { theme?: string } = {};
-  try { body = await req.json(); } catch { /* empty body */ }
+  try { body = await req.json(); } catch {  }
   const theme = String(body.theme || '');
   if (!VALID.has(theme)) {
     return NextResponse.json({ error: 'theme must be light | dark | system' }, { status: 400 });

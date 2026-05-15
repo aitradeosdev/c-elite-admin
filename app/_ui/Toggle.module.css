@@ -41,7 +41,6 @@
   font-weight: var(--weight-medium);
 }
 
-/* keyboard focus on the underlying input */
 .input {
   position: absolute;
   opacity: 0;

@@ -33,17 +33,14 @@
   transform: translateY(0.5px);
 }
 
-/* sizes */
 .sm { height: 28px; padding: 0 var(--space-3); font-size: var(--text-sm); }
 .md { height: 34px; padding: 0 var(--space-4); }
 .lg { height: 40px; padding: 0 var(--space-5); font-size: var(--text-md); }
 
-/* icon-only variants — square */
 .iconSm { width: 28px; padding: 0; }
 .iconMd { width: 34px; padding: 0; }
 .iconLg { width: 40px; padding: 0; }
 
-/* variants */
 .primary {
   background: var(--accent-base);
   color: var(--accent-fg);
@@ -105,7 +102,6 @@
   filter: brightness(0.92);
 }
 
-/* loading spinner inside button */
 .spinner {
   width: 14px;
   height: 14px;
