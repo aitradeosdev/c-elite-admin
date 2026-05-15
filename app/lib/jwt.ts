@@ -44,16 +44,6 @@ export async function verifyAdminJWT(token: string): Promise<AdminJWTPayload | n
   }
 }
 
-/**
- * Resolve the calling admin from either:
- *   1. Authorization: Bearer <jwt>   (mobile)
- *   2. admin_token cookie            (web)
- * Bearer wins if both are present. Returns null if neither validates.
- *
- * Reads request context via Next.js's `headers()` + `cookies()` — call from
- * route handlers, no argument needed. Use this from every route both web AND
- * mobile call. Web-only routes can keep the cookie-only `verifyAdminJWT`.
- */
 export async function verifyAdminFromRequest(): Promise<AdminJWTPayload | null> {
   const h = await headers();
   const auth = h.get('authorization');

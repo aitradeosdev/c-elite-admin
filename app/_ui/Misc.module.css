@@ -1,4 +1,4 @@
-/* Skeleton — pulsing loading placeholder */
+
 .skeleton {
   display: block;
   background: linear-gradient(
@@ -16,7 +16,6 @@
   100% { background-position: -200% 0; }
 }
 
-/* EmptyState — centered message + optional CTA when a list/table has 0 rows */
 .empty {
   display: flex;
   flex-direction: column;
@@ -55,7 +54,6 @@
   margin-top: var(--space-2);
 }
 
-/* PageHeader — title row at the top of each page */
 .pageHeader {
   display: flex;
   align-items: flex-start;
@@ -78,7 +76,6 @@
 }
 .pageHeaderActions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
 
-/* SectionTitle — small label above a Card or group */
 .sectionTitle {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
@@ -88,7 +85,6 @@
   margin: var(--space-6) 0 var(--space-3);
 }
 
-/* KPI tile — large stat block, often in a 4-column grid */
 .kpiGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -103,8 +99,7 @@
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  /* container-type makes this tile the reference for cqi-based font sizing
-   * in .kpiValue so the amount scales to the TILE width, not the viewport. */
+  
   container-type: inline-size;
 }
 .kpiLabel {
@@ -117,13 +112,7 @@
   min-width: 0;
 }
 .kpiValue {
-  /* Sized to fit the LONGEST realistic amount (17 chars like
-   * ₦1,904,590,187.94) on a single line at the typical 6-per-row tile
-   * width (~190px content). 7cqi at 190px = 13.3px font; Inter Bold
-   * tabular at 13.3px is ~8px per digit; 17 × 8 = 136px which fits in
-   * the ~150px content area. On wider tiles it scales up to text-2xl
-   * so short values still feel substantial. ellipsis is a last-resort
-   * safety net for trillion+ figures we don't actually expect. */
+  
   font-size: clamp(var(--text-base), 7cqi, var(--text-2xl));
   font-weight: var(--weight-bold);
   letter-spacing: -0.02em;
@@ -149,7 +138,6 @@
   color: var(--fg-tertiary);
 }
 
-/* Spinner — inline loading indicator */
 .spinner {
   width: 16px;
   height: 16px;
@@ -161,7 +149,6 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Toast */
 .toastWrap {
   position: fixed;
   bottom: var(--space-6);

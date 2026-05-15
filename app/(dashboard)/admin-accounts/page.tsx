@@ -20,6 +20,7 @@ const ASSIGNABLE_PAGES = [
   { key: 'notification_templates', label: 'Notification Templates' },
   { key: 'email_templates', label: 'Email Templates' },
   { key: 'platform_balance', label: 'Platform Balance' },
+  { key: 'activity', label: 'Activity (Audit Log)' },
 ];
 
 interface AdminUser {

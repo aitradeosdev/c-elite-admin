@@ -43,7 +43,6 @@
 }
 .tab.active .count { background: var(--accent-soft); color: var(--accent-base); }
 
-/* underline variant — for in-page section navigation */
 .underline {
   display: inline-flex;
   align-items: center;

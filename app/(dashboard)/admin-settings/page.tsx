@@ -99,8 +99,6 @@ export default function AdminSettingsPage() {
     app_update_message: updMsg,
   });
 
-  // Client-side defense matching the server-side URL_RE in route.ts. Server
-  // is authoritative; this just gives faster feedback before a round-trip.
   const isValidUrl = (u: string) => u.length === 0 || /^https?:\/\/[^\s<>"']{3,}$/i.test(u.trim());
   const saveTerms = () => {
     if (!isValidUrl(termsUrl)) { showToast('Terms URL must start with https://'); return; }

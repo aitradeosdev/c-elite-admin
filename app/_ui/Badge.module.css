@@ -23,7 +23,6 @@
 .md { padding: 4px var(--space-3); font-size: var(--text-sm); }
 .lg { padding: 6px var(--space-4); font-size: var(--text-md); }
 
-/* tones — all use semantic tokens, so dark mode is automatic */
 .neutral { background: var(--tone-neutral-bg); color: var(--tone-neutral-fg); border-color: var(--tone-neutral-border); }
 .success { background: var(--tone-success-bg); color: var(--tone-success-fg); border-color: var(--tone-success-border); }
 .warning { background: var(--tone-warning-bg); color: var(--tone-warning-fg); border-color: var(--tone-warning-border); }

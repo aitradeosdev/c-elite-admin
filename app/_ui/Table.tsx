@@ -5,15 +5,10 @@ export type TableDensity = 'default' | 'dense' | 'relaxed';
 
 export interface TableProps extends TableHTMLAttributes<HTMLTableElement> {
   density?: TableDensity;
-  /** Render without the surrounding card border. Use when the table sits
-   *  inside a <Card><CardBody flush>. */
+  
   flush?: boolean;
 }
 
-/**
- * Standard data table. Sticky header, hover rows, hairline dividers, dark
- * mode automatic. Compose with <THead>/<TBody>/<Tr>/<Th>/<Td>.
- */
 export function Table({ density = 'default', flush, className, children, ...rest }: TableProps) {
   const densityClass = density === 'dense' ? s.dense : density === 'relaxed' ? s.relaxed : '';
   return (
@@ -44,9 +39,9 @@ export function Th({ align, className, ...rest }: ThProps) {
 
 export interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
   align?: Align;
-  /** Style emphasis. `primary` = subject identifier in first column. */
+  
   emphasis?: 'primary' | 'secondary' | 'muted';
-  /** Render the cell value in tabular-monospace digits. Use for amounts/IDs. */
+  
   mono?: boolean;
 }
 export function Td({ align, emphasis, mono, className, ...rest }: TdProps) {
@@ -76,7 +71,7 @@ export interface TableEmptyProps {
   colSpan: number;
   children?: ReactNode;
 }
-/** Single-row empty state matching the column count. */
+
 export function TableEmpty({ colSpan, children }: TableEmptyProps) {
   return (
     <tr>

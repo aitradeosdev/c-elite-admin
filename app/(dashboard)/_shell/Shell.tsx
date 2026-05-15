@@ -12,9 +12,7 @@ import s from './Shell.module.css';
 const COLLAPSE_KEY = 'cardelite-admin-sidebar-collapsed';
 
 interface ShellProps {
-  /** Permission keys (plain strings) — function components like icons can't
-   *  cross the server/client boundary, so the server passes the keys and the
-   *  Shell resolves them against the in-module NAV_GROUPS itself. */
+  
   allowedKeys: string[];
   isSuperAdmin: boolean;
   username: string;
@@ -22,11 +20,6 @@ interface ShellProps {
   children: ReactNode;
 }
 
-/**
- * The whole dashboard chrome: collapsible sidebar (grouped nav, brand mark,
- * user pill), sticky top bar (breadcrumb + theme switch), scrollable content
- * area. Wraps everything in <ToastProvider> so pages can call useToast().
- */
 export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -36,24 +29,23 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
     [allowedKeys, isSuperAdmin],
   );
 
-  // Hydrate sidebar collapse state from localStorage on mount.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(COLLAPSE_KEY);
       if (saved === '1') setCollapsed(true);
-    } catch { /* ignore */ }
+    } catch {  }
   }, []);
 
   const toggleCollapse = () => {
     setCollapsed((c) => {
       const next = !c;
-      try { localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+      try { localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0'); } catch {  }
       return next;
     });
   };
 
   const handleLogout = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {  }
     router.push('/login');
   };
 
@@ -90,7 +82,7 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   const active = pathname === item.href || pathname.startsWith(item.href + '/');
-                  // De-dupe by href since groups can list the same key twice (e.g. Bonuses + Levels).
+                  
                   return (
                     <Link
                       key={`${item.href}-${item.label}`}

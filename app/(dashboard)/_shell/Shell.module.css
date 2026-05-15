@@ -1,4 +1,4 @@
-/* Layout shell — the surface that wraps every dashboard page. */
+
 
 .shell {
   display: flex;
@@ -7,7 +7,6 @@
   color: var(--fg-primary);
 }
 
-/* sidebar — fixed left column with collapse animation */
 .sidebar {
   width: 240px;
   flex: none;
@@ -31,10 +30,7 @@
   border-bottom: 1px solid var(--border-subtle);
   min-height: 56px;
 }
-/* When collapsed there's only 32px of horizontal space inside the head —
- * the brand mark + button can't both fit, so we hide the brand and centre
- * just the expand button. The brand still appears at full width as soon
- * as the user expands the sidebar again. */
+
 .collapsed .sidebarHead {
   padding: var(--space-4) var(--space-2);
   justify-content: center;
@@ -157,7 +153,6 @@
 .collapsed .navItem { justify-content: center; padding: 8px; }
 .collapsed .navItem .navLabel { opacity: 0; width: 0; }
 
-/* tooltip when collapsed — pure CSS, shows on hover */
 .collapsed .navItem[data-tooltip]:hover::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -237,7 +232,6 @@
 .logoutBtn:hover { background: var(--tone-danger-bg); color: var(--tone-danger-fg); }
 .collapsed .logoutBtn { display: none; }
 
-/* main content area */
 .main {
   flex: 1;
   display: flex;
@@ -289,7 +283,6 @@
   overflow-x: hidden;
 }
 
-/* theme switcher */
 .themeSwitch {
   display: inline-flex;
   align-items: center;

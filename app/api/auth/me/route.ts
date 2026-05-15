@@ -6,7 +6,6 @@ export async function GET() {
   const admin = await verifyAdminFromRequest();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // Refresh from DB so permission changes propagate without re-login.
   const { data: row } = await supabaseAdmin
     .from('admin_users')
     .select('id, username, email, role_title, is_super_admin, is_active, page_permissions')

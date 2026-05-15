@@ -13,25 +13,16 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
-  /** Show a spinner and disable interactions while async work runs. */
+  
   loading?: boolean;
-  /** Leading icon node (typically a lucide-react icon). */
+  
   leftIcon?: ReactNode;
-  /** Trailing icon node. */
+  
   rightIcon?: ReactNode;
-  /** If true, render only a square button suitable for a single icon. */
+  
   iconOnly?: boolean;
 }
 
-/**
- * Standard button used everywhere in the admin. Variants:
- *   primary     — single CTA on the screen (uses accent)
- *   secondary   — neutral surface, default for most actions
- *   ghost       — borderless, for toolbar / inline actions
- *   danger      — destructive confirm (filled red)
- *   dangerSubtle— destructive trigger (tinted red, escalates to filled on hover)
- *   success     — confirm with positive intent (rarely needed)
- */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'secondary', size = 'md', loading, leftIcon, rightIcon, iconOnly, className, children, disabled, ...rest },
   ref,

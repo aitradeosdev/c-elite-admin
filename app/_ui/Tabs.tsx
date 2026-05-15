@@ -9,12 +9,6 @@ export interface TabsProps<T extends string> {
   className?: string;
 }
 
-/**
- * Two visual modes:
- *   segmented — pill-style toggle group (default). Use for compact filters.
- *   underline — full-width row with underlined active tab. Use for primary
- *               in-page section navigation.
- */
 export function Tabs<T extends string>({ value, onChange, items, variant = 'segmented', className }: TabsProps<T>) {
   const cls = [variant === 'underline' ? s.underline : s.tabs, className].filter(Boolean).join(' ');
   return (

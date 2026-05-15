@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   });
 
   const isMobile = req.headers.get('x-client') === 'mobile-admin';
-  // Mobile gets a 30-day token (lives in SecureStore); web gets 8h cookie.
+  
   const token = await signAdminJWT({
     admin_id: admin.id,
     role_title: admin.role_title,
@@ -76,15 +76,11 @@ export async function POST(req: NextRequest) {
     username: admin.username,
   }, isMobile ? '30d' : '8h');
 
-  // Normalised theme preference — DB default is 'system' but tolerate
-  // anything unexpected by falling back to 'system'.
   const themePref: 'light' | 'dark' | 'system' =
     admin.theme_preference === 'light' || admin.theme_preference === 'dark' ? admin.theme_preference : 'system';
 
   if (isMobile) {
-    // No cookie for mobile — token + preferences returned in body for
-    // SecureStore. theme_preference lets the mobile admin app honour the
-    // same per-user theme that the web admin uses.
+
     return NextResponse.json({
       success: true,
       token,
@@ -108,11 +104,7 @@ export async function POST(req: NextRequest) {
     maxAge: 60 * 60 * 8,
     path: '/',
   });
-  // Theme cookie is intentionally NOT httpOnly so the client-side
-  // ThemeProvider can read/write it; server reads it during SSR to
-  // render <html data-theme=...> on the very first frame (no flash,
-  // no inline script needed). Long max-age so it survives any token
-  // expiry — theme isn't sensitive and should persist across re-logins.
+
   response.cookies.set('admin_theme', themePref, {
     httpOnly: false,
     secure: process.env.NODE_ENV === 'production',

@@ -11,13 +11,12 @@ export interface ModalProps {
   onClose: () => void;
   title?: ReactNode;
   subtitle?: ReactNode;
-  /** Hide the X close button in the header. */
+  
   hideClose?: boolean;
   size?: ModalSize;
-  /** Footer node — usually a row of <Button>s. */
+  
   footer?: ReactNode;
-  /** Disable scrim-click and Escape-key closing. Use for non-dismissable
-   *  flows like in-progress async work. */
+  
   static?: boolean;
   children: ReactNode;
 }

@@ -1,11 +1,6 @@
 @import "tailwindcss";
 @import "./_ui/tokens.css";
 
-/*
- * Surface CardElite design tokens to Tailwind v4 utilities. Use the named
- * utilities (bg-app, fg-primary, etc.) sparingly — the component library is
- * the canonical layer. Tailwind is a fallback for ad-hoc page styling.
- */
 @theme inline {
   --color-bg-app: var(--bg-app);
   --color-bg-surface: var(--bg-surface);

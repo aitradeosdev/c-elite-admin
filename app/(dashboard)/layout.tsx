@@ -11,10 +11,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const admin = await verifyAdminJWT(token);
   if (!admin) redirect('/login');
 
-  // IMPORTANT: only pass serialisable values across the server/client boundary.
-  // Nav icons are function components (not serialisable) so the Shell client
-  // must do its own filtering against the in-module nav config — server just
-  // hands it the permission keys.
   return (
     <Shell
       allowedKeys={admin.page_permissions}

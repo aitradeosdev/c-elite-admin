@@ -3,9 +3,7 @@
   inset: 0;
   background: rgba(15, 15, 18, 0.50);
   backdrop-filter: blur(2px);
-  /* z-modal (1000), explicitly higher than --z-overlay (500) used by
-   * SidePanel — so an approve/reject Modal opened from inside an open
-   * detail panel always sits on top instead of being blocked by it. */
+  
   z-index: var(--z-modal);
   display: flex;
   align-items: center;
@@ -17,7 +15,6 @@
   from { opacity: 0; }
 }
 
-/* Modal */
 .modal {
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
@@ -88,7 +85,6 @@
   background: var(--bg-subtle);
 }
 
-/* Side-panel (right-edge drawer) — for detail views */
 .panelScrim {
   position: fixed;
   inset: 0;

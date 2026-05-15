@@ -93,7 +93,6 @@ export default function UserDetailPage() {
         <a href="/users" style={s.backLink}>&larr; Back to Users</a>
       </div>
 
-
       <div style={s.profileCard}>
         <div style={s.avatarRow}>
           <div style={s.avatar}>{(user.full_name || '?').charAt(0).toUpperCase()}</div>

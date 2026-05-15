@@ -1,18 +1,5 @@
 'use client';
 
-// Theme system for the admin dashboard.
-//
-// Per-user, server-persisted theme:
-//   - Stored on admin_users.theme_preference (DB)
-//   - Mirrored to the `admin_theme` cookie so the server can set
-//     <html data-theme="..."> during SSR (root layout reads the cookie)
-//   - Cross-device: log in on a new browser/phone, the login API reads
-//     the DB value and seeds the cookie before the first dashboard render
-//
-// Modes: 'light' | 'dark' | 'system'. 'system' is never the value of
-// data-theme on <html> — it resolves to light/dark via matchMedia. Only
-// the resolved value ever reaches the DOM.
-
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -22,8 +9,8 @@ const COOKIE_NAME = 'admin_theme';
 const COOKIE_MAX_AGE_DAYS = 365;
 
 interface ThemeContextValue {
-  mode: ThemeMode;          // what the user picked
-  resolved: ResolvedTheme;  // what is actually applied right now
+  mode: ThemeMode;          
+  resolved: ResolvedTheme;  
   setMode: (mode: ThemeMode) => void;
 }
 
@@ -58,12 +45,6 @@ function applyTheme(resolved: ResolvedTheme) {
   document.documentElement.setAttribute('data-theme', resolved);
 }
 
-/**
- * Best-effort POST to the server. Theme persistence is server-of-truth,
- * but the cookie + DOM apply synchronously so a slow network never blocks
- * the UI. Failures are silently swallowed — the cookie still wins for the
- * current session, and the next page load will re-sync from the DB.
- */
 async function persistThemeToServer(mode: ThemeMode): Promise<void> {
   try {
     await fetch('/api/admin/theme', {
@@ -72,24 +53,20 @@ async function persistThemeToServer(mode: ThemeMode): Promise<void> {
       body: JSON.stringify({ theme: mode }),
       credentials: 'same-origin',
     });
-  } catch { /* swallow — cookie + UI are already updated */ }
+  } catch {  }
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Initial state defaults to 'system' — overwritten on mount with the actual
-  // cookie value. The DOM already has the right data-theme from SSR (root
-  // layout read the cookie), so this state lag is invisible to the user.
+
   const [mode, setModeState] = useState<ThemeMode>('system');
   const [resolved, setResolved] = useState<ResolvedTheme>('light');
 
-  // Hydrate from the cookie on mount.
   useEffect(() => {
     const initial = readCookieTheme();
     setModeState(initial);
     setResolved(resolveTheme(initial));
   }, []);
 
-  // When mode is 'system', track OS preference changes live.
   useEffect(() => {
     if (mode !== 'system' || typeof window === 'undefined') return;
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
@@ -108,7 +85,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setModeState(next);
     const r = resolveTheme(next);
     setResolved(r);
-    // Brief CSS-driven transition flash so the swap feels intentional.
+    
     if (typeof document !== 'undefined') {
       document.documentElement.classList.add('theme-transitioning');
       window.setTimeout(() => {
@@ -116,7 +93,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }, 250);
     }
     applyTheme(r);
-    // Fire-and-forget DB persistence so cross-device sync works.
+    
     persistThemeToServer(next);
   }, []);
 
