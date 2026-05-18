@@ -3,6 +3,7 @@ import Link from 'next/link';
 import {
   ClipboardList, Wallet, Users as UsersIcon, ArrowDownToLine,
   TrendingUp, TicketPercent, Gift, Share2,
+  ArrowLeftRight, Receipt, Activity, CreditCard, ShieldCheck, UserPlus,
 } from 'lucide-react';
 import { supabaseAdmin } from '../../lib/supabase';
 import { verifyAdminFromRequest } from '../../lib/jwt';
@@ -12,44 +13,70 @@ import {
   Table, THead, TBody, Tr, Th, Td, TableEmpty, Button,
 } from '../../_ui';
 
-async function getDashboardStats() {
+type Stats = Record<string, number>;
+
+// Permission-driven: only the metrics the admin can actually see are
+// queried (least-privilege + fewer DB round-trips). Every page that has
+// real numbers contributes a stat keyed to its nav permission.
+async function getDashboardStats(can: (k: string) => boolean): Promise<Stats> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayISO = today.toISOString();
+  const onlineISO = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-  const [
-    { count: pendingCards },
-    { data: todayPayouts },
-    { count: totalUsers },
-    { count: pendingWithdrawals },
-    { count: cardsToday },
-    { count: activeCoupons },
-    { data: bonusPool },
-    { count: referralsToday },
-  ] = await Promise.all([
-    supabaseAdmin.from('card_submissions').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-    supabaseAdmin.from('withdrawals').select('amount').eq('status', 'success').gte('created_at', todayISO),
-    supabaseAdmin.from('users').select('id', { count: 'exact', head: true }),
-    supabaseAdmin.from('withdrawals').select('id', { count: 'exact', head: true }).eq('status', 'initiated'),
-    supabaseAdmin.from('card_submissions').select('id', { count: 'exact', head: true }).gte('created_at', todayISO),
-    supabaseAdmin.from('coupons').select('id', { count: 'exact', head: true }).eq('is_active', true),
-    supabaseAdmin.from('wallets').select('balance'),
-    supabaseAdmin.from('referrals').select('id', { count: 'exact', head: true }).gte('created_at', todayISO),
-  ]);
+  const s: Stats = {};
+  const jobs: Promise<unknown>[] = [];
+  const count = (key: string, q: any) =>
+    jobs.push(q.then((r: any) => { s[key] = r?.count || 0; }).catch(() => {}));
+  const sum = (key: string, q: any, col: string) =>
+    jobs.push(q.then((r: any) => {
+      s[key] = (r?.data || []).reduce((a: number, x: any) => a + Number(x[col] || 0), 0);
+    }).catch(() => {}));
 
-  const todayPayoutsTotal = (todayPayouts || []).reduce((sum: number, w: any) => sum + Number(w.amount), 0);
-  const bonusPoolTotal = (bonusPool || []).reduce((sum: number, w: any) => sum + Number(w.balance), 0);
+  if (can('card_queue')) {
+    count('pendingCards', supabaseAdmin.from('card_submissions').select('id', { count: 'exact', head: true }).eq('status', 'pending'));
+    count('cardsToday', supabaseAdmin.from('card_submissions').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
+  }
+  if (can('withdrawals')) {
+    sum('todayPayouts', supabaseAdmin.from('withdrawals').select('amount').eq('status', 'success').gte('created_at', todayISO), 'amount');
+    count('pendingWithdrawals', supabaseAdmin.from('withdrawals').select('id', { count: 'exact', head: true }).eq('status', 'initiated'));
+  }
+  if (can('transfers')) {
+    count('transfersToday', supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
+    sum('transferVolumeToday', supabaseAdmin.from('transfers').select('amount').eq('status', 'success').gte('created_at', todayISO), 'amount');
+  }
+  if (can('transactions_overview')) {
+    count('txToday', supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
+    sum('txVolumeToday', supabaseAdmin.from('transactions').select('amount').eq('status', 'success').gte('created_at', todayISO), 'amount');
+  }
+  if (can('users')) {
+    count('totalUsers', supabaseAdmin.from('users').select('id', { count: 'exact', head: true }));
+    count('newUsersToday', supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
+  }
+  if (can('user_activity_monitor')) {
+    count('onlineUsers', supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('last_active_at', onlineISO));
+  }
+  if (can('coupons')) {
+    count('activeCoupons', supabaseAdmin.from('coupons').select('id', { count: 'exact', head: true }).eq('is_active', true));
+  }
+  if (can('bonuses_rewards')) {
+    count('giftboxToday', supabaseAdmin.from('giftbox_claims').select('id', { count: 'exact', head: true }).gte('claimed_at', todayISO));
+  }
+  if (can('referral_management')) {
+    count('referralsToday', supabaseAdmin.from('referrals').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
+  }
+  if (can('platform_balance')) {
+    sum('walletTotal', supabaseAdmin.from('wallets').select('balance'), 'balance');
+  }
+  if (can('card_management')) {
+    count('activeCards', supabaseAdmin.from('cards').select('id', { count: 'exact', head: true }).eq('is_active', true));
+  }
+  if (can('admin_accounts')) {
+    count('totalAdmins', supabaseAdmin.from('admin_users').select('id', { count: 'exact', head: true }));
+  }
 
-  return {
-    pendingCards: pendingCards || 0,
-    todayPayouts: todayPayoutsTotal,
-    totalUsers: totalUsers || 0,
-    pendingWithdrawals: pendingWithdrawals || 0,
-    cardsToday: cardsToday || 0,
-    activeCoupons: activeCoupons || 0,
-    bonusPool: bonusPoolTotal,
-    referralsToday: referralsToday || 0,
-  };
+  await Promise.all(jobs);
+  return s;
 }
 
 async function getRecentSubmissions() {
@@ -117,40 +144,84 @@ export default async function DashboardPage() {
   const can = (key: string): boolean =>
     !!admin && (admin.is_super_admin || (admin.page_permissions || []).includes(key));
 
-  const [stats, submissions] = await Promise.all([getDashboardStats(), getRecentSubmissions()]);
+  const showSubmissions = can('card_queue');
+  const [stats, submissions] = await Promise.all([
+    getDashboardStats(can),
+    showSubmissions ? getRecentSubmissions() : Promise.resolve([] as any[]),
+  ]);
 
+  const n = (k: string) => stats[k] || 0;
+
+  // One widget per page-permission area that has real numbers. Filtered
+  // by the admin's permissions; super admins (all perms) see everything.
   const kpis: { perm: string; node: ReactNode }[] = [
     { perm: 'card_queue', node: (
       <Kpi key="pc" label="Pending cards" icon={<ClipboardList size={14} />}
-        value={formatCount(stats.pendingCards)} hint="Awaiting admin review" />
-    ) },
-    { perm: 'withdrawals', node: (
-      <Kpi key="tp" label="Today's payouts" icon={<Wallet size={14} />}
-        value={formatNaira(stats.todayPayouts)} hint="Withdrawals settled today" />
-    ) },
-    { perm: 'users', node: (
-      <Kpi key="tu" label="Total users" icon={<UsersIcon size={14} />}
-        value={formatCount(stats.totalUsers)} hint="All-time registrations" />
-    ) },
-    { perm: 'withdrawals', node: (
-      <Kpi key="pw" label="Pending withdrawals" icon={<ArrowDownToLine size={14} />}
-        value={formatCount(stats.pendingWithdrawals)} hint="In the approval queue" />
+        value={formatCount(n('pendingCards'))} hint="Awaiting admin review" />
     ) },
     { perm: 'card_queue', node: (
       <Kpi key="ct" label="Cards today" icon={<TrendingUp size={14} />}
-        value={formatCount(stats.cardsToday)} hint="Submissions in the last 24h" />
+        value={formatCount(n('cardsToday'))} hint="Submissions in the last 24h" />
+    ) },
+    { perm: 'withdrawals', node: (
+      <Kpi key="tp" label="Today's payouts" icon={<Wallet size={14} />}
+        value={formatNaira(n('todayPayouts'))} hint="Withdrawals settled today" />
+    ) },
+    { perm: 'withdrawals', node: (
+      <Kpi key="pw" label="Pending withdrawals" icon={<ArrowDownToLine size={14} />}
+        value={formatCount(n('pendingWithdrawals'))} hint="In the approval queue" />
+    ) },
+    { perm: 'transfers', node: (
+      <Kpi key="tft" label="Transfers today" icon={<ArrowLeftRight size={14} />}
+        value={formatCount(n('transfersToday'))} hint="Tag + bank, last 24h" />
+    ) },
+    { perm: 'transfers', node: (
+      <Kpi key="tfv" label="Transfer volume" icon={<ArrowLeftRight size={14} />}
+        value={formatNaira(n('transferVolumeToday'))} hint="Settled transfers today" />
+    ) },
+    { perm: 'transactions_overview', node: (
+      <Kpi key="txt" label="Transactions today" icon={<Receipt size={14} />}
+        value={formatCount(n('txToday'))} hint="All transaction types" />
+    ) },
+    { perm: 'transactions_overview', node: (
+      <Kpi key="txv" label="Transaction volume" icon={<Receipt size={14} />}
+        value={formatNaira(n('txVolumeToday'))} hint="Successful, today" />
+    ) },
+    { perm: 'users', node: (
+      <Kpi key="tu" label="Total users" icon={<UsersIcon size={14} />}
+        value={formatCount(n('totalUsers'))} hint="All-time registrations" />
+    ) },
+    { perm: 'users', node: (
+      <Kpi key="nu" label="New users today" icon={<UserPlus size={14} />}
+        value={formatCount(n('newUsersToday'))} hint="Signups in the last 24h" />
+    ) },
+    { perm: 'user_activity_monitor', node: (
+      <Kpi key="ou" label="Users online" icon={<Activity size={14} />}
+        value={formatCount(n('onlineUsers'))} hint="Active in the last 5 min" />
     ) },
     { perm: 'coupons', node: (
       <Kpi key="ac" label="Active coupons" icon={<TicketPercent size={14} />}
-        value={formatCount(stats.activeCoupons)} hint="Currently redeemable" />
+        value={formatCount(n('activeCoupons'))} hint="Currently redeemable" />
     ) },
-    { perm: 'platform_balance', node: (
-      <Kpi key="bp" label="Bonus pool" icon={<Gift size={14} />}
-        value={formatNaira(stats.bonusPool)} hint="Pending across all wallets" />
+    { perm: 'bonuses_rewards', node: (
+      <Kpi key="gb" label="Giftbox claims" icon={<Gift size={14} />}
+        value={formatCount(n('giftboxToday'))} hint="Claimed today" />
     ) },
     { perm: 'referral_management', node: (
       <Kpi key="rt" label="Referrals today" icon={<Share2 size={14} />}
-        value={formatCount(stats.referralsToday)} hint="New referral signups" />
+        value={formatCount(n('referralsToday'))} hint="New referral signups" />
+    ) },
+    { perm: 'platform_balance', node: (
+      <Kpi key="wt" label="Total wallet balance" icon={<Wallet size={14} />}
+        value={formatNaira(n('walletTotal'))} hint="Sum across all user wallets" />
+    ) },
+    { perm: 'card_management', node: (
+      <Kpi key="acd" label="Active cards" icon={<CreditCard size={14} />}
+        value={formatCount(n('activeCards'))} hint="Live in the catalog" />
+    ) },
+    { perm: 'admin_accounts', node: (
+      <Kpi key="ad" label="Admin accounts" icon={<ShieldCheck size={14} />}
+        value={formatCount(n('totalAdmins'))} hint="Total admin users" />
     ) },
   ];
   const visibleKpis = kpis.filter((k) => can(k.perm));
@@ -168,12 +239,12 @@ export default async function DashboardPage() {
         <KpiGrid>{visibleKpis.map((k) => k.node)}</KpiGrid>
       ) : null}
 
-      {!can('card_queue') && visibleKpis.length === 0 ? (
+      {visibleKpis.length === 0 ? (
         <Card>
           <CardBody>
-            <p style={{ color: 'var(--muted, #6B6F76)', fontSize: 14 }}>
-              No dashboard widgets are available for your permissions. Use the side
-              navigation to access the pages you manage.
+            <p style={{ color: 'var(--fg-secondary)', fontSize: 14 }}>
+              No dashboard metrics for your permissions. Use the side navigation
+              to access the pages you manage.
             </p>
           </CardBody>
         </Card>
