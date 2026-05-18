@@ -1,9 +1,11 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   ClipboardList, Wallet, Users as UsersIcon, ArrowDownToLine,
   TrendingUp, TicketPercent, Gift, Share2,
 } from 'lucide-react';
 import { supabaseAdmin } from '../../lib/supabase';
+import { verifyAdminFromRequest } from '../../lib/jwt';
 import AutoRefresh from './AutoRefresh';
 import {
   PageHeader, Kpi, KpiGrid, SectionTitle, Card, CardHeader, CardBody, Badge,
@@ -108,7 +110,50 @@ function statusLabel(status: string) {
 }
 
 export default async function DashboardPage() {
+  const admin = await verifyAdminFromRequest();
+  // Each admin sees only the widgets for pages they're permitted. Super
+  // admins (all permissions) see everything. The KPI ↔ permission map
+  // mirrors the nav keys in (dashboard)/_shell/nav.ts.
+  const can = (key: string): boolean =>
+    !!admin && (admin.is_super_admin || (admin.page_permissions || []).includes(key));
+
   const [stats, submissions] = await Promise.all([getDashboardStats(), getRecentSubmissions()]);
+
+  const kpis: { perm: string; node: ReactNode }[] = [
+    { perm: 'card_queue', node: (
+      <Kpi key="pc" label="Pending cards" icon={<ClipboardList size={14} />}
+        value={formatCount(stats.pendingCards)} hint="Awaiting admin review" />
+    ) },
+    { perm: 'withdrawals', node: (
+      <Kpi key="tp" label="Today's payouts" icon={<Wallet size={14} />}
+        value={formatNaira(stats.todayPayouts)} hint="Withdrawals settled today" />
+    ) },
+    { perm: 'users', node: (
+      <Kpi key="tu" label="Total users" icon={<UsersIcon size={14} />}
+        value={formatCount(stats.totalUsers)} hint="All-time registrations" />
+    ) },
+    { perm: 'withdrawals', node: (
+      <Kpi key="pw" label="Pending withdrawals" icon={<ArrowDownToLine size={14} />}
+        value={formatCount(stats.pendingWithdrawals)} hint="In the approval queue" />
+    ) },
+    { perm: 'card_queue', node: (
+      <Kpi key="ct" label="Cards today" icon={<TrendingUp size={14} />}
+        value={formatCount(stats.cardsToday)} hint="Submissions in the last 24h" />
+    ) },
+    { perm: 'coupons', node: (
+      <Kpi key="ac" label="Active coupons" icon={<TicketPercent size={14} />}
+        value={formatCount(stats.activeCoupons)} hint="Currently redeemable" />
+    ) },
+    { perm: 'platform_balance', node: (
+      <Kpi key="bp" label="Bonus pool" icon={<Gift size={14} />}
+        value={formatNaira(stats.bonusPool)} hint="Pending across all wallets" />
+    ) },
+    { perm: 'referral_management', node: (
+      <Kpi key="rt" label="Referrals today" icon={<Share2 size={14} />}
+        value={formatCount(stats.referralsToday)} hint="New referral signups" />
+    ) },
+  ];
+  const visibleKpis = kpis.filter((k) => can(k.perm));
 
   return (
     <div>
@@ -119,57 +164,23 @@ export default async function DashboardPage() {
         subtitle="Today's activity across the CardElite platform."
       />
 
-      <KpiGrid>
-        <Kpi
-          label="Pending cards"
-          icon={<ClipboardList size={14} />}
-          value={formatCount(stats.pendingCards)}
-          hint="Awaiting admin review"
-        />
-        <Kpi
-          label="Today's payouts"
-          icon={<Wallet size={14} />}
-          value={formatNaira(stats.todayPayouts)}
-          hint="Withdrawals settled today"
-        />
-        <Kpi
-          label="Total users"
-          icon={<UsersIcon size={14} />}
-          value={formatCount(stats.totalUsers)}
-          hint="All-time registrations"
-        />
-        <Kpi
-          label="Pending withdrawals"
-          icon={<ArrowDownToLine size={14} />}
-          value={formatCount(stats.pendingWithdrawals)}
-          hint="In the approval queue"
-        />
-        <Kpi
-          label="Cards today"
-          icon={<TrendingUp size={14} />}
-          value={formatCount(stats.cardsToday)}
-          hint="Submissions in the last 24h"
-        />
-        <Kpi
-          label="Active coupons"
-          icon={<TicketPercent size={14} />}
-          value={formatCount(stats.activeCoupons)}
-          hint="Currently redeemable"
-        />
-        <Kpi
-          label="Bonus pool"
-          icon={<Gift size={14} />}
-          value={formatNaira(stats.bonusPool)}
-          hint="Pending across all wallets"
-        />
-        <Kpi
-          label="Referrals today"
-          icon={<Share2 size={14} />}
-          value={formatCount(stats.referralsToday)}
-          hint="New referral signups"
-        />
-      </KpiGrid>
+      {visibleKpis.length > 0 ? (
+        <KpiGrid>{visibleKpis.map((k) => k.node)}</KpiGrid>
+      ) : null}
 
+      {!can('card_queue') && visibleKpis.length === 0 ? (
+        <Card>
+          <CardBody>
+            <p style={{ color: 'var(--muted, #6B6F76)', fontSize: 14 }}>
+              No dashboard widgets are available for your permissions. Use the side
+              navigation to access the pages you manage.
+            </p>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {can('card_queue') ? (
+        <>
       <SectionTitle>Recent card submissions</SectionTitle>
       <Card>
         <CardHeader
@@ -220,6 +231,8 @@ export default async function DashboardPage() {
           </Table>
         </CardBody>
       </Card>
+        </>
+      ) : null}
     </div>
   );
 }
