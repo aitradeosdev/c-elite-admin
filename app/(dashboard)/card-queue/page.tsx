@@ -83,7 +83,7 @@ export default function CardQueuePage() {
     if (d.amount_foreign) lines.push(`Value: ${d.amount_foreign}`);
     if (d.submitted_fields) {
       Object.entries(d.submitted_fields).forEach(([k, v]) => {
-        if (v && typeof v === 'string') lines.push(`${k}: ${v}`);
+        if (v && typeof v === 'string') lines.push(`${d.field_labels?.[k] || k}: ${v}`);
       });
     }
     return lines.join('\n');
@@ -371,7 +371,7 @@ export default function CardQueuePage() {
               <div style={{ marginTop: 18 }}>
                 <SectionLabel>Submitted fields</SectionLabel>
                 {Object.entries(detail.submitted_fields).map(([k, v]: [string, any]) => (
-                  <DetailRow key={k} label={k} value={String(v)} />
+                  <DetailRow key={k} label={detail.field_labels?.[k] || k} value={String(v)} />
                 ))}
               </div>
             )}
