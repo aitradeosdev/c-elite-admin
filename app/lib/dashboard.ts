@@ -51,6 +51,7 @@ export async function getDashboardStats(can: (k: string) => boolean): Promise<Da
   }
   if (can('bonuses_rewards')) {
     count('giftboxToday', supabaseAdmin.from('giftbox_claims').select('id', { count: 'exact', head: true }).gte('claimed_at', todayISO));
+    sum('rewardPool', supabaseAdmin.from('transactions').select('amount').eq('status', 'success').in('type', ['signup_bonus', 'newbie_bonus', 'giftbox_bonus', 'referral_bonus', 'level_bonus', 'anniversary_bonus']).limit(100000), 'amount');
   }
   if (can('referral_management')) {
     count('referralsToday', supabaseAdmin.from('referrals').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));

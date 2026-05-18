@@ -3,7 +3,7 @@ import Link from 'next/link';
 import {
   ClipboardList, Wallet, Users as UsersIcon, ArrowDownToLine,
   TrendingUp, TicketPercent, Gift, Share2,
-  ArrowLeftRight, Receipt, Activity, CreditCard, ShieldCheck, UserPlus,
+  ArrowLeftRight, Receipt, Activity, CreditCard, ShieldCheck, UserPlus, Coins,
 } from 'lucide-react';
 import { verifyAdminFromRequest } from '../../lib/jwt';
 import { buildCan, getDashboardStats, getRecentSubmissions } from '../../lib/dashboard';
@@ -98,6 +98,10 @@ export default async function DashboardPage() {
     { perm: 'bonuses_rewards', node: (
       <Kpi key="gb" label="Giftbox claims" icon={<Gift size={14} />}
         value={formatCount(n('giftboxToday'))} hint="Claimed today" />
+    ) },
+    { perm: 'bonuses_rewards', node: (
+      <Kpi key="rp" label="Reward pool" icon={<Coins size={14} />}
+        value={formatNaira(n('rewardPool'))} hint="All rewards granted — redeemed + unredeemed" />
     ) },
     { perm: 'referral_management', node: (
       <Kpi key="rt" label="Referrals today" icon={<Share2 size={14} />}
