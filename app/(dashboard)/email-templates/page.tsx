@@ -39,12 +39,12 @@ export default function EmailTemplatesPage() {
 
   useEffect(() => { fetchTemplates(); }, []);
 
-  const fetchTemplates = async () => {
-    setLoading(true);
+  const fetchTemplates = async (silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch('/api/email-templates');
     const data = await res.json().catch(() => ({}));
     setTemplates(data.templates || []);
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
@@ -92,7 +92,7 @@ export default function EmailTemplatesPage() {
     if (!res.ok) { showToast(data.error || 'Save failed'); return; }
     showToast('Saved');
     closeEditor();
-    await fetchTemplates();
+    await fetchTemplates(true);
   };
 
   const insertVar = (target: 'subject' | 'html', v: string) => {

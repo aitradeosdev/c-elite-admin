@@ -63,12 +63,12 @@ export default function FieldBuilderPage() {
     setCards(data.cards || []);
   };
 
-  const fetchTypes = async (cardId: string, countryCode: string) => {
-    setLoading(true);
+  const fetchTypes = async (cardId: string, countryCode: string, silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch(`/api/field-builder?card_id=${cardId}&country_code=${countryCode}`);
     const data = await res.json();
     setCardTypes((data.types || []).map((t: CardType) => ({ ...t, expanded: false })));
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const selectCard = (card: CardBrand) => {
@@ -96,7 +96,7 @@ export default function FieldBuilderPage() {
     });
     setSavingType(false);
     setNewTypeName(''); setShowAddType(false);
-    fetchTypes(selectedCard.id, selectedCountry.country_code);
+    fetchTypes(selectedCard.id, selectedCountry.country_code, true);
   };
 
   const handleToggleType = async (cardType: CardType) => {
@@ -105,7 +105,7 @@ export default function FieldBuilderPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'card_type', id: cardType.id, is_active: !cardType.is_active }),
     });
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code);
+    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
   };
 
   const handleSaveEditType = async (typeId: string) => {
@@ -116,7 +116,7 @@ export default function FieldBuilderPage() {
       body: JSON.stringify({ type: 'card_type', id: typeId, name: editTypeName.trim() }),
     });
     setEditTypeId(null);
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code);
+    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
   };
 
   const handleDeleteType = async (typeId: string) => {
@@ -131,7 +131,7 @@ export default function FieldBuilderPage() {
       body: JSON.stringify({ type: 'card_type', id: deleteTypeId }),
     });
     setDeleteTypeId(null);
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code);
+    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
   };
 
   const openAddField = (typeId: string) => {
@@ -163,7 +163,7 @@ export default function FieldBuilderPage() {
     }
     setSavingField(false);
     setFieldFormTypeId(null);
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code);
+    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
   };
 
   const handleDeleteField = async (fieldId: string) => {
@@ -172,7 +172,7 @@ export default function FieldBuilderPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'field', id: fieldId }),
     });
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code);
+    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
   };
 
   const inputTypeBadge = (type: string) => {

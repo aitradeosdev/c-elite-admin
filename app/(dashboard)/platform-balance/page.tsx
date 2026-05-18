@@ -13,14 +13,14 @@ export default function PlatformBalancePage() {
 
   useEffect(() => { fetchConfig(); }, []);
 
-  const fetchConfig = async () => {
-    setLoading(true);
+  const fetchConfig = async (silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch('/api/platform-balance');
     const data = await res.json().catch(() => ({}));
     const cfg: Config = data.config || {};
     setConfig(cfg);
     setStaticInput(cfg.platform_balance_static || '');
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
@@ -35,7 +35,7 @@ export default function PlatformBalancePage() {
     setSaving(false);
     if (!res.ok) { showToast('Save failed'); return false; }
     showToast('Saved');
-    await fetchConfig();
+    await fetchConfig(true);
     return true;
   };
 

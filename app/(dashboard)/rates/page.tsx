@@ -59,12 +59,12 @@ export default function RatesPage() {
 
   useEffect(() => { fetchRates(); }, []);
 
-  const fetchRates = async () => {
-    setLoading(true);
+  const fetchRates = async (silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch('/api/rates');
     const data = await res.json();
     setCards(data.cards || []);
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const toggle = (set: Set<string>, id: string): Set<string> => {
@@ -105,7 +105,7 @@ export default function RatesPage() {
       setChanges({});
       setToast('All changes saved ✓');
       setTimeout(() => setToast(''), 3000);
-      fetchRates();
+      fetchRates(true);
     } else {
       setToast('Failed to save changes.');
       setTimeout(() => setToast(''), 3000);
@@ -130,7 +130,7 @@ export default function RatesPage() {
     setAddingDenom(false);
     setAddDenomTypeId(null);
     setRangeLabel(''); setMinValue(''); setMaxValue(''); setRateNaira(''); setDenomActive(true);
-    fetchRates();
+    fetchRates(true);
   };
 
   const hasChanges = Object.keys(changes).length > 0;

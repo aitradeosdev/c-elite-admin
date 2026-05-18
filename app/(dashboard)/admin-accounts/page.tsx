@@ -61,13 +61,13 @@ export default function AdminAccountsPage() {
     fetchAdmins();
   }, []);
 
-  const fetchAdmins = async () => {
-    setLoading(true);
+  const fetchAdmins = async (silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch('/api/admin-accounts');
     if (res.status === 403) { router.push('/dashboard'); return; }
     const data = await res.json();
     setAdmins(data.admins || []);
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const openCreate = () => {
@@ -122,7 +122,7 @@ export default function AdminAccountsPage() {
     setSaving(false);
     if (!res.ok) { setFormError(data.error || 'Failed to save.'); return; }
     closePanel();
-    fetchAdmins();
+    fetchAdmins(true);
   };
 
   const handleToggleActive = async (admin: AdminUser) => {
@@ -131,7 +131,7 @@ export default function AdminAccountsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: admin.id, is_active: !admin.is_active }),
     });
-    fetchAdmins();
+    fetchAdmins(true);
   };
 
   const handleDelete = async () => {
@@ -143,7 +143,7 @@ export default function AdminAccountsPage() {
     });
     setDeleteTarget(null);
     setDeleteInput('');
-    fetchAdmins();
+    fetchAdmins(true);
   };
 
   const formatPages = (pages: string[]) => {

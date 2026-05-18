@@ -277,12 +277,12 @@ export default function CardsPage() {
 
   useEffect(() => { fetchCards(); }, []);
 
-  const fetchCards = async () => {
-    setLoading(true);
+  const fetchCards = async (silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch('/api/cards');
     const data = await res.json();
     setCards(data.cards || []);
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const openCreate = () => {
@@ -323,7 +323,7 @@ export default function CardsPage() {
     setSaving(false);
     if (!res.ok) { setCardError(data.error || 'Failed to save.'); return; }
     setShowCardModal(false);
-    fetchCards();
+    fetchCards(true);
   };
 
   const handleToggleCard = async (card: Card) => {
@@ -332,7 +332,7 @@ export default function CardsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'card', id: card.id, is_active: !card.is_active }),
     });
-    fetchCards();
+    fetchCards(true);
   };
 
   const openCountries = (card: Card) => {
@@ -358,7 +358,7 @@ export default function CardsPage() {
     });
     setAddingCountry(false);
     setNewCountryCode(''); setNewCurrencySymbol(''); setNewCurrencyName('');
-    await fetchCards();
+    await fetchCards(true);
     setCountriesCard((prev) => {
       const updated = cards.find((c) => c.id === prev?.id);
       return updated || prev;
@@ -371,7 +371,7 @@ export default function CardsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'country', id: country.id, is_active: !country.is_active }),
     });
-    fetchCards();
+    fetchCards(true);
   };
 
   const handleRemoveCountry = async (country: Country) => {
@@ -380,7 +380,7 @@ export default function CardsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'country', id: country.id }),
     });
-    fetchCards();
+    fetchCards(true);
   };
 
   const formatCountries = (countries: Country[]) => {

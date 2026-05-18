@@ -37,14 +37,14 @@ export default function LimitsFeesPage() {
 
   useEffect(() => { fetchConfig(); }, []);
 
-  const fetchConfig = async () => {
-    setLoading(true);
+  const fetchConfig = async (silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch('/api/limits-fees');
     const data = await res.json().catch(() => ({}));
     const cfg: Config = data.config || {};
     setConfig(cfg);
     setDraft(cfg);
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
@@ -67,7 +67,7 @@ export default function LimitsFeesPage() {
     setSaving(false);
     if (!res.ok) { showToast(body.error || 'Save failed'); return; }
     showToast('Saved');
-    await fetchConfig();
+    await fetchConfig(true);
   };
 
   if (loading) return <div><h1 style={styles.h1}>Limits & Fees</h1><p style={styles.empty}>Loading…</p></div>;
