@@ -98,8 +98,6 @@ export async function GET(req: NextRequest) {
         denominations: denoms.filter((d: any) => d.card_type_id === t.id),
       }));
     }
-    // submitted_fields is keyed by card_type_fields.id (a UUID). Resolve
-    // those to human labels so the UI/share shows "E-code: …" not the UUID.
     let field_labels: Record<string, string> = {};
     const submittedCardTypeId = (data as any).card_type_id;
     if (submittedCardTypeId) {

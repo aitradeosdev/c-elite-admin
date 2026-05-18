@@ -25,9 +25,6 @@ export const metadata: Metadata = {
 
 async function resolveInitialTheme(): Promise<'light' | 'dark'> {
   const store = await cookies();
-  // The client persists the actual resolved light/dark value here so the
-  // server renders the correct theme even for 'system' mode (it can't
-  // read prefers-color-scheme). This is the no-flash source of truth.
   const resolved = store.get('admin_theme_resolved')?.value;
   if (resolved === 'dark' || resolved === 'light') return resolved;
   const raw = store.get('admin_theme')?.value;
@@ -35,8 +32,6 @@ async function resolveInitialTheme(): Promise<'light' | 'dark'> {
   return 'light';
 }
 
-// Belt-and-suspenders: corrects data-theme before first paint on the
-// very first visit (no resolved cookie yet) using the OS preference.
 const NO_FLASH = `(function(){try{
 var rc=(document.cookie.match(/(?:^|; )admin_theme_resolved=([^;]+)/)||[])[1];
 if(rc==='dark'||rc==='light'){document.documentElement.setAttribute('data-theme',rc);return;}

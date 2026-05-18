@@ -15,9 +15,6 @@ import {
 
 type Stats = Record<string, number>;
 
-// Permission-driven: only the metrics the admin can actually see are
-// queried (least-privilege + fewer DB round-trips). Every page that has
-// real numbers contributes a stat keyed to its nav permission.
 async function getDashboardStats(can: (k: string) => boolean): Promise<Stats> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -80,10 +77,6 @@ async function getDashboardStats(can: (k: string) => boolean): Promise<Stats> {
 }
 
 async function getRecentSubmissions() {
-  // card_submissions has NO FK to card_countries — embedding it made the
-  // whole query error (data = null → "No submissions yet"). Country comes
-  // from card_types.country_code, resolved to a name via card_countries
-  // keyed by (card_id, country_code), same as the card-queue route.
   const { data } = await supabaseAdmin
     .from('card_submissions')
     .select(`
@@ -138,9 +131,6 @@ function statusLabel(status: string) {
 
 export default async function DashboardPage() {
   const admin = await verifyAdminFromRequest();
-  // Each admin sees only the widgets for pages they're permitted. Super
-  // admins (all permissions) see everything. The KPI ↔ permission map
-  // mirrors the nav keys in (dashboard)/_shell/nav.ts.
   const can = (key: string): boolean =>
     !!admin && (admin.is_super_admin || (admin.page_permissions || []).includes(key));
 
@@ -152,8 +142,6 @@ export default async function DashboardPage() {
 
   const n = (k: string) => stats[k] || 0;
 
-  // One widget per page-permission area that has real numbers. Filtered
-  // by the admin's permissions; super admins (all perms) see everything.
   const kpis: { perm: string; node: ReactNode }[] = [
     { perm: 'card_queue', node: (
       <Kpi key="pc" label="Pending cards" icon={<ClipboardList size={14} />}

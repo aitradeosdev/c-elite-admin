@@ -33,10 +33,6 @@ function writeCookieTheme(mode: ThemeMode): void {
   document.cookie = `${COOKIE_NAME}=${encodeURIComponent(mode)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
 }
 
-// The server can't read prefers-color-scheme, so it can't know what
-// 'system' resolves to. Persist the actual resolved light/dark value in
-// its own cookie; the server reads THIS for the initial data-theme, so
-// every refresh renders the correct theme with zero flash.
 function writeResolvedCookie(resolved: ResolvedTheme): void {
   if (typeof document === 'undefined') return;
   const maxAge = 60 * 60 * 24 * COOKIE_MAX_AGE_DAYS;
