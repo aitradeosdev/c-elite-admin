@@ -32,14 +32,7 @@ async function resolveInitialTheme(): Promise<'light' | 'dark'> {
   return 'light';
 }
 
-const NO_FLASH = `(function(){try{
-var rc=(document.cookie.match(/(?:^|; )admin_theme_resolved=([^;]+)/)||[])[1];
-if(rc==='dark'||rc==='light'){document.documentElement.setAttribute('data-theme',rc);return;}
-var m=(document.cookie.match(/(?:^|; )admin_theme=([^;]+)/)||[])[1];
-m=m?decodeURIComponent(m):'system';
-var r=(m==='dark'||m==='light')?m:(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
-document.documentElement.setAttribute('data-theme',r);
-}catch(e){}})();`;
+const NO_FLASH = `(function(){try{var g=function(n){var x=document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]+)'));return x?decodeURIComponent(x[1]):'';};var rc=g('admin_theme_resolved');var tm=g('admin_theme');var r=(rc==='dark'||rc==='light')?rc:((tm==='dark'||tm==='light')?tm:((window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'));document.documentElement.setAttribute('data-theme',r);}catch(e){}})();`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const initialTheme = await resolveInitialTheme();
