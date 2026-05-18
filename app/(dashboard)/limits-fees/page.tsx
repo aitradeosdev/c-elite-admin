@@ -112,15 +112,15 @@ export default function LimitsFeesPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: '#111', margin: '0 0 16px' },
-  card: { backgroundColor: '#FFF', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid #EEE' },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: '#111', margin: '0 0 14px' },
+  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
+  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
+  cardTitle: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 14px' },
   field: { marginBottom: 16 },
-  label: { display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 },
-  input: { width: '100%', padding: '10px 12px', fontSize: 14, border: '1px solid #DDD', borderRadius: 6, boxSizing: 'border-box' },
-  hint: { fontSize: 11, color: '#888', margin: '6px 0 0', lineHeight: 1.5 },
+  label: { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: 6 },
+  input: { width: '100%', padding: '10px 12px', fontSize: 14, border: '1px solid var(--border-default)', borderRadius: 6, boxSizing: 'border-box' },
+  hint: { fontSize: 11, color: 'var(--fg-tertiary)', margin: '6px 0 0', lineHeight: 1.5 },
   footer: { display: 'flex', justifyContent: 'flex-end', paddingTop: 8 },
-  saveBtn: { padding: '12px 28px', fontSize: 13, fontWeight: 700, backgroundColor: '#111', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  empty: { fontSize: 12, color: '#888' },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: '#111', color: '#FFF', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
+  saveBtn: { padding: '12px 28px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
 };

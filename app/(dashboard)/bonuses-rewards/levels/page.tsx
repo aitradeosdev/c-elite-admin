@@ -107,7 +107,7 @@ export default function LevelsPage() {
                 <div style={styles.cardHead}>
                   <span style={styles.tierOrder}>TIER {t.tier_order}</span>
                   <div
-                    style={{ ...styles.toggle, backgroundColor: active ? '#111111' : '#E0E0E0' }}
+                    style={{ ...styles.toggle, backgroundColor: active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
                     onClick={() => setField(t.id, 'is_active', !active)}
                   >
                     <div style={{ ...styles.toggleThumb, left: active ? 22 : 2 }} />
@@ -195,35 +195,35 @@ export default function LevelsPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { paddingBottom: 40 },
-  breadcrumb: { display: 'inline-block', fontSize: 12, color: '#555555', textDecoration: 'none', marginBottom: 12 },
-  header: { fontSize: 12, color: '#555555', marginBottom: 16, lineHeight: 1.6 },
-  empty: { fontSize: 12, color: '#888888', padding: 20, textAlign: 'center' },
+  breadcrumb: { display: 'inline-block', fontSize: 12, color: 'var(--fg-secondary)', textDecoration: 'none', marginBottom: 12 },
+  header: { fontSize: 12, color: 'var(--fg-secondary)', marginBottom: 16, lineHeight: 1.6 },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)', padding: 20, textAlign: 'center' },
 
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 },
+  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 },
   cardHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  tierOrder: { fontSize: 11, fontWeight: 700, color: '#888888', letterSpacing: '0.08em' },
+  tierOrder: { fontSize: 11, fontWeight: 700, color: 'var(--fg-tertiary)', letterSpacing: '0.08em' },
 
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
+  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
 
   badgeRow: { display: 'flex', gap: 12, alignItems: 'center' },
-  badgePreview: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#F7F7F7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
+  badgePreview: { width: 72, height: 72, borderRadius: 12, backgroundColor: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
   badgeImg: { width: '100%', height: '100%', objectFit: 'contain' },
-  badgePlaceholder: { fontSize: 10, color: '#AAAAAA' },
-  uploadBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  uploadHint: { fontSize: 10, color: '#AAAAAA', marginTop: 6, marginBottom: 0 },
+  badgePlaceholder: { fontSize: 10, color: 'var(--fg-tertiary)' },
+  uploadBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  uploadHint: { fontSize: 10, color: 'var(--fg-tertiary)', marginTop: 6, marginBottom: 0 },
 
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4, marginTop: 2 },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4, marginTop: 2 },
   fieldRow: { display: 'flex', gap: 10 },
-  input: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: '#111111', outline: 'none', boxSizing: 'border-box', backgroundColor: '#FFFFFF' },
+  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
 
   statsLine: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  stat: { fontSize: 11, color: '#555555' },
-  badgeActive: { backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeInactive: { backgroundColor: '#EBEBEB', color: '#666', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  stat: { fontSize: 11, color: 'var(--fg-secondary)' },
+  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgeInactive: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
 
-  saveBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 6 },
+  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 6 },
 
-  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: '#111111', color: '#FFFFFF', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
+  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--bg-inverse)', color: 'var(--fg-inverse)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
 };

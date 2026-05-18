@@ -181,7 +181,7 @@ export default function RatesPage() {
                             onChange={(e) => handleRateChange(denom, e.target.value)}
                           />
                           <div
-                            style={{ ...styles.toggle, backgroundColor: getActive(denom) ? '#111111' : '#E0E0E0' }}
+                            style={{ ...styles.toggle, backgroundColor: getActive(denom) ? 'var(--accent-base)' : 'var(--bg-muted)' }}
                             onClick={() => handleToggleChange(denom)}
                           >
                             <div style={{ ...styles.toggleThumb, left: getActive(denom) ? 22 : 2 }} />
@@ -234,7 +234,7 @@ export default function RatesPage() {
             </div>
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>ACTIVE</label>
-              <div style={{ ...styles.toggle, backgroundColor: denomActive ? '#111111' : '#E0E0E0' }} onClick={() => setDenomActive(!denomActive)}>
+              <div style={{ ...styles.toggle, backgroundColor: denomActive ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setDenomActive(!denomActive)}>
                 <div style={{ ...styles.toggleThumb, left: denomActive ? 22 : 2 }} />
               </div>
             </div>
@@ -258,39 +258,39 @@ export default function RatesPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { paddingBottom: 80 },
-  emptyText: { fontSize: 12, color: '#888888' },
-  cardBlock: { backgroundColor: '#FFFFFF', borderRadius: 10, marginBottom: 8, overflow: 'hidden' },
+  emptyText: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  cardBlock: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, marginBottom: 8, overflow: 'hidden' },
   level1Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', cursor: 'pointer' },
   level1Left: { display: 'flex', alignItems: 'center', gap: 10 },
   logo: { width: 32, height: 32, objectFit: 'contain', borderRadius: 4 },
-  level1Name: { fontSize: 14, fontWeight: 700, color: '#111111' },
-  activeRates: { fontSize: 12, color: '#888888' },
-  arrow: { fontSize: 10, color: '#888888', transition: 'transform 0.2s' },
-  level2Block: { borderTop: '1px solid #F5F5F5' },
-  level2Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px 10px 32px', cursor: 'pointer', backgroundColor: '#FAFAFA' },
+  level1Name: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)' },
+  activeRates: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  arrow: { fontSize: 10, color: 'var(--fg-tertiary)', transition: 'transform 0.2s' },
+  level2Block: { borderTop: '1px solid var(--border-subtle)' },
+  level2Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px 10px 32px', cursor: 'pointer', backgroundColor: 'var(--bg-subtle)' },
   level2Left: { display: 'flex', alignItems: 'center', gap: 8 },
-  level2Name: { fontSize: 13, fontWeight: 600, color: '#333333' },
-  currencyBadge: { backgroundColor: '#F7F7F7', borderWidth: 1, borderStyle: 'solid', borderColor: '#E8E8E8', borderRadius: 6, padding: '2px 6px', fontSize: 11, color: '#555555' },
-  level3Block: { borderTop: '1px solid #F5F5F5' },
-  level3Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px 9px 48px', cursor: 'pointer', backgroundColor: '#FFFFFF' },
-  level3Name: { fontSize: 13, fontWeight: 600, color: '#444444' },
-  level4Block: { padding: '4px 16px 8px 64px', borderTop: '1px solid #F5F5F5' },
-  level4Row: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid #EEEEEE' },
-  rangeLabel: { fontSize: 13, color: '#333333', minWidth: 120 },
-  rateInput: { width: 120, border: '1.5px solid #E8E8E8', borderRadius: 6, padding: '6px 10px', fontSize: 13, color: '#111111', outline: 'none' },
+  level2Name: { fontSize: 13, fontWeight: 600, color: 'var(--fg-secondary)' },
+  currencyBadge: { backgroundColor: 'var(--bg-subtle)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--border-default)', borderRadius: 6, padding: '2px 6px', fontSize: 11, color: 'var(--fg-secondary)' },
+  level3Block: { borderTop: '1px solid var(--border-subtle)' },
+  level3Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px 9px 48px', cursor: 'pointer', backgroundColor: 'var(--bg-surface)' },
+  level3Name: { fontSize: 13, fontWeight: 600, color: 'var(--fg-secondary)' },
+  level4Block: { padding: '4px 16px 8px 64px', borderTop: '1px solid var(--border-subtle)' },
+  level4Row: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-default)' },
+  rangeLabel: { fontSize: 13, color: 'var(--fg-secondary)', minWidth: 120 },
+  rateInput: { width: 120, border: '1.5px solid var(--border-default)', borderRadius: 6, padding: '6px 10px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none' },
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  addRangeBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#34C759', padding: '6px 0', marginTop: 4 },
-  saveAllBtn: { position: 'fixed', bottom: 24, right: 24, backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' },
-  toast: { position: 'fixed', bottom: 80, right: 24, backgroundColor: '#111111', color: '#FFFFFF', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
+  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
+  addRangeBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--tone-success-fg)', padding: '6px 0', marginTop: 4 },
+  saveAllBtn: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' },
+  toast: { position: 'fixed', bottom: 80, right: 24, backgroundColor: 'var(--bg-inverse)', color: 'var(--fg-inverse)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 24, width: 400, zIndex: 100 },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 20px' },
+  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 400, zIndex: 100 },
+  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
   fieldGroup: { marginBottom: 14 },
   fieldRow: { display: 'flex', gap: 12, marginBottom: 14 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#111111', outline: 'none', boxSizing: 'border-box', backgroundColor: '#FFFFFF' },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
   modalActions: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 },
-  cancelBtn: { backgroundColor: '#F7F7F7', color: '#333333', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  saveBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  cancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
 };

@@ -263,7 +263,7 @@ export default function FieldBuilderPage() {
                     <>
                       <span style={styles.typeName}>{cardType.name}</span>
                       <div
-                        style={{ ...styles.toggle, backgroundColor: cardType.is_active ? '#111111' : '#E0E0E0' }}
+                        style={{ ...styles.toggle, backgroundColor: cardType.is_active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
                         onClick={() => handleToggleType(cardType)}
                       >
                         <div style={{ ...styles.toggleThumb, left: cardType.is_active ? 22 : 2 }} />
@@ -338,7 +338,7 @@ export default function FieldBuilderPage() {
             <p style={styles.modalText}>This will delete the card type and all its fields. This cannot be undone.</p>
             <div style={styles.modalActions}>
               <button style={styles.cancelSmallBtn} onClick={() => setDeleteTypeId(null)}>Cancel</button>
-              <button style={{ ...styles.saveSmallBtn, backgroundColor: '#C62828' }} onClick={confirmDeleteType}>Delete</button>
+              <button style={{ ...styles.saveSmallBtn, backgroundColor: 'var(--tone-danger-fg)' }} onClick={confirmDeleteType}>Delete</button>
             </div>
           </div>
         </>
@@ -371,7 +371,7 @@ function FieldForm({ label, setLabel, inputType, setInputType, required, setRequ
       </div>
       <div style={styles.fieldFormRow}>
         <span style={styles.fieldFormLabel}>Required</span>
-        <div style={{ ...styles.toggle, backgroundColor: required ? '#111111' : '#E0E0E0' }} onClick={() => setRequired(!required)}>
+        <div style={{ ...styles.toggle, backgroundColor: required ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setRequired(!required)}>
           <div style={{ ...styles.toggleThumb, left: required ? 22 : 2 }} />
         </div>
       </div>
@@ -405,46 +405,46 @@ function DeleteIcon() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: { display: 'flex', height: 'calc(100vh - 48px)', overflow: 'hidden', margin: -24 },
-  panel1: { width: 200, backgroundColor: '#FFFFFF', borderRight: '1px solid #EEEEEE', overflowY: 'auto', flexShrink: 0 },
-  panel2: { width: 220, backgroundColor: '#F7F7F7', borderRight: '1px solid #EEEEEE', overflowY: 'auto', flexShrink: 0 },
-  panel3: { flex: 1, overflowY: 'auto', padding: 20, backgroundColor: '#FFFFFF' },
-  panelHeader: { fontSize: 11, fontWeight: 700, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '12px 14px 8px', margin: 0, borderBottom: '1px solid #EEEEEE' },
-  panelItem: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#333333' },
-  panelItemActive: { backgroundColor: '#F7F7F7', borderLeft: '2.5px solid #111111', paddingLeft: 11.5, color: '#111111' },
+  panel1: { width: 200, backgroundColor: 'var(--bg-surface)', borderRight: '1px solid var(--border-default)', overflowY: 'auto', flexShrink: 0 },
+  panel2: { width: 220, backgroundColor: 'var(--bg-subtle)', borderRight: '1px solid var(--border-default)', overflowY: 'auto', flexShrink: 0 },
+  panel3: { flex: 1, overflowY: 'auto', padding: 20, backgroundColor: 'var(--bg-surface)' },
+  panelHeader: { fontSize: 11, fontWeight: 700, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '12px 14px 8px', margin: 0, borderBottom: '1px solid var(--border-default)' },
+  panelItem: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--fg-secondary)' },
+  panelItemActive: { backgroundColor: 'var(--bg-subtle)', borderLeft: '2.5px solid var(--accent-base)', paddingLeft: 11.5, color: 'var(--fg-primary)' },
   panelItemLabel: { fontSize: 12, fontWeight: 600 },
   cardLogo: { width: 24, height: 24, objectFit: 'contain', borderRadius: 3, flexShrink: 0 },
-  emptyText: { fontSize: 12, color: '#888888', padding: '12px 14px', margin: 0 },
+  emptyText: { fontSize: 12, color: 'var(--fg-tertiary)', padding: '12px 14px', margin: 0 },
   panel3Header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  panel3Title: { fontSize: 14, fontWeight: 700, color: '#111111' },
-  addTypeBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  inlineForm: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, backgroundColor: '#F7F7F7', padding: 10, borderRadius: 8 },
-  inlineInput: { border: '1.5px solid #E8E8E8', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#111111', outline: 'none', backgroundColor: '#FFFFFF' },
-  saveSmallBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' },
-  cancelSmallBtn: { backgroundColor: '#F0F0F0', color: '#555555', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  typeBlock: { border: '1px solid #EEEEEE', borderRadius: 8, marginBottom: 10, overflow: 'hidden' },
-  typeHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', backgroundColor: '#FAFAFA' },
-  typeName: { fontSize: 12, fontWeight: 600, color: '#111111', flex: 1 },
+  panel3Title: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)' },
+  addTypeBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  inlineForm: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, backgroundColor: 'var(--bg-subtle)', padding: 10, borderRadius: 8 },
+  inlineInput: { border: '1.5px solid var(--border-default)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--fg-primary)', outline: 'none', backgroundColor: 'var(--bg-surface)' },
+  saveSmallBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' },
+  cancelSmallBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  typeBlock: { border: '1px solid var(--border-default)', borderRadius: 8, marginBottom: 10, overflow: 'hidden' },
+  typeHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', backgroundColor: 'var(--bg-subtle)' },
+  typeName: { fontSize: 12, fontWeight: 600, color: 'var(--fg-primary)', flex: 1 },
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  iconBtn: { background: 'none', border: 'none', cursor: 'pointer', color: '#888888', padding: 4, display: 'flex', alignItems: 'center' },
-  iconBtnRed: { background: 'none', border: 'none', cursor: 'pointer', color: '#E53935', padding: 4, display: 'flex', alignItems: 'center' },
-  expandBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: '#888888', padding: 4 },
-  fieldsBlock: { padding: '8px 14px 12px 30px', borderTop: '1px solid #EEEEEE' },
-  fieldRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F5F5F5' },
-  dragHandle: { fontSize: 14, color: '#CCCCCC', cursor: 'grab', userSelect: 'none' },
-  fieldLabel: { fontSize: 12, color: '#333333', flex: 1 },
-  inputTypeBadge: { backgroundColor: '#E3F2FD', color: '#1565C0', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' },
-  requiredBadge: { backgroundColor: '#FFEBEE', color: '#C62828', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  optionalBadge: { backgroundColor: '#F7F7F7', color: '#888888', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  addFieldBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#34C759', padding: '6px 0', marginTop: 4 },
-  fieldForm: { backgroundColor: '#F7F7F7', borderRadius: 8, padding: 12, marginBottom: 8 },
+  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
+  iconBtn: { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-tertiary)', padding: 4, display: 'flex', alignItems: 'center' },
+  iconBtnRed: { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tone-danger-fg)', padding: 4, display: 'flex', alignItems: 'center' },
+  expandBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--fg-tertiary)', padding: 4 },
+  fieldsBlock: { padding: '8px 14px 12px 30px', borderTop: '1px solid var(--border-default)' },
+  fieldRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border-subtle)' },
+  dragHandle: { fontSize: 14, color: 'var(--fg-tertiary)', cursor: 'grab', userSelect: 'none' },
+  fieldLabel: { fontSize: 12, color: 'var(--fg-secondary)', flex: 1 },
+  inputTypeBadge: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' },
+  requiredBadge: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
+  optionalBadge: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
+  addFieldBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--tone-success-fg)', padding: '6px 0', marginTop: 4 },
+  fieldForm: { backgroundColor: 'var(--bg-subtle)', borderRadius: 8, padding: 12, marginBottom: 8 },
   fieldFormRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
-  fieldFormLabel: { fontSize: 12, color: '#555555', fontWeight: 600 },
-  typePill: { borderWidth: '1.5px', borderStyle: 'solid', borderColor: '#E8E8E8', borderRadius: 100, padding: '6px 14px', fontSize: 12, cursor: 'pointer', backgroundColor: '#FFFFFF', color: '#333333', fontWeight: 500 },
-  typePillActive: { backgroundColor: '#111111', color: '#FFFFFF', borderColor: '#111111' },
+  fieldFormLabel: { fontSize: 12, color: 'var(--fg-secondary)', fontWeight: 600 },
+  typePill: { borderWidth: '1.5px', borderStyle: 'solid', borderColor: 'var(--border-default)', borderRadius: 100, padding: '6px 14px', fontSize: 12, cursor: 'pointer', backgroundColor: 'var(--bg-surface)', color: 'var(--fg-secondary)', fontWeight: 500 },
+  typePillActive: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', borderColor: 'var(--accent-base)' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 24, width: 360, zIndex: 100 },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 8px' },
-  modalText: { fontSize: 13, color: '#555555', margin: '0 0 16px' },
+  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 360, zIndex: 100 },
+  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 8px' },
+  modalText: { fontSize: 13, color: 'var(--fg-secondary)', margin: '0 0 16px' },
   modalActions: { display: 'flex', gap: 10, justifyContent: 'flex-end' },
 };

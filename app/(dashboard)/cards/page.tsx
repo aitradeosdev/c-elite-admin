@@ -415,11 +415,11 @@ export default function CardsPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: '#888888' }}>Loading...</td></tr>
+              <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>Loading...</td></tr>
             ) : cards.length === 0 ? (
-              <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: '#888888' }}>No card brands yet</td></tr>
+              <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No card brands yet</td></tr>
             ) : cards.map((card, i) => (
-              <tr key={card.id} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
+              <tr key={card.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
                 <td style={styles.td}>
                   {card.logo_url
                     ? <img src={card.logo_url} alt={card.name} style={styles.logoThumb} />
@@ -471,7 +471,7 @@ export default function CardsPage() {
                   <img src={logoPreview} alt="Logo preview" style={styles.logoPreview} />
                 ) : (
                   <>
-                    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                       <polyline points="17 8 12 3 7 8" />
                       <line x1={12} y1={3} x2={12} y2={15} />
@@ -485,7 +485,7 @@ export default function CardsPage() {
 
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>ACTIVE</label>
-              <div style={{ ...styles.toggle, backgroundColor: cardActive ? '#111111' : '#E0E0E0' }} onClick={() => setCardActive(!cardActive)}>
+              <div style={{ ...styles.toggle, backgroundColor: cardActive ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setCardActive(!cardActive)}>
                 <div style={{ ...styles.toggleThumb, left: cardActive ? 22 : 2 }} />
               </div>
             </div>
@@ -510,7 +510,7 @@ export default function CardsPage() {
 
             <div style={styles.countriesList}>
               {countriesCard.countries.length === 0 && (
-                <p style={{ fontSize: 12, color: '#888888' }}>No countries added yet.</p>
+                <p style={{ fontSize: 12, color: 'var(--fg-tertiary)' }}>No countries added yet.</p>
               )}
               {countriesCard.countries.map((country) => (
                 <div key={country.id} style={styles.countryRow}>
@@ -519,7 +519,7 @@ export default function CardsPage() {
                     <span style={styles.currencySymbol}> ({country.currency_symbol})</span>
                   </div>
                   <div
-                    style={{ ...styles.toggle, backgroundColor: country.is_active ? '#111111' : '#E0E0E0' }}
+                    style={{ ...styles.toggle, backgroundColor: country.is_active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
                     onClick={() => handleToggleCountry(country)}
                   >
                     <div style={{ ...styles.toggleThumb, left: country.is_active ? 22 : 2 }} />
@@ -561,7 +561,7 @@ export default function CardsPage() {
                         }}
                       >
                         <span style={{ fontWeight: 600 }}>{c.name}</span>
-                        <span style={{ color: '#888', fontSize: 11, marginLeft: 6 }}>{c.currency} {c.symbol}</span>
+                        <span style={{ color: 'var(--fg-tertiary)', fontSize: 11, marginLeft: 6 }}>{c.currency} {c.symbol}</span>
                       </div>
                     ))}
                     {ISO_COUNTRIES.filter((c) =>
@@ -569,7 +569,7 @@ export default function CardsPage() {
                       c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
                       c.currency.toLowerCase().includes(countryQuery.toLowerCase())
                     ).length === 0 && (
-                      <div style={{ padding: '10px 12px', fontSize: 12, color: '#888' }}>No matches</div>
+                      <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--fg-tertiary)' }}>No matches</div>
                     )}
                   </div>
                 )}
@@ -588,7 +588,7 @@ export default function CardsPage() {
 
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>ACTIVE</label>
-              <div style={{ ...styles.toggle, backgroundColor: newCountryActive ? '#111111' : '#E0E0E0' }} onClick={() => setNewCountryActive(!newCountryActive)}>
+              <div style={{ ...styles.toggle, backgroundColor: newCountryActive ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setNewCountryActive(!newCountryActive)}>
                 <div style={{ ...styles.toggleThumb, left: newCountryActive ? 22 : 2 }} />
               </div>
             </div>
@@ -610,44 +610,44 @@ export default function CardsPage() {
 const styles: Record<string, React.CSSProperties> = {
   page: { position: 'relative' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  title: { fontSize: 15, fontWeight: 800, color: '#111111' },
-  createBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  tableWrapper: { overflowX: 'auto', borderRadius: 10, border: '1px solid #EEEEEE' },
+  title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
+  createBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  tableWrapper: { overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-default)' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '10px 12px', color: '#333333', fontSize: 12, verticalAlign: 'middle' },
+  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
+  td: { padding: '10px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
   logoThumb: { width: 32, height: 32, objectFit: 'contain', borderRadius: 4 },
-  logoPlaceholder: { width: 32, height: 32, backgroundColor: '#F0F0F0', borderRadius: 4 },
-  badgeActive: { backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  badgeInactive: { backgroundColor: '#EBEBEB', color: '#888888', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
+  logoPlaceholder: { width: 32, height: 32, backgroundColor: 'var(--bg-subtle)', borderRadius: 4 },
+  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
+  badgeInactive: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
   actions: { display: 'flex', gap: 6, alignItems: 'center' },
-  editBtn: { backgroundColor: '#F3E5F5', color: '#6A1B9A', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  manageBtn: { backgroundColor: '#E3F2FD', color: '#1565C0', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  toggleBtn: { backgroundColor: '#FFF8E1', color: '#F9A825', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  dragHandle: { fontSize: 16, color: '#CCCCCC', cursor: 'grab', userSelect: 'none' },
+  editBtn: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  manageBtn: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  toggleBtn: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  dragHandle: { fontSize: 16, color: 'var(--fg-tertiary)', cursor: 'grab', userSelect: 'none' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 49 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 24, width: 480, zIndex: 50, maxHeight: '90vh', overflowY: 'auto' },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 20px' },
+  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 480, zIndex: 50, maxHeight: '90vh', overflowY: 'auto' },
+  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
   fieldGroup: { marginBottom: 14 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#111111', outline: 'none', boxSizing: 'border-box', backgroundColor: '#FFFFFF' },
-  uploadBox: { width: 100, height: 100, border: '2px dashed #DEDEDE', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: 6 },
-  uploadText: { fontSize: 11, color: '#888888' },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
+  uploadBox: { width: 100, height: 100, border: '2px dashed var(--border-default)', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: 6 },
+  uploadText: { fontSize: 11, color: 'var(--fg-tertiary)' },
   logoPreview: { width: 96, height: 96, objectFit: 'contain', borderRadius: 6 },
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  formError: { fontSize: 12, color: '#E53935', margin: '8px 0' },
+  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
+  formError: { fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0' },
   modalActions: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 },
-  cancelBtn: { backgroundColor: '#F7F7F7', color: '#333333', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  saveBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  cancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
   panelOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.2)', zIndex: 49 },
-  panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 440, backgroundColor: '#FFFFFF', borderLeft: '1px solid #EEEEEE', padding: 24, zIndex: 50, overflowY: 'auto' },
-  panelTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 16px' },
+  panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 440, backgroundColor: 'var(--bg-surface)', borderLeft: '1px solid var(--border-default)', padding: 24, zIndex: 50, overflowY: 'auto' },
+  panelTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
   countriesList: { display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 },
-  countryRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F0F0F0' },
-  countryName: { fontSize: 13, fontWeight: 600, color: '#111111' },
-  currencySymbol: { fontSize: 12, color: '#888888' },
-  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, backgroundColor: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' },
-  dropdownItem: { padding: '10px 12px', fontSize: 13, color: '#111', cursor: 'pointer', borderBottom: '1px solid #F5F5F5', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  removeBtn: { backgroundColor: '#FFEBEE', color: '#C62828', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  countryRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' },
+  countryName: { fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' },
+  currencySymbol: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' },
+  dropdownItem: { padding: '10px 12px', fontSize: 13, color: 'var(--fg-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  removeBtn: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
 };

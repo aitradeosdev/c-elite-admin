@@ -81,7 +81,7 @@ export default function ReferralManagementPage() {
       <div style={styles.card}>
         <div style={styles.cardHead}>
           <span style={styles.cardTitle}>Settings</span>
-          <div style={{ ...styles.toggle, backgroundColor: getToggle('referral_active') ? '#111111' : '#E0E0E0' }} onClick={() => toggleKey('referral_active')}>
+          <div style={{ ...styles.toggle, backgroundColor: getToggle('referral_active') ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => toggleKey('referral_active')}>
             <div style={{ ...styles.toggleThumb, left: getToggle('referral_active') ? 22 : 2 }} />
           </div>
         </div>
@@ -164,35 +164,35 @@ export default function ReferralManagementPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { paddingBottom: 40 },
-  empty: { fontSize: 12, color: '#888888', padding: 20, textAlign: 'center' },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)', padding: 20, textAlign: 'center' },
 
-  card: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 16, marginBottom: 12 },
+  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16, marginBottom: 12 },
   cardHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  cardTitle: { fontSize: 13, fontWeight: 700, color: '#111111' },
+  cardTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' },
   fieldRow: { display: 'flex', gap: 12 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#111111', outline: 'none', boxSizing: 'border-box', backgroundColor: '#FFFFFF' },
-  readonlyNote: { fontSize: 12, color: '#888888', marginTop: 12, marginBottom: 0 },
-  saveBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
+  readonlyNote: { fontSize: 12, color: 'var(--fg-tertiary)', marginTop: 12, marginBottom: 0 },
+  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
 
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
+  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
 
   statCard: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 },
-  statItem: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 6 },
-  statLabel: { fontSize: 11, color: '#888888' },
-  statValue: { fontSize: 18, fontWeight: 800, color: '#111111' },
+  statItem: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 6 },
+  statLabel: { fontSize: 11, color: 'var(--fg-tertiary)' },
+  statValue: { fontSize: 18, fontWeight: 800, color: 'var(--fg-primary)' },
 
-  section: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: 700, color: '#111111', margin: '0 0 12px' },
+  section: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16 },
+  sectionTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 12px' },
   tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', textAlign: 'left', padding: '8px 10px', fontWeight: 600, fontSize: 11 },
-  td: { padding: '8px 10px', borderBottom: '1px solid #EEEEEE', color: '#333333' },
+  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', textAlign: 'left', padding: '8px 10px', fontWeight: 600, fontSize: 11 },
+  td: { padding: '8px 10px', borderBottom: '1px solid var(--border-default)', color: 'var(--fg-secondary)' },
 
-  badgePaid: { backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgePending: { backgroundColor: '#FFF3E0', color: '#E65100', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeAwait: { backgroundColor: '#EBEBEB', color: '#666', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgePaid: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgePending: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgeAwait: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
 
-  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: '#111111', color: '#FFFFFF', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
+  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
 };

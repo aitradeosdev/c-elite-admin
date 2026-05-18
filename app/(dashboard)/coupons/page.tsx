@@ -236,7 +236,7 @@ export default function CouponsPage() {
             </div>
             <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 10 }}>
               <div
-                style={{ ...styles.toggle, backgroundColor: form.is_active ? '#111111' : '#E0E0E0' }}
+                style={{ ...styles.toggle, backgroundColor: form.is_active ? 'var(--accent-base)' : 'var(--border-default)' }}
                 onClick={() => setForm({ ...form, is_active: !form.is_active })}
               >
                 <div style={{ ...styles.toggleThumb, left: form.is_active ? 22 : 2 }} />
@@ -245,9 +245,9 @@ export default function CouponsPage() {
             </div>
           </div>
 
-          <div style={{ marginBottom: 14, backgroundColor: '#FAFAFA', borderRadius: 8, padding: 10, border: '1px solid #EEEEEE' }}>
+          <div style={{ marginBottom: 14, backgroundColor: 'var(--bg-subtle)', borderRadius: 8, padding: 10, border: '1px solid var(--border-default)' }}>
             <label style={styles.fieldLabel}>ELIGIBILITY (OPTIONAL)</label>
-            <p style={{ fontSize: 11, color: '#888', margin: '2px 0 8px' }}>Restrict to users who have traded a specific card. Leave blank for no restriction.</p>
+            <p style={{ fontSize: 11, color: 'var(--fg-tertiary)', margin: '2px 0 8px' }}>Restrict to users who have traded a specific card. Leave blank for no restriction.</p>
             <select
               style={styles.input}
               value={form.restrict_card}
@@ -326,41 +326,41 @@ export default function CouponsPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { paddingBottom: 40 },
-  empty: { fontSize: 12, color: '#888888', padding: 20, textAlign: 'center' },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)', padding: 20, textAlign: 'center' },
 
   headerRow: { display: 'flex', justifyContent: 'flex-end', marginBottom: 12 },
-  createBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
+  createBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
 
-  card: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 16, marginBottom: 16 },
-  cardTitle: { fontSize: 13, fontWeight: 700, color: '#111111', margin: '0 0 12px' },
+  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16, marginBottom: 16 },
+  cardTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 12px' },
   fieldRow: { display: 'flex', gap: 12, marginBottom: 12 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#111111', outline: 'none', boxSizing: 'border-box', backgroundColor: '#FFFFFF' },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
 
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  toggleLabel: { fontSize: 12, fontWeight: 600, color: '#111111' },
+  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
+  toggleLabel: { fontSize: 12, fontWeight: 600, color: 'var(--fg-primary)' },
 
   formActions: { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 },
-  cancelBtn: { backgroundColor: '#FFFFFF', color: '#111111', border: '1.5px solid #E8E8E8', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  saveBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  cancelBtn: { backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1.5px solid var(--border-default)', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
 
-  section: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: 700, color: '#111111', margin: '0 0 12px' },
+  section: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16 },
+  sectionTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 12px' },
   tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', textAlign: 'left', padding: '8px 10px', fontWeight: 600, fontSize: 11 },
-  td: { padding: '8px 10px', borderBottom: '1px solid #EEEEEE', color: '#333333' },
+  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', textAlign: 'left', padding: '8px 10px', fontWeight: 600, fontSize: 11 },
+  td: { padding: '8px 10px', borderBottom: '1px solid var(--border-default)', color: 'var(--fg-secondary)' },
 
-  typeGift: { backgroundColor: '#E3F2FD', color: '#1565C0', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  typeGen: { backgroundColor: '#F3E5F5', color: '#6A1B9A', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  typeGift: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  typeGen: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
 
-  badgeActive: { backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeDisabled: { backgroundColor: '#EBEBEB', color: '#666', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeExpired: { backgroundColor: '#FFEBEE', color: '#C62828', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgeDisabled: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
+  badgeExpired: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
 
-  btnEdit: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '4px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', marginRight: 6 },
-  btnReject: { backgroundColor: '#FFFFFF', color: '#111111', border: '1.5px solid #E8E8E8', borderRadius: 100, padding: '4px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  btnEdit: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '4px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', marginRight: 6 },
+  btnReject: { backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1.5px solid var(--border-default)', borderRadius: 100, padding: '4px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
 
-  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: '#111111', color: '#FFFFFF', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
+  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
 };

@@ -171,15 +171,15 @@ export default function AdminAccountsPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: '#888888' }}>Loading...</td></tr>
+              <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>Loading...</td></tr>
             ) : admins.length === 0 ? (
-              <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: '#888888' }}>No admin accounts yet</td></tr>
+              <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No admin accounts yet</td></tr>
             ) : admins.map((admin, i) => (
-              <tr key={admin.id} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
+              <tr key={admin.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
                 <td style={{ ...styles.td, fontWeight: 600 }}>{admin.username}</td>
-                <td style={{ ...styles.td, color: admin.email ? '#333' : '#C62828' }}>{admin.email || '— (no alerts)'}</td>
+                <td style={{ ...styles.td, color: admin.email ? 'var(--fg-secondary)' : 'var(--tone-danger-fg)' }}>{admin.email || '— (no alerts)'}</td>
                 <td style={styles.td}>{admin.role_title}</td>
-                <td style={{ ...styles.td, maxWidth: 200, color: '#555555' }}>{formatPages(admin.page_permissions)}</td>
+                <td style={{ ...styles.td, maxWidth: 200, color: 'var(--fg-secondary)' }}>{formatPages(admin.page_permissions)}</td>
                 <td style={styles.td}>{admin.last_login_at ? new Date(admin.last_login_at).toLocaleDateString() : 'Never'}</td>
                 <td style={styles.td}>
                   <span style={admin.is_active ? styles.badgeActive : styles.badgeInactive}>
@@ -219,7 +219,7 @@ export default function AdminAccountsPage() {
             </div>
 
             <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>EMAIL <span style={{ fontWeight: 400, textTransform: 'none', color: '#888' }}>(receives security alerts)</span></label>
+              <label style={styles.fieldLabel}>EMAIL <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--fg-tertiary)' }}>(receives security alerts)</span></label>
               <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@cardelite.ng" />
             </div>
 
@@ -305,12 +305,12 @@ export default function AdminAccountsPage() {
 
 function EyeIcon({ visible }: { visible: boolean }) {
   return visible ? (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
       <circle cx={12} cy={12} r={3} />
     </svg>
   ) : (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
       <line x1={1} y1={1} x2={23} y2={23} />
     </svg>
@@ -320,38 +320,38 @@ function EyeIcon({ visible }: { visible: boolean }) {
 const styles: Record<string, React.CSSProperties> = {
   page: { position: 'relative' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  title: { fontSize: 15, fontWeight: 800, color: '#111111' },
-  createBtn: { backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  tableWrapper: { overflowX: 'auto', borderRadius: 10, border: '1px solid #EEEEEE' },
+  title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
+  createBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  tableWrapper: { overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-default)' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '10px 12px', color: '#333333', fontSize: 12, verticalAlign: 'middle' },
-  badgeActive: { backgroundColor: '#E8F5E9', color: '#2E7D32', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  badgeInactive: { backgroundColor: '#EBEBEB', color: '#888888', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
+  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
+  td: { padding: '10px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
+  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
+  badgeInactive: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
   actions: { display: 'flex', gap: 6 },
-  editBtn: { backgroundColor: '#F3E5F5', color: '#6A1B9A', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  deactivateBtn: { backgroundColor: '#FFF8E1', color: '#F9A825', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  deleteBtn: { backgroundColor: '#FFEBEE', color: '#C62828', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  editBtn: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  deactivateBtn: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  deleteBtn: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
   overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.2)', zIndex: 49 },
-  panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 400, backgroundColor: '#FFFFFF', borderLeft: '1px solid #EEEEEE', padding: 24, zIndex: 50, overflowY: 'auto' },
-  panelTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 20px' },
+  panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 400, backgroundColor: 'var(--bg-surface)', borderLeft: '1px solid var(--border-default)', padding: 24, zIndex: 50, overflowY: 'auto' },
+  panelTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
   fieldGroup: { marginBottom: 14 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#111111', outline: 'none', boxSizing: 'border-box', backgroundColor: '#FFFFFF' },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
   pwWrapper: { position: 'relative' },
   eyeBtn: { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 },
   checkList: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 },
   checkRow: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' },
-  checkbox: { width: 16, height: 16, borderWidth: '1.5px', borderStyle: 'solid', borderColor: '#DEDEDE', borderRadius: 3, backgroundColor: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' },
-  checkboxChecked: { backgroundColor: '#111111', borderColor: '#111111' },
-  checkmark: { fontSize: 10, color: '#FFFFFF', fontWeight: 700 },
-  checkLabel: { fontSize: 12, color: '#333333' },
-  formError: { fontSize: 12, color: '#E53935', margin: '8px 0' },
-  saveBtn: { width: '100%', backgroundColor: '#111111', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: 12, fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 16 },
+  checkbox: { width: 16, height: 16, borderWidth: '1.5px', borderStyle: 'solid', borderColor: 'var(--border-default)', borderRadius: 3, backgroundColor: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' },
+  checkboxChecked: { backgroundColor: 'var(--accent-base)', borderColor: 'var(--accent-base)' },
+  checkmark: { fontSize: 10, color: 'var(--accent-fg)', fontWeight: 700 },
+  checkLabel: { fontSize: 12, color: 'var(--fg-secondary)' },
+  formError: { fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0' },
+  saveBtn: { width: '100%', backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: 12, fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 16 },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 24, width: 360, zIndex: 100 },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 8px' },
-  modalText: { fontSize: 13, color: '#555555', margin: '0 0 16px' },
+  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 360, zIndex: 100 },
+  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 8px' },
+  modalText: { fontSize: 13, color: 'var(--fg-secondary)', margin: '0 0 16px' },
   modalActions: { display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' },
-  modalCancelBtn: { backgroundColor: '#F7F7F7', color: '#333333', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  modalCancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
 };

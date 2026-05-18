@@ -189,7 +189,7 @@ export default function NotificationsBroadcastPage() {
                     {userHits.map((u) => (
                       <div key={u.id} style={styles.dropdownItem} onClick={() => { setSelectedUser(u); setUserHits([]); }}>
                         <div style={{ fontWeight: 600, fontSize: 12 }}>{u.full_name || u.username}</div>
-                        <div style={{ fontSize: 11, color: '#888' }}>{u.email}</div>
+                        <div style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>{u.email}</div>
                       </div>
                     ))}
                   </div>
@@ -306,29 +306,29 @@ export default function NotificationsBroadcastPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: '#111', margin: '0 0 16px' },
-  card: { backgroundColor: '#FFF', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid #EEE' },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: '#111', margin: '0 0 14px' },
+  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
+  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
+  cardTitle: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 14px' },
   grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  label: { display: 'block', fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 5, textTransform: 'uppercase' },
-  input: { width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid #DDD', borderRadius: 6, backgroundColor: '#FFF', boxSizing: 'border-box' },
-  selectedUser: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', fontSize: 13, border: '1px solid #111', borderRadius: 6, backgroundColor: '#F9F9F9' },
-  clearBtn: { background: 'none', border: 'none', color: '#E53935', cursor: 'pointer', fontSize: 11, fontWeight: 600 },
-  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: '#FFF', border: '1px solid #DDD', borderRadius: 6, marginTop: 2, maxHeight: 200, overflowY: 'auto', zIndex: 10 },
-  dropdownItem: { padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid #F2F2F2' },
-  sendRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTop: '1px solid #F2F2F2' },
-  countText: { fontSize: 13, color: '#555', margin: 0 },
-  sendBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: '#111', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  label: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: 5, textTransform: 'uppercase' },
+  input: { width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--border-default)', borderRadius: 6, backgroundColor: 'var(--bg-surface)', boxSizing: 'border-box' },
+  selectedUser: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', fontSize: 13, border: '1px solid var(--border-strong)', borderRadius: 6, backgroundColor: 'var(--bg-subtle)' },
+  clearBtn: { background: 'none', border: 'none', color: 'var(--tone-danger-fg)', cursor: 'pointer', fontSize: 11, fontWeight: 600 },
+  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 6, marginTop: 2, maxHeight: 200, overflowY: 'auto', zIndex: 10 },
+  dropdownItem: { padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)' },
+  sendRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border-subtle)' },
+  countText: { fontSize: 13, color: 'var(--fg-secondary)', margin: 0 },
+  sendBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
   table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#555', textTransform: 'uppercase', padding: '8px 10px', borderBottom: '1px solid #EEE' },
-  td: { fontSize: 12, color: '#111', padding: '10px', borderBottom: '1px solid #F2F2F2' },
-  badge: { fontSize: 10, fontWeight: 600, padding: '2px 8px', backgroundColor: '#F2F2F2', borderRadius: 10 },
-  empty: { fontSize: 12, color: '#888', margin: 0 },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: '#111', color: '#FFF', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
-  varsBox: { marginTop: 14, padding: 12, border: '1px dashed #DDD', borderRadius: 8, backgroundColor: '#FAFAFA' },
-  varsTitle: { fontSize: 12, fontWeight: 700, color: '#111', margin: '0 0 8px' },
-  varsSection: { fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', margin: '8px 0 6px' },
-  varsMuted: { fontSize: 11, color: '#999' },
+  th: { textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--fg-secondary)', textTransform: 'uppercase', padding: '8px 10px', borderBottom: '1px solid var(--border-default)' },
+  td: { fontSize: 12, color: 'var(--fg-primary)', padding: '10px', borderBottom: '1px solid var(--border-subtle)' },
+  badge: { fontSize: 10, fontWeight: 600, padding: '2px 8px', backgroundColor: 'var(--tone-neutral-bg)', borderRadius: 10 },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)', margin: 0 },
+  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
+  varsBox: { marginTop: 14, padding: 12, border: '1px dashed var(--border-default)', borderRadius: 8, backgroundColor: 'var(--bg-subtle)' },
+  varsTitle: { fontSize: 12, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 8px' },
+  varsSection: { fontSize: 10, fontWeight: 700, color: 'var(--fg-secondary)', textTransform: 'uppercase', margin: '8px 0 6px' },
+  varsMuted: { fontSize: 11, color: 'var(--fg-tertiary)' },
   chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  chip: { fontSize: 11, fontWeight: 600, padding: '4px 8px', backgroundColor: '#FFF', border: '1px solid #DDD', borderRadius: 12, cursor: 'pointer', fontFamily: 'monospace', color: '#111' },
+  chip: { fontSize: 11, fontWeight: 600, padding: '4px 8px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 12, cursor: 'pointer', fontFamily: 'monospace', color: 'var(--fg-primary)' },
 };

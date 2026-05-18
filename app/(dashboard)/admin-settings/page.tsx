@@ -271,8 +271,8 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      <div style={{ ...styles.card, borderColor: emergencyOn ? '#E53935' : '#EEE' }}>
-        <p style={{ ...styles.cardTitle, color: emergencyOn ? '#E53935' : '#111' }}>Emergency Mode</p>
+      <div style={{ ...styles.card, borderColor: emergencyOn ? 'var(--tone-danger-fg)' : 'var(--border-default)' }}>
+        <p style={{ ...styles.cardTitle, color: emergencyOn ? 'var(--tone-danger-fg)' : 'var(--fg-primary)' }}>Emergency Mode</p>
         <p style={styles.cardHint}>
           When ON, all mobile clients are force-logged-out and shown a blocking maintenance modal on next resume.
         </p>
@@ -410,7 +410,7 @@ function TagTransferSection({
       </div>
 
       {!enabled && (
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #EEE' }}>
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-default)' }}>
           <p style={{ ...styles.cardTitle, marginBottom: 8 }}>Allow-list ({overrides.length})</p>
           <p style={styles.cardHint}>These users can transfer even with the global toggle OFF.</p>
 
@@ -433,17 +433,17 @@ function TagTransferSection({
           </div>
 
           {search.trim() ? (
-            <div style={{ border: '1px solid #EEE', borderRadius: 6, marginBottom: 12, maxHeight: 200, overflowY: 'auto' }}>
+            <div style={{ border: '1px solid var(--border-default)', borderRadius: 6, marginBottom: 12, maxHeight: 200, overflowY: 'auto' }}>
               {searching ? (
-                <div style={{ padding: 12, fontSize: 12, color: '#888' }}>Searching…</div>
+                <div style={{ padding: 12, fontSize: 12, color: 'var(--fg-tertiary)' }}>Searching…</div>
               ) : results.length === 0 ? (
-                <div style={{ padding: 12, fontSize: 12, color: '#888' }}>No matches.</div>
+                <div style={{ padding: 12, fontSize: 12, color: 'var(--fg-tertiary)' }}>No matches.</div>
               ) : (
                 results.map((u) => (
-                  <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #F5F5F5' }}>
+                  <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)' }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{u.full_name || u.username}</div>
-                      <div style={{ fontSize: 11, color: '#888' }}>@{u.username} · {u.email}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>{u.full_name || u.username}</div>
+                      <div style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>@{u.username} · {u.email}</div>
                     </div>
                     <button
                       style={styles.saveBtn}
@@ -465,10 +465,10 @@ function TagTransferSection({
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {overrides.map((o) => (
-                <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#F9F9F9', borderRadius: 6 }}>
+                <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', borderRadius: 6 }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{o.full_name || o.username}</div>
-                    <div style={{ fontSize: 11, color: '#888' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>{o.full_name || o.username}</div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>
                       @{o.username} · {o.email}
                       {o.reason ? ` · "${o.reason}"` : ''}
                       {o.granted_by_username ? ` · by ${o.granted_by_username}` : ''}
@@ -499,14 +499,14 @@ function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: b
       disabled={disabled}
       style={{
         width: 44, height: 24, borderRadius: 12, border: 'none',
-        backgroundColor: value ? '#111' : '#CCC',
+        backgroundColor: value ? 'var(--accent-base)' : 'var(--bg-muted)',
         position: 'relative', cursor: disabled ? 'default' : 'pointer',
         transition: 'background-color 0.15s', flexShrink: 0,
       }}
     >
       <span style={{
         position: 'absolute', top: 2, left: value ? 22 : 2,
-        width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFF',
+        width: 20, height: 20, borderRadius: 10, backgroundColor: 'var(--bg-surface)',
         transition: 'left 0.15s',
       }} />
     </button>
@@ -514,26 +514,26 @@ function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: b
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: '#111', margin: '0 0 16px' },
-  card: { backgroundColor: '#FFF', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid #EEE' },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: '#111', margin: '0 0 6px' },
-  cardHint: { fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.5 },
+  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
+  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
+  cardTitle: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 6px' },
+  cardHint: { fontSize: 11, color: 'var(--fg-tertiary)', margin: '0 0 14px', lineHeight: 1.5 },
   gwList: { display: 'flex', flexDirection: 'column', gap: 10 },
-  gwRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', backgroundColor: '#F9F9F9', borderRadius: 6, gap: 12 },
-  gwLabel: { fontSize: 13, fontWeight: 600, color: '#111', flex: 1 },
-  primaryLabel: { fontSize: 11, color: '#555', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' },
-  textarea: { width: '100%', padding: 10, fontSize: 12, border: '1px solid #DDD', borderRadius: 6, fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box' },
+  gwRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', borderRadius: 6, gap: 12 },
+  gwLabel: { fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)', flex: 1 },
+  primaryLabel: { fontSize: 11, color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' },
+  textarea: { width: '100%', padding: 10, fontSize: 12, border: '1px solid var(--border-default)', borderRadius: 6, fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box' },
   grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  label: { display: 'block', fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 4 },
-  input: { width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid #DDD', borderRadius: 6, boxSizing: 'border-box' },
-  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: '#111', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  dangerBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: '#E53935', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  cancelBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: '#FFF', color: '#111', border: '1px solid #DDD', borderRadius: 6, cursor: 'pointer' },
-  empty: { fontSize: 12, color: '#888' },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: '#111', color: '#FFF', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
+  label: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: 4 },
+  input: { width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--border-default)', borderRadius: 6, boxSizing: 'border-box' },
+  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  dangerBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  cancelBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer' },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
   modalBg: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
-  modal: { backgroundColor: '#FFF', borderRadius: 10, padding: 24, maxWidth: 420, width: '90%' },
-  modalTitle: { fontSize: 16, fontWeight: 800, color: '#111', margin: '0 0 10px' },
-  modalBody: { fontSize: 13, color: '#555', lineHeight: 1.5, margin: '0 0 20px' },
+  modal: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '90%' },
+  modalTitle: { fontSize: 16, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 10px' },
+  modalBody: { fontSize: 13, color: 'var(--fg-secondary)', lineHeight: 1.5, margin: '0 0 20px' },
   modalRow: { display: 'flex', gap: 10, justifyContent: 'flex-end' },
 };

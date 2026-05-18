@@ -129,11 +129,11 @@ export default function NotificationTemplatesPage() {
               <tr key={t.key} style={styles.tr}>
                 <td style={styles.td}><code style={styles.code}>{t.key}</code></td>
                 <td style={styles.td}>{t.title}</td>
-                <td style={{ ...styles.td, color: '#555', maxWidth: 420 }}>
+                <td style={{ ...styles.td, color: 'var(--fg-secondary)', maxWidth: 420 }}>
                   <span title={t.body}>{t.body.length > 80 ? t.body.slice(0, 80) + '…' : t.body}</span>
                 </td>
                 <td style={styles.td}>
-                  <span style={{ ...styles.pill, backgroundColor: t.is_active ? '#E8F5E9' : '#FFEBEE', color: t.is_active ? '#1B5E20' : '#C62828' }}>
+                  <span style={{ ...styles.pill, backgroundColor: t.is_active ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)', color: t.is_active ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
                     {t.is_active ? 'ON' : 'OFF'}
                   </span>
                 </td>
@@ -224,33 +224,33 @@ export default function NotificationTemplatesPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: '#111', margin: '0 0 6px' },
-  sub: { fontSize: 12, color: '#666', margin: '0 0 16px' },
-  tableWrap: { backgroundColor: '#FFF', border: '1px solid #EEE', borderRadius: 10, overflow: 'hidden' },
+  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 6px' },
+  sub: { fontSize: 12, color: 'var(--fg-secondary)', margin: '0 0 16px' },
+  tableWrap: { backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden' },
   table: { width: '100%', borderCollapse: 'collapse' as any, fontSize: 13 },
-  th: { textAlign: 'left', padding: '10px 12px', backgroundColor: '#FAFAFA', color: '#555', fontWeight: 600, borderBottom: '1px solid #EEE', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
-  tr: { borderBottom: '1px solid #F3F3F3' },
-  td: { padding: '12px', color: '#111', verticalAlign: 'middle' },
-  code: { fontFamily: 'monospace', fontSize: 11, backgroundColor: '#F5F5F5', padding: '2px 6px', borderRadius: 4, color: '#333' },
+  th: { textAlign: 'left', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-default)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
+  tr: { borderBottom: '1px solid var(--border-subtle)' },
+  td: { padding: '12px', color: 'var(--fg-primary)', verticalAlign: 'middle' },
+  code: { fontFamily: 'monospace', fontSize: 11, backgroundColor: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: 4, color: 'var(--fg-secondary)' },
   pill: { fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 100 },
-  editBtn: { padding: '6px 12px', fontSize: 12, fontWeight: 600, backgroundColor: '#111', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  editBtn: { padding: '6px 12px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
   dim: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 50 },
-  drawer: { position: 'fixed', top: 0, right: 0, width: 520, height: '100%', backgroundColor: '#FFF', padding: 24, boxSizing: 'border-box', overflowY: 'auto', zIndex: 51, boxShadow: '-4px 0 12px rgba(0,0,0,0.08)' },
+  drawer: { position: 'fixed', top: 0, right: 0, width: 520, height: '100%', backgroundColor: 'var(--bg-surface)', padding: 24, boxSizing: 'border-box', overflowY: 'auto', zIndex: 51, boxShadow: '-4px 0 12px rgba(0,0,0,0.08)' },
   drawerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-  drawerTitle: { fontSize: 16, fontWeight: 800, color: '#111', margin: '0 0 4px' },
-  closeBtn: { background: 'none', border: 'none', fontSize: 28, lineHeight: 1, color: '#999', cursor: 'pointer' },
-  desc: { fontSize: 12, color: '#666', lineHeight: 1.5, margin: '8px 0 16px', padding: '10px 12px', backgroundColor: '#FAFAFA', borderRadius: 6, border: '1px solid #EEE' },
-  label: { display: 'block', fontSize: 11, fontWeight: 600, color: '#555', marginTop: 14, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
-  input: { width: '100%', padding: '10px 12px', fontSize: 14, border: '1px solid #DDD', borderRadius: 6, boxSizing: 'border-box' },
+  drawerTitle: { fontSize: 16, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 4px' },
+  closeBtn: { background: 'none', border: 'none', fontSize: 28, lineHeight: 1, color: 'var(--fg-tertiary)', cursor: 'pointer' },
+  desc: { fontSize: 12, color: 'var(--fg-secondary)', lineHeight: 1.5, margin: '8px 0 16px', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', borderRadius: 6, border: '1px solid var(--border-default)' },
+  label: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-secondary)', marginTop: 14, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
+  input: { width: '100%', padding: '10px 12px', fontSize: 14, border: '1px solid var(--border-default)', borderRadius: 6, boxSizing: 'border-box' },
   chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  chip: { fontSize: 11, fontFamily: 'monospace', padding: '5px 10px', backgroundColor: '#F0F0F0', color: '#111', border: '1px solid #DDD', borderRadius: 100, cursor: 'pointer' },
-  preview: { padding: 14, backgroundColor: '#F7F9FC', borderRadius: 8, border: '1px solid #E4E8EF' },
-  previewTitle: { fontSize: 13, fontWeight: 800, color: '#111', margin: '0 0 6px' },
-  previewBody: { fontSize: 13, color: '#333', margin: 0, lineHeight: 1.5 },
-  checkboxRow: { display: 'flex', alignItems: 'center', marginTop: 20, fontSize: 12, color: '#555' },
+  chip: { fontSize: 11, fontFamily: 'monospace', padding: '5px 10px', backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', border: '1px solid var(--border-default)', borderRadius: 100, cursor: 'pointer' },
+  preview: { padding: 14, backgroundColor: 'var(--bg-subtle)', borderRadius: 8, border: '1px solid var(--border-default)' },
+  previewTitle: { fontSize: 13, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 6px' },
+  previewBody: { fontSize: 13, color: 'var(--fg-secondary)', margin: 0, lineHeight: 1.5 },
+  checkboxRow: { display: 'flex', alignItems: 'center', marginTop: 20, fontSize: 12, color: 'var(--fg-secondary)' },
   footer: { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 },
-  cancelBtn: { padding: '10px 18px', fontSize: 13, fontWeight: 600, backgroundColor: '#FFF', color: '#111', border: '1px solid #DDD', borderRadius: 6, cursor: 'pointer' },
-  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: '#111', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  empty: { fontSize: 12, color: '#888' },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: '#111', color: '#FFF', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
+  cancelBtn: { padding: '10px 18px', fontSize: 13, fontWeight: 600, backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer' },
+  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  empty: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
 };
