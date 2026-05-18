@@ -100,7 +100,11 @@ export async function PATCH(req: NextRequest) {
   const { error } = await supabaseAdmin.from('app_config').upsert(rows, { onConflict: 'key' });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' }).catch(() => {});
+  // Fire-and-forget cache invalidation — never fail the request on it.
+  // (PostgrestFilterBuilder is a thenable but has no .catch in the types.)
+  try {
+    await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' });
+  } catch { /* cache will expire on its TTL */ }
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_ADMIN_SETTINGS', entity: 'app_config',
