@@ -46,8 +46,8 @@ export default function AdminSettingsPage() {
     setMaxApproval(cfg.max_card_approval_naira || '5000000');
     setTermsUrl(cfg.terms_url || '');
     setPrivacyUrl(cfg.privacy_url || '');
-    setPlaystoreUrl(cfg.playstore_url || '');
-    setAppstoreUrl(cfg.appstore_url || '');
+    setPlaystoreUrl(cfg.store_url_android || '');
+    setAppstoreUrl(cfg.store_url_ios || '');
     setLoading(false);
   };
 
@@ -115,7 +115,7 @@ export default function AdminSettingsPage() {
   const saveStoreLinks = () => {
     if (!isValidUrl(playstoreUrl)) { showToast('Play Store URL must start with https://'); return; }
     if (!isValidUrl(appstoreUrl)) { showToast('App Store URL must start with https://'); return; }
-    save({ playstore_url: playstoreUrl.trim(), appstore_url: appstoreUrl.trim() });
+    save({ store_url_android: playstoreUrl.trim(), store_url_ios: appstoreUrl.trim() });
   };
 
   const confirmEmergency = async () => {
