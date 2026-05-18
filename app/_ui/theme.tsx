@@ -65,10 +65,22 @@ async function persistThemeToServer(mode: ThemeMode): Promise<void> {
   } catch {  }
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-
-  const [mode, setModeState] = useState<ThemeMode>(() => readCookieTheme());
-  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(readCookieTheme()));
+export function ThemeProvider({
+  children,
+  initialMode,
+  initialResolved,
+}: {
+  children: React.ReactNode;
+  initialMode?: ThemeMode;
+  initialResolved?: ResolvedTheme;
+}) {
+  // Seeded from the server-read cookie so SSR and the client agree —
+  // otherwise SSR has no document and the theme switcher would highlight
+  // the wrong segment until hydration.
+  const [mode, setModeState] = useState<ThemeMode>(() => initialMode ?? readCookieTheme());
+  const [resolved, setResolved] = useState<ResolvedTheme>(
+    () => initialResolved ?? resolveTheme(initialMode ?? readCookieTheme()),
+  );
 
   useEffect(() => {
     applyTheme(resolved);

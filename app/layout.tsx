@@ -32,10 +32,19 @@ async function resolveInitialTheme(): Promise<'light' | 'dark'> {
   return 'light';
 }
 
+async function resolveInitialMode(): Promise<'light' | 'dark' | 'system'> {
+  const store = await cookies();
+  const raw = store.get('admin_theme')?.value;
+  return raw === 'dark' || raw === 'light' || raw === 'system' ? raw : 'system';
+}
+
 const NO_FLASH = `(function(){try{var g=function(n){var x=document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]+)'));return x?decodeURIComponent(x[1]):'';};var rc=g('admin_theme_resolved');var tm=g('admin_theme');var r=(rc==='dark'||rc==='light')?rc:((tm==='dark'||tm==='light')?tm:((window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'));document.documentElement.setAttribute('data-theme',r);}catch(e){}})();`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const initialTheme = await resolveInitialTheme();
+  const [initialTheme, initialMode] = await Promise.all([
+    resolveInitialTheme(),
+    resolveInitialMode(),
+  ]);
   return (
     <html
       lang="en"
@@ -45,7 +54,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     >
       <body>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider initialMode={initialMode} initialResolved={initialTheme}>{children}</ThemeProvider>
       </body>
     </html>
   );
