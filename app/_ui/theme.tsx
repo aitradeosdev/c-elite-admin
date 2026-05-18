@@ -24,11 +24,24 @@ function readCookieTheme(): ThemeMode {
   return raw === 'dark' || raw === 'light' || raw === 'system' ? raw : 'system';
 }
 
+const RESOLVED_COOKIE = 'admin_theme_resolved';
+
 function writeCookieTheme(mode: ThemeMode): void {
   if (typeof document === 'undefined') return;
   const maxAge = 60 * 60 * 24 * COOKIE_MAX_AGE_DAYS;
   const secure = location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = `${COOKIE_NAME}=${encodeURIComponent(mode)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
+}
+
+// The server can't read prefers-color-scheme, so it can't know what
+// 'system' resolves to. Persist the actual resolved light/dark value in
+// its own cookie; the server reads THIS for the initial data-theme, so
+// every refresh renders the correct theme with zero flash.
+function writeResolvedCookie(resolved: ResolvedTheme): void {
+  if (typeof document === 'undefined') return;
+  const maxAge = 60 * 60 * 24 * COOKIE_MAX_AGE_DAYS;
+  const secure = location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${RESOLVED_COOKIE}=${resolved}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
 }
 
 function getSystemTheme(): ResolvedTheme {
@@ -64,7 +77,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const initial = readCookieTheme();
     setModeState(initial);
-    setResolved(resolveTheme(initial));
+    const r = resolveTheme(initial);
+    setResolved(r);
+    writeResolvedCookie(r);
   }, []);
 
   useEffect(() => {
@@ -74,6 +89,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       const next: ResolvedTheme = mql.matches ? 'dark' : 'light';
       setResolved(next);
       applyTheme(next);
+      writeResolvedCookie(next);
     };
     handler();
     mql.addEventListener('change', handler);
@@ -85,7 +101,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setModeState(next);
     const r = resolveTheme(next);
     setResolved(r);
-    
+    writeResolvedCookie(r);
+
     if (typeof document !== 'undefined') {
       document.documentElement.classList.add('theme-transitioning');
       window.setTimeout(() => {
@@ -93,7 +110,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }, 250);
     }
     applyTheme(r);
-    
+
     persistThemeToServer(next);
   }, []);
 
