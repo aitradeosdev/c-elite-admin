@@ -67,15 +67,12 @@ async function persistThemeToServer(mode: ThemeMode): Promise<void> {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
-  const [mode, setModeState] = useState<ThemeMode>('system');
-  const [resolved, setResolved] = useState<ResolvedTheme>('light');
+  const [mode, setModeState] = useState<ThemeMode>(() => readCookieTheme());
+  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(readCookieTheme()));
 
   useEffect(() => {
-    const initial = readCookieTheme();
-    setModeState(initial);
-    const r = resolveTheme(initial);
-    setResolved(r);
-    writeResolvedCookie(r);
+    applyTheme(resolved);
+    writeResolvedCookie(resolved);
   }, []);
 
   useEffect(() => {
