@@ -10,14 +10,14 @@ function formatNaira(n: number | string | null | undefined) {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string }> = {
-    success: { bg: '#E8F5E9', color: '#2E7D32' },
-    completed: { bg: '#E8F5E9', color: '#2E7D32' },
-    pending: { bg: '#FFF8E1', color: '#F9A825' },
-    processing: { bg: '#FFF8E1', color: '#F9A825' },
-    failed: { bg: '#FFEBEE', color: '#C62828' },
-    refunded: { bg: '#F3E5F5', color: '#6A1B9A' },
+    success: { bg: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' },
+    completed: { bg: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' },
+    pending: { bg: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)' },
+    processing: { bg: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)' },
+    failed: { bg: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)' },
+    refunded: { bg: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)' },
   };
-  const s = map[status] || { bg: '#EBEBEB', color: '#888888' };
+  const s = map[status] || { bg: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)' };
   return (
     <span style={{
       backgroundColor: s.bg,
@@ -81,8 +81,8 @@ export default function UserDetailPage() {
     load();
   };
 
-  if (loading) return <p style={{ color: '#888', fontSize: 13 }}>Loading...</p>;
-  if (!data || !data.user) return <p style={{ color: '#888', fontSize: 13 }}>User not found</p>;
+  if (loading) return <p style={{ color: 'var(--fg-tertiary)', fontSize: 13 }}>Loading...</p>;
+  if (!data || !data.user) return <p style={{ color: 'var(--fg-tertiary)', fontSize: 13 }}>User not found</p>;
 
   const user = data.user;
   const stats = data.stats || {};
@@ -118,8 +118,8 @@ export default function UserDetailPage() {
 
         {user.is_frozen && user.freeze_reason && (
           <div style={s.freezeReasonBox}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#C62828', textTransform: 'uppercase' }}>Freeze Reason:</span>{' '}
-            <span style={{ fontSize: 12, color: '#333' }}>{user.freeze_reason}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--tone-danger-fg)', textTransform: 'uppercase' }}>Freeze Reason:</span>{' '}
+            <span style={{ fontSize: 12, color: 'var(--fg-secondary)' }}>{user.freeze_reason}</span>
           </div>
         )}
 
@@ -173,9 +173,9 @@ export default function UserDetailPage() {
             </thead>
             <tbody>
               {(data.recentTransactions || []).length === 0 ? (
-                <tr><td colSpan={4} style={{ ...s.td, textAlign: 'center', color: '#888' }}>No transactions</td></tr>
+                <tr><td colSpan={4} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No transactions</td></tr>
               ) : (data.recentTransactions || []).map((t: any, i: number) => (
-                <tr key={t.id} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
+                <tr key={t.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
                   <td style={s.td}>
                     <span style={s.typeBadge}>{(t.type || '-').replace(/_/g, ' ')}</span>
                   </td>
@@ -201,9 +201,9 @@ export default function UserDetailPage() {
             </thead>
             <tbody>
               {(data.devices || []).length === 0 ? (
-                <tr><td colSpan={5} style={{ ...s.td, textAlign: 'center', color: '#888' }}>No device logs</td></tr>
+                <tr><td colSpan={5} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No device logs</td></tr>
               ) : (data.devices || []).map((d: any, i: number) => (
-                <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
+                <tr key={i} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
                   <td style={{ ...s.td, fontWeight: 600 }}>{d.device_model || '-'}</td>
                   <td style={s.td}>{d.os_version || '-'}</td>
                   <td style={s.td}>{d.app_version || '-'}</td>
@@ -228,9 +228,9 @@ export default function UserDetailPage() {
             </thead>
             <tbody>
               {(data.logins || []).length === 0 ? (
-                <tr><td colSpan={5} style={{ ...s.td, textAlign: 'center', color: '#888' }}>No login history</td></tr>
+                <tr><td colSpan={5} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No login history</td></tr>
               ) : (data.logins || []).map((l: any, i: number) => (
-                <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F7F7F7' }}>
+                <tr key={i} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
                   <td style={{ ...s.td, fontWeight: 600 }}>{l.device_model || '-'}</td>
                   <td style={s.td}>{l.os_version || '-'}</td>
                   <td style={s.td}>{l.app_version || '-'}</td>
@@ -248,7 +248,7 @@ export default function UserDetailPage() {
           <div style={s.modalOverlay} onClick={() => setShowFreezeModal(false)} />
           <div style={s.modal}>
             <p style={s.modalTitle}>Freeze Account</p>
-            <p style={{ fontSize: 13, color: '#333', margin: '0 0 12px' }}>
+            <p style={{ fontSize: 13, color: 'var(--fg-secondary)', margin: '0 0 12px' }}>
               Freezing <strong>@{user.username}</strong> will block all transactions, withdrawals, and transfers.
             </p>
             <label style={s.fieldLabel}>REASON</label>
@@ -258,7 +258,7 @@ export default function UserDetailPage() {
               placeholder="Why is this account being frozen?"
               style={s.textarea}
             />
-            {freezeError && <p style={{ fontSize: 12, color: '#E53935', margin: '8px 0 0' }}>{freezeError}</p>}
+            {freezeError && <p style={{ fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0 0' }}>{freezeError}</p>}
             <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
               <button style={s.cancelBtn} onClick={() => setShowFreezeModal(false)}>Cancel</button>
               <button style={s.confirmFreezeBtn} onClick={handleFreeze} disabled={freezing}>
@@ -274,43 +274,43 @@ export default function UserDetailPage() {
 
 function InfoRow({ label, value, bold }: { label: string; value: any; bold?: boolean }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #F0F0F0', fontSize: 13 }}>
-      <span style={{ color: '#888' }}>{label}</span>
-      <span style={{ fontWeight: bold ? 800 : 600, color: '#111', maxWidth: '55%', textAlign: 'right', wordBreak: 'break-word' }}>{value || '-'}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: 13 }}>
+      <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
+      <span style={{ fontWeight: bold ? 800 : 600, color: 'var(--fg-primary)', maxWidth: '55%', textAlign: 'right', wordBreak: 'break-word' }}>{value || '-'}</span>
     </div>
   );
 }
 
 const s: Record<string, React.CSSProperties> = {
   topBar: { marginBottom: 16 },
-  backLink: { fontSize: 13, color: '#1565C0', textDecoration: 'none', fontWeight: 600 },
-  profileCard: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 20, marginBottom: 16 },
+  backLink: { fontSize: 13, color: 'var(--fg-link)', textDecoration: 'none', fontWeight: 600 },
+  profileCard: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
   avatarRow: { display: 'flex', gap: 14, alignItems: 'center', marginBottom: 16 },
-  avatar: { width: 48, height: 48, borderRadius: '50%', backgroundColor: '#111', color: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, flexShrink: 0 },
-  profileName: { fontSize: 16, fontWeight: 800, color: '#111', margin: 0 },
-  profileUsername: { fontSize: 13, color: '#888', margin: '2px 0 0' },
-  frozenBadge: { backgroundColor: '#FFEBEE', color: '#C62828', padding: '4px 12px', borderRadius: 100, fontSize: 11, fontWeight: 700 },
-  freezeBtn: { backgroundColor: '#FFEBEE', color: '#C62828', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  unfreezeBtn: { backgroundColor: '#E8F5E9', color: '#2E7D32', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  freezeReasonBox: { backgroundColor: '#FFEBEE', borderRadius: 8, padding: 12, marginBottom: 16 },
+  avatar: { width: 48, height: 48, borderRadius: '50%', backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, flexShrink: 0 },
+  profileName: { fontSize: 16, fontWeight: 800, color: 'var(--fg-primary)', margin: 0 },
+  profileUsername: { fontSize: 13, color: 'var(--fg-tertiary)', margin: '2px 0 0' },
+  frozenBadge: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '4px 12px', borderRadius: 100, fontSize: 11, fontWeight: 700 },
+  freezeBtn: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  unfreezeBtn: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  freezeReasonBox: { backgroundColor: 'var(--tone-danger-bg)', borderRadius: 8, padding: 12, marginBottom: 16 },
   infoGrid: { },
   statsGrid: { display: 'flex', gap: 12, marginTop: 16 },
-  miniStat: { flex: 1, backgroundColor: '#F7F7F7', borderRadius: 8, padding: 12, textAlign: 'center' },
-  miniLabel: { fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 4px' },
-  miniValue: { fontSize: 20, fontWeight: 800, color: '#111', margin: 0 },
-  tabs: { display: 'flex', gap: 0, borderBottom: '1px solid #EEE', marginBottom: 0 },
-  tabBtn: { padding: '10px 16px', background: 'none', border: 'none', borderBottom: '2px solid transparent', fontSize: 12, fontWeight: 500, color: '#888', cursor: 'pointer' },
-  tabBtnActive: { borderBottom: '2px solid #111111', color: '#111', fontWeight: 700 },
-  tableWrap: { overflowX: 'auto', borderRadius: '0 0 10px 10px', border: '1px solid #EEEEEE', borderTop: 'none', backgroundColor: '#FFF' },
+  miniStat: { flex: 1, backgroundColor: 'var(--bg-subtle)', borderRadius: 8, padding: 12, textAlign: 'center' },
+  miniLabel: { fontSize: 10, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 4px' },
+  miniValue: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: 0 },
+  tabs: { display: 'flex', gap: 0, borderBottom: '1px solid var(--border-default)', marginBottom: 0 },
+  tabBtn: { padding: '10px 16px', background: 'none', border: 'none', borderBottom: '2px solid transparent', fontSize: 12, fontWeight: 500, color: 'var(--fg-tertiary)', cursor: 'pointer' },
+  tabBtnActive: { borderBottom: '2px solid var(--accent-base)', color: 'var(--fg-primary)', fontWeight: 700 },
+  tableWrap: { overflowX: 'auto', borderRadius: '0 0 10px 10px', border: '1px solid var(--border-default)', borderTop: 'none', backgroundColor: 'var(--bg-surface)' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: '#111111', color: '#FFFFFF', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '12px 12px', color: '#333333', fontSize: 12, verticalAlign: 'middle' },
-  typeBadge: { backgroundColor: '#F3E5F5', color: '#6A1B9A', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 600, textTransform: 'capitalize' },
+  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
+  td: { padding: '12px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
+  typeBadge: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 600, textTransform: 'capitalize' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 49 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 24, width: 440, zIndex: 50, maxHeight: '90vh', overflowY: 'auto' },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: '#111111', margin: '0 0 12px' },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  textarea: { width: '100%', border: '1.5px solid #E8E8E8', borderRadius: 8, padding: '10px 14px', fontSize: 13, minHeight: 80, resize: 'vertical', outline: 'none', boxSizing: 'border-box' },
-  cancelBtn: { backgroundColor: '#F7F7F7', color: '#333333', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  confirmFreezeBtn: { backgroundColor: '#C62828', color: '#FFFFFF', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 440, zIndex: 50, maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--border-default)' },
+  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 12px' },
+  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  textarea: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, minHeight: 80, resize: 'vertical', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)' },
+  cancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  confirmFreezeBtn: { backgroundColor: 'var(--tone-danger-fg)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
 };
