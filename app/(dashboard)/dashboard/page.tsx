@@ -51,17 +51,39 @@ async function getDashboardStats() {
 }
 
 async function getRecentSubmissions() {
+  // card_submissions has NO FK to card_countries — embedding it made the
+  // whole query error (data = null → "No submissions yet"). Country comes
+  // from card_types.country_code, resolved to a name via card_countries
+  // keyed by (card_id, country_code), same as the card-queue route.
   const { data } = await supabaseAdmin
     .from('card_submissions')
     .select(`
-      id, amount_foreign, payout_naira, status, created_at,
+      id, amount_foreign, payout_naira, status, created_at, card_id,
       users(username),
       cards(name),
-      card_countries(country_name)
+      card_types(country_code)
     `)
     .order('created_at', { ascending: false })
     .limit(10);
-  return data || [];
+  const rows = data || [];
+  const cardIds = [...new Set(rows.map((r: any) => r.card_id).filter(Boolean))];
+  let nameByKey: Record<string, string> = {};
+  if (cardIds.length) {
+    const { data: cc } = await supabaseAdmin
+      .from('card_countries')
+      .select('card_id, country_code, country_name')
+      .in('card_id', cardIds);
+    nameByKey = Object.fromEntries(
+      (cc || []).map((c: any) => [`${c.card_id}|${c.country_code}`, c.country_name]),
+    );
+  }
+  return rows.map((r: any) => ({
+    ...r,
+    country_name:
+      nameByKey[`${r.card_id}|${r.card_types?.country_code}`] ||
+      r.card_types?.country_code ||
+      null,
+  }));
 }
 
 function formatNaira(amount: number) {
@@ -180,7 +202,7 @@ export default async function DashboardPage() {
                   <Tr key={row.id}>
                     <Td emphasis="primary">{row.users?.username || '—'}</Td>
                     <Td>{row.cards?.name || '—'}</Td>
-                    <Td emphasis="secondary">{row.card_countries?.country_name || '—'}</Td>
+                    <Td emphasis="secondary">{row.country_name || '—'}</Td>
                     <Td align="right" mono>{formatNaira(row.payout_naira)}</Td>
                     <Td emphasis="secondary">{new Date(row.created_at).toLocaleDateString()}</Td>
                     <Td>
