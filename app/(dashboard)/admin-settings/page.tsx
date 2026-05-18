@@ -24,6 +24,8 @@ export default function AdminSettingsPage() {
   const [maxApproval, setMaxApproval] = useState('');
   const [termsUrl, setTermsUrl] = useState('');
   const [privacyUrl, setPrivacyUrl] = useState('');
+  const [playstoreUrl, setPlaystoreUrl] = useState('');
+  const [appstoreUrl, setAppstoreUrl] = useState('');
 
   const [emergencyConfirm, setEmergencyConfirm] = useState<null | 'on' | 'off'>(null);
 
@@ -44,6 +46,8 @@ export default function AdminSettingsPage() {
     setMaxApproval(cfg.max_card_approval_naira || '5000000');
     setTermsUrl(cfg.terms_url || '');
     setPrivacyUrl(cfg.privacy_url || '');
+    setPlaystoreUrl(cfg.playstore_url || '');
+    setAppstoreUrl(cfg.appstore_url || '');
     setLoading(false);
   };
 
@@ -107,6 +111,11 @@ export default function AdminSettingsPage() {
   const savePrivacy = () => {
     if (!isValidUrl(privacyUrl)) { showToast('Privacy URL must start with https://'); return; }
     save({ privacy_url: privacyUrl.trim() });
+  };
+  const saveStoreLinks = () => {
+    if (!isValidUrl(playstoreUrl)) { showToast('Play Store URL must start with https://'); return; }
+    if (!isValidUrl(appstoreUrl)) { showToast('App Store URL must start with https://'); return; }
+    save({ playstore_url: playstoreUrl.trim(), appstore_url: appstoreUrl.trim() });
   };
 
   const confirmEmergency = async () => {
@@ -240,6 +249,34 @@ export default function AdminSettingsPage() {
         />
         <button style={styles.saveBtn} onClick={savePrivacy} disabled={saving}>
           {saving ? 'Saving…' : 'Save Privacy URL'}
+        </button>
+      </div>
+
+      <div style={styles.card}>
+        <p style={styles.cardTitle}>App Store Links</p>
+        <p style={styles.cardHint}>
+          Public store listing URLs. Used by the app&apos;s update prompt to send
+          users to the right store. Must be HTTPS — a missing or invalid value is
+          treated as &quot;not configured&quot;.
+        </p>
+        <label style={styles.label}>Google Play Store URL</label>
+        <input
+          style={styles.input}
+          type="url"
+          value={playstoreUrl}
+          onChange={(e) => setPlaystoreUrl(e.target.value)}
+          placeholder="https://play.google.com/store/apps/details?id=com.cardelite.app"
+        />
+        <label style={{ ...styles.label, marginTop: 12 }}>Apple App Store URL</label>
+        <input
+          style={styles.input}
+          type="url"
+          value={appstoreUrl}
+          onChange={(e) => setAppstoreUrl(e.target.value)}
+          placeholder="https://apps.apple.com/app/id000000000"
+        />
+        <button style={styles.saveBtn} onClick={saveStoreLinks} disabled={saving}>
+          {saving ? 'Saving…' : 'Save Store Links'}
         </button>
       </div>
 
