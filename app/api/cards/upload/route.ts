@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
+import { verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from '../../../lib/uploadTypes';
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const admin = await verifyAdminJWT(token);
+  // verifyAdminFromRequest accepts the mobile Bearer JWT OR the web
+  // admin_token cookie — same pattern as every other admin route. This
+  // route was missed in the Bearer refactor; cookie-only blocked mobile.
+  const admin = await verifyAdminFromRequest();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
