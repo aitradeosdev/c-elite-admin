@@ -12,7 +12,7 @@ const GATEWAYS = [
 export default function AdminSettingsPage() {
   const [config, setConfig] = useState<Config>({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [toast, setToast] = useState('');
   const [forbidden, setForbidden] = useState(false);
 
@@ -53,19 +53,22 @@ export default function AdminSettingsPage() {
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
-  const save = async (changes: Record<string, string>) => {
-    setSaving(true);
-    const res = await fetch('/api/admin-settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ changes }),
-    });
-    setSaving(false);
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(body.error || 'Save failed'); return false; }
-    showToast('Saved');
-    await fetchConfig();
-    return true;
+  const save = async (changes: Record<string, string>, key: string) => {
+    setSavingKey(key);
+    try {
+      const res = await fetch('/api/admin-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(body.error || 'Save failed'); return false; }
+      showToast('Saved');
+      setConfig((c) => ({ ...c, ...changes }));
+      return true;
+    } finally {
+      setSavingKey(null);
+    }
   };
 
   const toggleGateway = (g: string, enabled: boolean) => {
@@ -74,7 +77,7 @@ export default function AdminSettingsPage() {
       showToast('Cannot disable the primary gateway');
       return;
     }
-    save({ [`gateway_${g}_enabled`]: enabled ? 'true' : 'false' });
+    save({ [`gateway_${g}_enabled`]: enabled ? 'true' : 'false' }, 'gateways');
   };
 
   const setPrimary = (g: string) => {
@@ -82,45 +85,45 @@ export default function AdminSettingsPage() {
       showToast('Enable the gateway first');
       return;
     }
-    save({ active_payment_gateway: g });
+    save({ active_payment_gateway: g }, 'gateways');
   };
 
-  const toggleVtpass = (v: boolean) => save({ bill_vtpass_enabled: v ? 'true' : 'false' });
-  const toggleTagTransfer = (v: boolean) => save({ tag_transfer_enabled: v ? 'true' : 'false' });
-  const saveLiveChat = () => save({ live_chat_url: liveChatUrl });
+  const toggleVtpass = (v: boolean) => save({ bill_vtpass_enabled: v ? 'true' : 'false' }, 'vtpass');
+  const toggleTagTransfer = (v: boolean) => save({ tag_transfer_enabled: v ? 'true' : 'false' }, 'tagTransfer');
+  const saveLiveChat = () => save({ live_chat_url: liveChatUrl }, 'liveChat');
   const saveMaxApproval = () => {
     const n = Number(maxApproval);
     if (!Number.isFinite(n) || n < 1000) {
       showToast('Enter a valid amount (minimum ₦1,000)');
       return;
     }
-    save({ max_card_approval_naira: String(Math.floor(n)) });
+    save({ max_card_approval_naira: String(Math.floor(n)) }, 'maxApproval');
   };
   const saveVersion = () => save({
     app_current_version: curVer,
     app_minimum_version: minVer,
     app_update_type: updType,
     app_update_message: updMsg,
-  });
+  }, 'version');
 
   const isValidUrl = (u: string) => u.length === 0 || /^https?:\/\/[^\s<>"']{3,}$/i.test(u.trim());
   const saveTerms = () => {
     if (!isValidUrl(termsUrl)) { showToast('Terms URL must start with https://'); return; }
-    save({ terms_url: termsUrl.trim() });
+    save({ terms_url: termsUrl.trim() }, 'terms');
   };
   const savePrivacy = () => {
     if (!isValidUrl(privacyUrl)) { showToast('Privacy URL must start with https://'); return; }
-    save({ privacy_url: privacyUrl.trim() });
+    save({ privacy_url: privacyUrl.trim() }, 'privacy');
   };
   const saveStoreLinks = () => {
     if (!isValidUrl(playstoreUrl)) { showToast('Play Store URL must start with https://'); return; }
     if (!isValidUrl(appstoreUrl)) { showToast('App Store URL must start with https://'); return; }
-    save({ store_url_android: playstoreUrl.trim(), store_url_ios: appstoreUrl.trim() });
+    save({ store_url_android: playstoreUrl.trim(), store_url_ios: appstoreUrl.trim() }, 'storeLinks');
   };
 
   const confirmEmergency = async () => {
     if (!emergencyConfirm) return;
-    const ok = await save({ emergency_mode: emergencyConfirm === 'on' ? 'true' : 'false' });
+    const ok = await save({ emergency_mode: emergencyConfirm === 'on' ? 'true' : 'false' }, 'emergency');
     if (ok) setEmergencyConfirm(null);
   };
 
@@ -152,11 +155,11 @@ export default function AdminSettingsPage() {
                     name="primary_gateway"
                     checked={isPrimary}
                     onChange={() => setPrimary(g.key)}
-                    disabled={saving || !enabled}
+                    disabled={savingKey === 'gateways' || !enabled}
                   />
                   Primary
                 </label>
-                <Toggle value={enabled} onChange={(v) => toggleGateway(g.key, v)} disabled={saving} />
+                <Toggle value={enabled} onChange={(v) => toggleGateway(g.key, v)} disabled={savingKey === 'gateways'} />
               </div>
             );
           })}
@@ -180,8 +183,8 @@ export default function AdminSettingsPage() {
           onChange={(e) => setMaxApproval(e.target.value)}
           placeholder="5000000"
         />
-        <button style={styles.saveBtn} onClick={saveMaxApproval} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
+        <button style={styles.saveBtn} onClick={saveMaxApproval} disabled={savingKey === 'maxApproval'}>
+          {savingKey === 'maxApproval' ? 'Saving…' : 'Save'}
         </button>
       </div>
 
@@ -192,7 +195,7 @@ export default function AdminSettingsPage() {
           <Toggle
             value={config.bill_vtpass_enabled === 'true'}
             onChange={toggleVtpass}
-            disabled={saving}
+            disabled={savingKey === 'vtpass'}
           />
         </div>
       </div>
@@ -200,7 +203,7 @@ export default function AdminSettingsPage() {
       <TagTransferSection
         enabled={config.tag_transfer_enabled !== 'false'}
         onToggle={toggleTagTransfer}
-        saving={saving}
+        saving={savingKey === 'tagTransfer'}
         showToast={showToast}
       />
 
@@ -214,8 +217,8 @@ export default function AdminSettingsPage() {
           onChange={(e) => setLiveChatUrl(e.target.value)}
           placeholder="https://direct.lc.chat/..."
         />
-        <button style={styles.saveBtn} onClick={saveLiveChat} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
+        <button style={styles.saveBtn} onClick={saveLiveChat} disabled={savingKey === 'liveChat'}>
+          {savingKey === 'liveChat' ? 'Saving…' : 'Save'}
         </button>
       </div>
 
@@ -235,8 +238,8 @@ export default function AdminSettingsPage() {
           onChange={(e) => setTermsUrl(e.target.value)}
           placeholder="https://your-site.com/terms"
         />
-        <button style={{ ...styles.saveBtn, marginBottom: 12 }} onClick={saveTerms} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Terms URL'}
+        <button style={{ ...styles.saveBtn, marginBottom: 12 }} onClick={saveTerms} disabled={savingKey === 'terms'}>
+          {savingKey === 'terms' ? 'Saving…' : 'Save Terms URL'}
         </button>
 
         <label style={styles.label}>Privacy Policy URL</label>
@@ -247,8 +250,8 @@ export default function AdminSettingsPage() {
           onChange={(e) => setPrivacyUrl(e.target.value)}
           placeholder="https://your-site.com/privacy"
         />
-        <button style={styles.saveBtn} onClick={savePrivacy} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Privacy URL'}
+        <button style={styles.saveBtn} onClick={savePrivacy} disabled={savingKey === 'privacy'}>
+          {savingKey === 'privacy' ? 'Saving…' : 'Save Privacy URL'}
         </button>
       </div>
 
@@ -275,8 +278,8 @@ export default function AdminSettingsPage() {
           onChange={(e) => setAppstoreUrl(e.target.value)}
           placeholder="https://apps.apple.com/app/id000000000"
         />
-        <button style={styles.saveBtn} onClick={saveStoreLinks} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Store Links'}
+        <button style={styles.saveBtn} onClick={saveStoreLinks} disabled={savingKey === 'storeLinks'}>
+          {savingKey === 'storeLinks' ? 'Saving…' : 'Save Store Links'}
         </button>
       </div>
 
@@ -303,8 +306,8 @@ export default function AdminSettingsPage() {
             <input style={styles.input} value={updMsg} onChange={(e) => setUpdMsg(e.target.value)} />
           </div>
         </div>
-        <button style={{ ...styles.saveBtn, marginTop: 12 }} onClick={saveVersion} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
+        <button style={{ ...styles.saveBtn, marginTop: 12 }} onClick={saveVersion} disabled={savingKey === 'version'}>
+          {savingKey === 'version' ? 'Saving…' : 'Save'}
         </button>
       </div>
 
@@ -318,7 +321,7 @@ export default function AdminSettingsPage() {
           <button
             style={emergencyOn ? styles.dangerBtn : styles.saveBtn}
             onClick={() => setEmergencyConfirm(emergencyOn ? 'off' : 'on')}
-            disabled={saving}
+            disabled={savingKey === 'emergency'}
           >
             {emergencyOn ? 'Disable Emergency Mode' : 'Enable Emergency Mode'}
           </button>
@@ -337,13 +340,13 @@ export default function AdminSettingsPage() {
                 : 'Users will regain access to the app. Continue?'}
             </p>
             <div style={styles.modalRow}>
-              <button style={styles.cancelBtn} onClick={() => setEmergencyConfirm(null)} disabled={saving}>Cancel</button>
+              <button style={styles.cancelBtn} onClick={() => setEmergencyConfirm(null)} disabled={savingKey === 'emergency'}>Cancel</button>
               <button
                 style={emergencyConfirm === 'on' ? styles.dangerBtn : styles.saveBtn}
                 onClick={confirmEmergency}
-                disabled={saving}
+                disabled={savingKey === 'emergency'}
               >
-                {saving ? 'Working…' : 'Confirm'}
+                {savingKey === 'emergency' ? 'Working…' : 'Confirm'}
               </button>
             </div>
           </div>
