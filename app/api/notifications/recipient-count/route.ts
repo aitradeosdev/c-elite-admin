@@ -17,5 +17,15 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin.rpc('resolve_broadcast_audience', { p_audience: audience });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ count: (data || []).length });
+  let count = (data || []).length;
+
+  if (audience === 'all_anon') {
+    const { count: anonCount } = await supabaseAdmin
+      .from('user_push_tokens')
+      .select('token', { count: 'exact', head: true })
+      .is('user_id', null);
+    count += anonCount || 0;
+  }
+
+  return NextResponse.json({ count });
 }

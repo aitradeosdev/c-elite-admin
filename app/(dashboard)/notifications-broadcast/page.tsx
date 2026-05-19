@@ -36,7 +36,8 @@ interface Broadcast {
 interface UserHit { id: string; full_name: string | null; username: string | null; email: string }
 
 const AUDIENCES = [
-  { value: 'all', label: 'All Users' },
+  { value: 'all', label: 'All Users (in-app only)' },
+  { value: 'all_anon', label: 'All Users + Anonymous' },
   { value: 'active_7d', label: 'Active in last 7 days' },
   { value: 'inactive', label: 'Inactive (7+ days)' },
   { value: 'specific', label: 'Specific User' },
