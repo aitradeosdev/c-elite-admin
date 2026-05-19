@@ -8,6 +8,7 @@ const KEYS = [
   'min_withdrawal_amount',
   'max_withdrawal_amount',
   'max_daily_withdrawal',
+  'pin_reset_freeze_hours',
   'withdraw_fee',
   'transfer_tag_fee',
   'transfer_bank_fee',

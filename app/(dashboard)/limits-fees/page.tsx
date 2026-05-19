@@ -9,6 +9,7 @@ const FIELDS = [
       { key: 'min_withdrawal_amount', label: 'Minimum Withdrawal (₦)', hint: 'Smallest amount a user can withdraw per request.' },
       { key: 'max_withdrawal_amount', label: 'Maximum Withdrawal (₦)', hint: 'Largest amount a user can withdraw in a single request.' },
       { key: 'max_daily_withdrawal', label: 'Daily Withdrawal Cap (₦)', hint: 'Total per-user per-day limit across all withdrawals.' },
+      { key: 'pin_reset_freeze_hours', label: 'PIN-Reset Withdrawal Freeze (hours)', hint: 'After a user resets their PIN via OTP, withdrawals are blocked for this many hours. Set 0 to disable. Max 720 (30 days).' },
       { key: 'withdraw_fee', label: 'Withdraw Fee (₦)', hint: 'Flat fee charged on withdrawals to bank accounts. Set 0 for free.' },
     ],
   },
