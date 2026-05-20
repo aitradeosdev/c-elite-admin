@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { ChevronsLeft, ChevronsRight, LogOut } from 'lucide-react';
 import { ToastProvider } from '../../_ui/Misc';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { findBreadcrumb, filterNavByPermissions } from './nav';
+import { findBreadcrumb, filterNavByPermissions, findNavKey } from './nav';
+import { AdminNotFound } from './NotFound';
 import s from './Shell.module.css';
 
 const COLLAPSE_KEY = 'cardelite-admin-sidebar-collapsed';
@@ -51,6 +52,12 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
 
   const initial = (username || '?').charAt(0).toUpperCase();
   const breadcrumb = findBreadcrumb(pathname);
+
+  const leafKey = findNavKey(pathname);
+  const permissionDenied = !isSuperAdmin
+    && pathname !== '/dashboard'
+    && leafKey !== null
+    && !allowedKeys.includes(leafKey);
 
   return (
     <ToastProvider>
@@ -135,7 +142,7 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
               <ThemeSwitcher />
             </div>
           </header>
-          <div className={s.content}>{children}</div>
+          <div className={s.content}>{permissionDenied ? <AdminNotFound /> : children}</div>
         </main>
       </div>
     </ToastProvider>

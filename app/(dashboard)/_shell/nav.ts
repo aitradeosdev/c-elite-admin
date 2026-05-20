@@ -99,6 +99,17 @@ export function findBreadcrumb(pathname: string): { group: string; item: string 
   return null;
 }
 
+export function findNavKey(pathname: string): string | null {
+  for (const group of NAV_GROUPS) {
+    for (const leaf of group.items) {
+      if (pathname === leaf.href || pathname.startsWith(leaf.href + '/')) {
+        return leaf.key;
+      }
+    }
+  }
+  return null;
+}
+
 export function filterNavByPermissions(allowedKeys: string[], isSuperAdmin: boolean): NavGroup[] {
   if (isSuperAdmin) return NAV_GROUPS;
   const allowed = new Set(allowedKeys);

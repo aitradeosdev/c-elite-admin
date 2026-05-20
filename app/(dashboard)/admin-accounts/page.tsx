@@ -70,7 +70,7 @@ export default function AdminAccountsPage() {
   const fetchAdmins = async (silent = false) => {
     if (!silent) setLoading(true);
     const res = await fetch('/api/admin-accounts');
-    if (res.status === 403) { router.push('/dashboard'); return; }
+    if (res.status === 403) { if (!silent) setLoading(false); return; }
     const data = await res.json();
     setAdmins(data.admins || []);
     if (!silent) setLoading(false);
