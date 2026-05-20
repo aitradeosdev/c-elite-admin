@@ -44,19 +44,21 @@ export default function TransactionsOverviewPage() {
   const [dateTo, setDateTo] = useState('');
   const [search, setSearch] = useState('');
 
+  const [applied, setApplied] = useState({ type: '', status: '', dateFrom: '', dateTo: '', search: '' });
+
   const buildParams = useCallback(() => {
     const params = new URLSearchParams();
-    if (type) params.set('type', type);
-    if (status) params.set('status', status);
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
-    if (search) params.set('search', search);
+    if (applied.type) params.set('type', applied.type);
+    if (applied.status) params.set('status', applied.status);
+    if (applied.dateFrom) params.set('date_from', applied.dateFrom);
+    if (applied.dateTo) params.set('date_to', applied.dateTo);
+    if (applied.search) params.set('search', applied.search);
     params.set('page', String(page));
     params.set('limit', String(limit));
     return params;
-  }, [type, status, dateFrom, dateTo, search, page]);
+  }, [applied, page]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     const res = await fetch('/api/transactions?' + buildParams().toString());
     const json = await res.json();
@@ -64,11 +66,14 @@ export default function TransactionsOverviewPage() {
     setTotal(json.total || 0);
     setStats(json.stats || { totalCount: 0, totalAmount: 0, todayCount: 0, todayAmount: 0 });
     setLoading(false);
+  }, [buildParams]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const applyFilters = () => {
+    setApplied({ type, status, dateFrom, dateTo, search });
+    setPage(1);
   };
-
-  useEffect(() => { load(); }, [page]);
-
-  const applyFilters = () => { setPage(1); load(); };
 
   const clearFilters = () => {
     setType('');
@@ -76,8 +81,8 @@ export default function TransactionsOverviewPage() {
     setDateFrom('');
     setDateTo('');
     setSearch('');
+    setApplied({ type: '', status: '', dateFrom: '', dateTo: '', search: '' });
     setPage(1);
-    setTimeout(() => load(), 0);
   };
 
   const totalPages = Math.ceil(total / limit);
