@@ -50,6 +50,10 @@ export async function PATCH(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  try {
+    await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' });
+  } catch {}
+
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_APP_CONFIG', entity: 'app_config',
     entity_id: 'batch', before_value: redactAudit(beforeMap), after_value: redactAudit(changes),
