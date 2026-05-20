@@ -52,7 +52,11 @@ export async function GET(req: NextRequest) {
     .from('transactions')
     .select('id, user_id, type, amount, status, reference_id, metadata, created_at, users(username, full_name, email)', { count: 'exact' });
 
-  if (type) query = query.eq('type', type);
+  if (type) {
+    const arr = type.split(',').map((s) => s.trim()).filter(Boolean);
+    if (arr.length === 1) query = query.eq('type', arr[0]);
+    else if (arr.length > 1) query = query.in('type', arr);
+  }
   if (status) query = query.eq('status', status);
   if (dateFrom) query = query.gte('created_at', dateFrom);
   if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59.999Z');

@@ -26,8 +26,14 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'purple'
   }
 }
 
-const TYPE_OPTIONS = ['', 'card_trade', 'withdrawal', 'transfer', 'bill_payment', 'referral_bonus', 'coupon_bonus', 'manual_credit', 'task_reward', 'giftbox'];
-const STATUS_OPTIONS = ['', 'success', 'pending', 'processing', 'failed', 'refunded', 'pending_review'];
+const TYPE_GROUPS: { label: string; key: string; values: string[] }[] = [
+  { label: 'Giftcards', key: 'giftcards', values: ['giftcard_credit'] },
+  { label: 'Withdrawals', key: 'withdrawals', values: ['withdrawal', 'withdrawal_refund'] },
+  { label: 'Transfers', key: 'transfers', values: ['transfer_tag', 'transfer_received', 'transfer_refund', 'transfer_bank'] },
+  { label: 'Bills', key: 'bills', values: ['airtime', 'data', 'cable', 'electricity'] },
+  { label: 'Bonuses', key: 'bonuses', values: ['signup_bonus', 'newbie_bonus', 'giftbox_bonus', 'referral_bonus', 'bonus_redeem', 'level_bonus'] },
+];
+const STATUS_OPTIONS = ['', 'pending', 'pending_review', 'success', 'failed'];
 
 export default function TransactionsOverviewPage() {
   const [rows, setRows] = useState<any[]>([]);
@@ -142,8 +148,8 @@ export default function TransactionsOverviewPage() {
             />
             <Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 160 }}>
               <option value="">All types</option>
-              {TYPE_OPTIONS.filter(Boolean).map((t) => (
-                <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+              {TYPE_GROUPS.map((g) => (
+                <option key={g.key} value={g.values.join(',')}>{g.label}</option>
               ))}
             </Select>
             <Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 160 }}>
