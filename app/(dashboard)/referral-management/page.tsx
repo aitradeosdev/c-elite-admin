@@ -21,7 +21,7 @@ interface Stats {
   total_paid_out: number;
 }
 
-const CONFIG_KEYS = ['referral_active', 'referral_referrer_bonus', 'referral_referee_bonus'];
+const CONFIG_KEYS = ['referral_active', 'referral_referrer_bonus', 'referral_referee_bonus', 'referral_min_trade_usd', 'referral_max_per_day'];
 
 export default function ReferralManagementPage() {
   const [config, setConfig] = useState<Record<string, string>>({});
@@ -94,6 +94,17 @@ export default function ReferralManagementPage() {
           <div style={{ flex: 1 }}>
             <label style={styles.fieldLabel}>REFEREE BONUS (₦)</label>
             <input style={styles.input} type="number" value={getValue('referral_referee_bonus')} onChange={(e) => setValue('referral_referee_bonus', e.target.value)} />
+          </div>
+        </div>
+
+        <div style={styles.fieldRow}>
+          <div style={{ flex: 1 }}>
+            <label style={styles.fieldLabel}>MIN FIRST-TRADE (USD)</label>
+            <input style={styles.input} type="number" value={getValue('referral_min_trade_usd')} onChange={(e) => setValue('referral_min_trade_usd', e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={styles.fieldLabel}>MAX REFERRALS / DAY</label>
+            <input style={styles.input} type="number" value={getValue('referral_max_per_day')} onChange={(e) => setValue('referral_max_per_day', e.target.value)} />
           </div>
         </div>
         <p style={styles.readonlyNote}>Trigger: First Trade</p>

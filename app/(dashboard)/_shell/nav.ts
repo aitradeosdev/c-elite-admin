@@ -7,6 +7,7 @@ import {
   Gift, Trophy, TicketPercent, Share2,
   Megaphone, Bell, Mail,
   Settings, Wallet, SlidersHorizontal,
+  Receipt, ShieldAlert, Shield,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -74,7 +75,15 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: 'platform_balance',       label: 'Balance',        href: '/platform-balance',       icon: Wallet },
       { key: 'limits_fees',            label: 'Limits & Fees',  href: '/limits-fees',            icon: SlidersHorizontal },
+      { key: 'bill_settings',          label: 'Bill Settings',  href: '/bill-settings',          icon: Receipt },
       { key: 'admin_settings',         label: 'Settings',       href: '/admin-settings',         icon: Settings },
+    ],
+  },
+  {
+    label: 'Security',
+    items: [
+      { key: 'anomaly_alerts',         label: 'Anomaly & Alerts', href: '/anomaly-alerts',       icon: ShieldAlert },
+      { key: 'security_limits',        label: 'Rate Limits & IPs', href: '/security-limits',     icon: Shield },
     ],
   },
 ];

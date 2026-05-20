@@ -21,6 +21,12 @@ const ASSIGNABLE_PAGES = [
   { key: 'email_templates', label: 'Email Templates' },
   { key: 'platform_balance', label: 'Platform Balance' },
   { key: 'activity', label: 'Activity (Audit Log)' },
+  { key: 'limits_fees', label: 'Limits & Fees' },
+  { key: 'admin_settings', label: 'Settings' },
+  { key: 'bill_settings', label: 'Bill Settings' },
+  { key: 'anomaly_alerts', label: 'Anomaly & Alerts' },
+  { key: 'security_limits', label: 'Rate Limits & Webhook IPs' },
+  { key: 'user_activity_monitor', label: 'User Activity Monitor' },
 ];
 
 interface AdminUser {
