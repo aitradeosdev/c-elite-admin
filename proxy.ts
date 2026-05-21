@@ -23,6 +23,11 @@ function rejectCrossOrigin(req: NextRequest): NextResponse | null {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
   if (!req.nextUrl.pathname.startsWith('/api/')) return null;
 
+  const auth = req.headers.get('authorization');
+  if (auth && /^Bearer\s+/i.test(auth) && req.headers.get('x-client') === 'mobile-admin') {
+    return null;
+  }
+
   const sfs = req.headers.get('sec-fetch-site');
   if (sfs === 'same-origin' || sfs === 'none') return null;
 
@@ -34,8 +39,6 @@ function rejectCrossOrigin(req: NextRequest): NextResponse | null {
       if (o.host === u.host && o.protocol === u.protocol) return null;
     } catch { /* fall through */ }
   }
-
-  if (req.nextUrl.pathname.startsWith('/api/mobile/')) return null;
 
   return new NextResponse(JSON.stringify({ error: 'Origin not allowed' }), {
     status: 403,

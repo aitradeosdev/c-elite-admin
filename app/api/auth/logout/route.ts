@@ -33,5 +33,12 @@ export async function POST(req: NextRequest) {
     expires: new Date(0),
     path: '/',
   });
+  response.cookies.set('admin_theme', '', {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    expires: new Date(0),
+    path: '/',
+  });
   return response;
 }

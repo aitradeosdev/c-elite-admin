@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (csv) {
-    const CSV_MAX_ROWS = 5000;
+    const CSV_MAX_ROWS = 50000;
     const { data, error } = await query
       .order('created_at', { ascending: false })
       .range(0, CSV_MAX_ROWS - 1);

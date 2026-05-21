@@ -12,12 +12,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!admin?.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await ctx.params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  }
 
   const { error } = await supabaseAdmin.rpc('terminate_user_sessions', {
     p_user_id: id,
     p_admin_id: admin.admin_id,
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    console.error('terminate_user_sessions:', error.message);
+    return NextResponse.json({ error: 'Could not terminate sessions' }, { status: 400 });
+  }
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id,

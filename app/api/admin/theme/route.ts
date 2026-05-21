@@ -21,6 +21,15 @@ export async function PATCH(req: NextRequest) {
     .eq('id', admin.admin_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  await supabaseAdmin.from('audit_log').insert({
+    admin_id: admin.admin_id,
+    action: 'UPDATE_ADMIN_THEME',
+    entity: 'admin_users',
+    entity_id: admin.admin_id,
+    after_value: { theme },
+    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
+  });
+
   const response = NextResponse.json({ success: true, theme });
   response.cookies.set('admin_theme', theme, {
     httpOnly: false,

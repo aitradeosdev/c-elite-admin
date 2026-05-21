@@ -27,11 +27,15 @@ export async function POST(req: NextRequest) {
   if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { title, message, type, audience, target_user_id } = body;
+  const stripUnsafeUnicode = (s: string): string =>
+    s.replace(/[‪-‮⁦-⁩‎‏]/g, '').normalize('NFKC');
+  const title = body.title != null ? stripUnsafeUnicode(String(body.title)) : '';
+  const message = body.message != null ? stripUnsafeUnicode(String(body.message)) : '';
+  const { type, audience, target_user_id } = body;
   if (!title || !message || !audience) {
     return NextResponse.json({ error: 'Missing title/message/audience' }, { status: 400 });
   }
-  if (String(title).length > 120 || String(message).length > 1000) {
+  if (title.length > 120 || message.length > 1000) {
     return NextResponse.json({ error: 'Title or message too long' }, { status: 400 });
   }
   const ALLOWED_AUDIENCE = new Set(['all', 'user', 'verified', 'unverified', 'active', 'inactive']);

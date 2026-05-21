@@ -11,7 +11,9 @@ async function getAdmin(_req?: any) {
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const canSearch = admin.is_super_admin
+    || (admin.page_permissions.includes('notifications_broadcast') && admin.page_permissions.includes('users'));
+  if (!canSearch) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const q = sanitizeSearch(new URL(req.url).searchParams.get('q') || '');
   if (q.length < 3) return NextResponse.json({ users: [] });

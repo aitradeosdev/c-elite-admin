@@ -27,7 +27,7 @@ const ALLOWED_PERMISSIONS = new Set<string>([
   'notification_templates', 'email_templates', 'platform_balance', 'admin_accounts',
   'user_activity_monitor', 'limits_fees', 'admin_settings', 'bill_settings',
   'anomaly_alerts', 'security_limits', 'activity', 'field_builder', 'feature_overrides',
-  'flagged_transactions', 'giftbox',
+  'flagged_transactions', 'giftbox', 'users_freeze',
 ]);
 
 function validatePagePermissions(perms: unknown): string | null {

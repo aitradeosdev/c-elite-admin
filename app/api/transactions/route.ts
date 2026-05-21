@@ -33,20 +33,12 @@ export async function GET(req: NextRequest) {
   today.setHours(0, 0, 0, 0);
   const todayISO = today.toISOString();
 
-  const [
-    { count: totalCount },
-    { data: totalAmountData },
-    { count: todayCount },
-    { data: todayAmountData },
-  ] = await Promise.all([
-    supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true }),
-    supabaseAdmin.from('transactions').select('amount'),
-    supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true }).gte('created_at', todayISO),
-    supabaseAdmin.from('transactions').select('amount').gte('created_at', todayISO),
-  ]);
-
-  const totalAmount = (totalAmountData || []).reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
-  const todayAmount = (todayAmountData || []).reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+  const { data: statsRows } = await supabaseAdmin.rpc('admin_transactions_stats');
+  const stats0 = Array.isArray(statsRows) ? statsRows[0] : statsRows;
+  const totalCount = Number(stats0?.total_count || 0);
+  const totalAmount = Number(stats0?.total_amount || 0);
+  const todayCount = Number(stats0?.today_count || 0);
+  const todayAmount = Number(stats0?.today_amount || 0);
 
   let query = supabaseAdmin
     .from('transactions')
@@ -74,7 +66,7 @@ export async function GET(req: NextRequest) {
         total: 0,
         page,
         limit,
-        stats: { totalCount: totalCount || 0, totalAmount, todayCount: todayCount || 0, todayAmount },
+        stats: { totalCount, totalAmount, todayCount, todayAmount },
       });
     }
   }
@@ -125,11 +117,6 @@ export async function GET(req: NextRequest) {
     total: count || 0,
     page,
     limit,
-    stats: {
-      totalCount: totalCount || 0,
-      totalAmount,
-      todayCount: todayCount || 0,
-      todayAmount,
-    },
+    stats: { totalCount, totalAmount, todayCount, todayAmount },
   });
 }

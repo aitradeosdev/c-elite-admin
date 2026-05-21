@@ -4,7 +4,9 @@ import { supabaseAdmin } from '../../lib/supabase';
 import { signAdminJWT } from '../../lib/jwt';
 
 function getClientIp(req: NextRequest): string {
-  return (req.headers.get('x-forwarded-for') || '').split(',')[0]?.trim() || 'unknown';
+  const xff = req.headers.get('x-forwarded-for') || '';
+  const parts = xff.split(',').map((s) => s.trim()).filter(Boolean);
+  return parts[parts.length - 1] || req.headers.get('x-real-ip') || 'unknown';
 }
 
 export async function POST(req: NextRequest) {
@@ -59,23 +61,42 @@ export async function POST(req: NextRequest) {
       ip_address: ip,
     });
 
-    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const { count: failCount } = await supabaseAdmin
-      .from('audit_log')
-      .select('id', { count: 'exact', head: true })
-      .eq('admin_id', admin.id)
-      .eq('action', 'LOGIN_FAILED')
-      .gte('created_at', since);
-    if ((failCount ?? 0) >= 5) {
+    const since30m = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const [{ count: fail30m }, { count: fail24h }] = await Promise.all([
+      supabaseAdmin
+        .from('audit_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('admin_id', admin.id)
+        .eq('action', 'LOGIN_FAILED')
+        .gte('created_at', since30m),
+      supabaseAdmin
+        .from('audit_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('admin_id', admin.id)
+        .eq('action', 'LOGIN_FAILED')
+        .gte('created_at', since24h),
+    ]);
+    if ((fail30m ?? 0) >= 5) {
       try {
         await supabaseAdmin.from('admin_alerts').insert({
           admin_id: admin.id,
           severity: 'high',
           event_type: 'admin_login_burst',
           subject: `Repeated failed admin logins for ${admin.email}`,
-          detail: { admin_id: admin.id, email: admin.email, fail_count: failCount, ip },
+          detail: { admin_id: admin.id, email: admin.email, fail_count: fail30m, ip },
         });
       } catch { /* alert insert is best-effort */ }
+    }
+    if ((fail24h ?? 0) >= 25) {
+      await supabaseAdmin.from('admin_users').update({ is_active: false }).eq('id', admin.id);
+      await supabaseAdmin.from('audit_log').insert({
+        admin_id: admin.id,
+        action: 'ADMIN_AUTO_DEACTIVATED',
+        entity: 'admin_users',
+        entity_id: admin.id,
+        ip_address: ip,
+      });
     }
 
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
@@ -103,7 +124,7 @@ export async function POST(req: NextRequest) {
     page_permissions: admin.page_permissions || [],
     username: admin.username,
     token_version: admin.token_version ?? 0,
-  }, isMobile ? '30d' : '8h');
+  }, isMobile ? '24h' : '8h');
 
   const themePref: 'light' | 'dark' | 'system' =
     admin.theme_preference === 'light' || admin.theme_preference === 'dark' ? admin.theme_preference : 'system';

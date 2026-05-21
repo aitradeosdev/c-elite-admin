@@ -50,7 +50,8 @@ export async function verifyAdminJWT(token: string): Promise<AdminJWTPayload | n
 export async function verifyAdminFromRequest(): Promise<AdminJWTPayload | null> {
   const h = await headers();
   const auth = h.get('authorization');
-  if (auth) {
+  const xClient = h.get('x-client');
+  if (auth && xClient === 'mobile-admin') {
     const m = auth.match(/^Bearer\s+(.+)$/i);
     if (m) {
       const claims = await verifyAdminJWT(m[1].trim());

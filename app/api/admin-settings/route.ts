@@ -28,7 +28,7 @@ const KEYS = [
 
 const URL_KEYS = new Set(['live_chat_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios']);
 const URL_MAX_LEN = 2048;
-const URL_RE = /^https?:\/\/[^\s<>"']{3,}$/i;
+const URL_RE = /^https:\/\/[^\s<>"']{3,}$/i;
 
 const ALLOWED_UPDATE = new Set(KEYS);
 
