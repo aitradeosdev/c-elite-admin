@@ -10,6 +10,7 @@ export interface AdminJWTPayload {
   is_super_admin: boolean;
   page_permissions: string[];
   username: string;
+  token_version: number;
 }
 
 export async function signAdminJWT(payload: AdminJWTPayload, expiresIn: string = '8h'): Promise<string> {
@@ -27,17 +28,19 @@ export async function verifyAdminJWT(token: string): Promise<AdminJWTPayload | n
 
     const { data: admin } = await supabaseAdmin
       .from('admin_users')
-      .select('id, is_active, is_super_admin, page_permissions')
+      .select('id, is_active, is_super_admin, page_permissions, token_version')
       .eq('id', claims.admin_id)
       .eq('is_active', true)
       .single();
 
     if (!admin) return null;
+    if ((claims.token_version ?? -1) !== (admin.token_version ?? 0)) return null;
 
     return {
       ...claims,
       is_super_admin: admin.is_super_admin,
       page_permissions: admin.page_permissions || [],
+      token_version: admin.token_version ?? 0,
     };
   } catch {
     return null;

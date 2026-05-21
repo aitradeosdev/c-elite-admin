@@ -28,14 +28,18 @@ export async function PATCH(req: NextRequest) {
   if (!admin.is_super_admin && !admin.page_permissions.includes('email_templates')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { key, subject, html, is_active } = await req.json();
-  if (!key || typeof key !== 'string') {
-    return NextResponse.json({ error: 'key required' }, { status: 400 });
+  if (!key || typeof key !== 'string' || key.length > 64 || !/^[a-z0-9_]+$/i.test(key)) {
+    return NextResponse.json({ error: 'Invalid key' }, { status: 400 });
   }
-  if (subject != null && !String(subject).trim()) {
-    return NextResponse.json({ error: 'subject cannot be empty' }, { status: 400 });
+  if (subject != null) {
+    const s = String(subject);
+    if (!s.trim()) return NextResponse.json({ error: 'subject cannot be empty' }, { status: 400 });
+    if (s.length > 300) return NextResponse.json({ error: 'subject too long' }, { status: 400 });
   }
-  if (html != null && !String(html).trim()) {
-    return NextResponse.json({ error: 'html cannot be empty' }, { status: 400 });
+  if (html != null) {
+    const h = String(html);
+    if (!h.trim()) return NextResponse.json({ error: 'html cannot be empty' }, { status: 400 });
+    if (h.length > 200000) return NextResponse.json({ error: 'html too long' }, { status: 400 });
   }
 
   const { data: before } = await supabaseAdmin

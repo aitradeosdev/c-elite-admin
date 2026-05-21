@@ -87,8 +87,17 @@ export async function GET(req: NextRequest) {
   }
 
   if (csv) {
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const CAP = 50000;
+    const { data, error } = await query.order('created_at', { ascending: false }).range(0, CAP - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await supabaseAdmin.from('audit_log').insert({
+      admin_id: admin.admin_id,
+      action: 'EXPORT_CSV',
+      entity: 'withdrawals',
+      entity_id: null,
+      diff: { rows: (data || []).length, filters: { status, dateFrom, dateTo, search, reviewOnly } },
+    });
 
     const header = 'ID,User,Amount,Bank,Account,AccountName,Status,Gateway,GatewayRef,Date\n';
     const body = (data || []).map((w: any) => {

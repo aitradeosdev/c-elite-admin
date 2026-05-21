@@ -22,6 +22,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ coupons: data || [] });
 }
 
+const COUPON_TYPES = new Set(['signup', 'referral', 'trade', 'event', 'manual']);
+const COUPON_CODE_RE = /^[A-Z0-9_-]{3,32}$/;
+
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -33,21 +36,31 @@ export async function POST(req: NextRequest) {
   if (!code || !type) {
     return NextResponse.json({ error: 'Missing code or type' }, { status: 400 });
   }
+  const normCode = String(code).trim().toUpperCase();
+  if (!COUPON_CODE_RE.test(normCode)) {
+    return NextResponse.json({ error: 'Invalid coupon code format' }, { status: 400 });
+  }
+  if (!COUPON_TYPES.has(String(type))) {
+    return NextResponse.json({ error: 'Invalid coupon type' }, { status: 400 });
+  }
+  if (terms_of_use != null && String(terms_of_use).length > 5000) {
+    return NextResponse.json({ error: 'terms_of_use too long' }, { status: 400 });
+  }
   const minTradeVal = Number(min_trade_amount_usd || 0);
   const bonusVal = Number(bonus_rate_naira || 0);
-  if (!Number.isFinite(minTradeVal) || minTradeVal < 0) return NextResponse.json({ error: 'Invalid min_trade_amount_usd' }, { status: 400 });
-  if (!Number.isFinite(bonusVal) || bonusVal < 0) return NextResponse.json({ error: 'Invalid bonus_rate_naira' }, { status: 400 });
+  if (!Number.isFinite(minTradeVal) || minTradeVal < 0 || minTradeVal > 1e7) return NextResponse.json({ error: 'Invalid min_trade_amount_usd' }, { status: 400 });
+  if (!Number.isFinite(bonusVal) || bonusVal < 0 || bonusVal > 1e9) return NextResponse.json({ error: 'Invalid bonus_rate_naira' }, { status: 400 });
 
   const { data, error } = await supabaseAdmin
     .from('coupons')
     .insert({
-      code: code.trim().toUpperCase(),
+      code: normCode,
       min_trade_amount_usd: minTradeVal,
       expiry_date: expiry_date || null,
       type,
       bonus_rate_naira: bonusVal,
       is_active: is_active ?? true,
-      eligibility_rules: Array.isArray(eligibility_rules) ? eligibility_rules : [],
+      eligibility_rules: Array.isArray(eligibility_rules) ? eligibility_rules.slice(0, 50) : [],
       terms_of_use: terms_of_use || null,
     })
     .select('id').single();
@@ -73,22 +86,34 @@ export async function PATCH(req: NextRequest) {
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
   const updates: any = {};
-  if (body.code !== undefined) updates.code = String(body.code).trim().toUpperCase();
+  if (body.code !== undefined) {
+    const c = String(body.code).trim().toUpperCase();
+    if (!COUPON_CODE_RE.test(c)) return NextResponse.json({ error: 'Invalid coupon code format' }, { status: 400 });
+    updates.code = c;
+  }
   if (body.min_trade_amount_usd !== undefined) {
     const n = Number(body.min_trade_amount_usd);
-    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: 'Invalid min_trade_amount_usd' }, { status: 400 });
+    if (!Number.isFinite(n) || n < 0 || n > 1e7) return NextResponse.json({ error: 'Invalid min_trade_amount_usd' }, { status: 400 });
     updates.min_trade_amount_usd = n;
   }
   if (body.bonus_rate_naira !== undefined) {
     const n = Number(body.bonus_rate_naira);
-    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: 'Invalid bonus_rate_naira' }, { status: 400 });
+    if (!Number.isFinite(n) || n < 0 || n > 1e9) return NextResponse.json({ error: 'Invalid bonus_rate_naira' }, { status: 400 });
     updates.bonus_rate_naira = n;
   }
   if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null;
-  if (body.type !== undefined) updates.type = body.type;
+  if (body.type !== undefined) {
+    if (!COUPON_TYPES.has(String(body.type))) return NextResponse.json({ error: 'Invalid coupon type' }, { status: 400 });
+    updates.type = body.type;
+  }
   if (body.is_active !== undefined) updates.is_active = !!body.is_active;
-  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules : [];
-  if (body.terms_of_use !== undefined) updates.terms_of_use = body.terms_of_use || null;
+  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules.slice(0, 50) : [];
+  if (body.terms_of_use !== undefined) {
+    if (body.terms_of_use != null && String(body.terms_of_use).length > 5000) {
+      return NextResponse.json({ error: 'terms_of_use too long' }, { status: 400 });
+    }
+    updates.terms_of_use = body.terms_of_use || null;
+  }
 
   const { data: before } = await supabaseAdmin.from('coupons').select('*').eq('id', id).single();
 

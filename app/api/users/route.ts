@@ -31,8 +31,21 @@ export async function GET(req: NextRequest) {
   }
 
   if (csv) {
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const CSV_MAX_ROWS = 5000;
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .range(0, CSV_MAX_ROWS - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    try {
+      await supabaseAdmin.from('audit_log').insert({
+        admin_id: admin.admin_id,
+        action: 'EXPORT_CSV',
+        entity: 'users',
+        entity_id: 'bulk',
+        after_value: { rows: (data || []).length, search: search || null, cap: CSV_MAX_ROWS },
+        ip_address: req.headers.get('x-forwarded-for') || 'unknown',
+      });
+    } catch {}
 
     const userIds = (data || []).map((u: any) => u.id);
     const { data: txCounts } = await supabaseAdmin.rpc('count_user_transactions', {}) as any;

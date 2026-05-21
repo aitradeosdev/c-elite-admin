@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
-import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from '../../../lib/uploadTypes';
+import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES, magicMatchesExt } from '../../../lib/uploadTypes';
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
@@ -33,11 +33,14 @@ export async function POST(req: NextRequest) {
 
   const fileName = `tier-${tierOrder}-${crypto.randomUUID()}.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (!magicMatchesExt(buffer, ext)) {
+    return NextResponse.json({ error: 'File content does not match its extension' }, { status: 400 });
+  }
 
   const { error } = await supabaseAdmin.storage
     .from('level-badges')
     .upload(fileName, buffer, { contentType, upsert: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
 
   const { data: { publicUrl } } = supabaseAdmin.storage
     .from('level-badges')

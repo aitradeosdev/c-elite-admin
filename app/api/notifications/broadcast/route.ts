@@ -31,6 +31,17 @@ export async function POST(req: NextRequest) {
   if (!title || !message || !audience) {
     return NextResponse.json({ error: 'Missing title/message/audience' }, { status: 400 });
   }
+  if (String(title).length > 120 || String(message).length > 1000) {
+    return NextResponse.json({ error: 'Title or message too long' }, { status: 400 });
+  }
+  const ALLOWED_AUDIENCE = new Set(['all', 'user', 'verified', 'unverified', 'active', 'inactive']);
+  if (!ALLOWED_AUDIENCE.has(String(audience))) {
+    return NextResponse.json({ error: 'Invalid audience' }, { status: 400 });
+  }
+  const ALLOWED_TYPE = new Set(['info', 'warning', 'success', 'promo', 'system']);
+  if (type != null && !ALLOWED_TYPE.has(String(type))) {
+    return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+  }
 
   if (audience === 'user') {
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

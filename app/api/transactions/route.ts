@@ -80,8 +80,17 @@ export async function GET(req: NextRequest) {
   }
 
   if (csv) {
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const CAP = 50000;
+    const { data, error } = await query.order('created_at', { ascending: false }).range(0, CAP - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await supabaseAdmin.from('audit_log').insert({
+      admin_id: admin.admin_id,
+      action: 'EXPORT_CSV',
+      entity: 'transactions',
+      entity_id: null,
+      diff: { rows: (data || []).length, filters: { type, status, dateFrom, dateTo, search } },
+    });
 
     const header = 'ID,User,Email,Type,Amount,Status,Reference,Date\n';
     const csvBody = (data || []).map((t: any) =>

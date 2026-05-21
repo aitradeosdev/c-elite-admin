@@ -44,8 +44,11 @@ export async function POST(req: NextRequest) {
   if (!title || reward_naira === undefined || reward_naira === null) {
     return NextResponse.json({ error: 'Missing title or reward' }, { status: 400 });
   }
+  if (String(title).length > 120) return NextResponse.json({ error: 'Title too long' }, { status: 400 });
+  if (description != null && String(description).length > 1000) return NextResponse.json({ error: 'Description too long' }, { status: 400 });
+  if (eligibility_condition != null && String(eligibility_condition).length > 200) return NextResponse.json({ error: 'Condition too long' }, { status: 400 });
   const rewardVal = Number(reward_naira);
-  if (!Number.isFinite(rewardVal) || rewardVal < 0) {
+  if (!Number.isFinite(rewardVal) || rewardVal < 0 || rewardVal > 1e8) {
     return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
   }
 
@@ -83,16 +86,26 @@ export async function PATCH(req: NextRequest) {
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
   const updates: any = {};
-  if (body.title !== undefined) updates.title = String(body.title);
-  if (body.description !== undefined) updates.description = body.description || null;
+  if (body.title !== undefined) {
+    const t = String(body.title);
+    if (t.length > 120) return NextResponse.json({ error: 'Title too long' }, { status: 400 });
+    updates.title = t;
+  }
+  if (body.description !== undefined) {
+    if (body.description != null && String(body.description).length > 1000) return NextResponse.json({ error: 'Description too long' }, { status: 400 });
+    updates.description = body.description || null;
+  }
   if (body.reward_naira !== undefined) {
     const n = Number(body.reward_naira);
-    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
+    if (!Number.isFinite(n) || n < 0 || n > 1e8) return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
     updates.reward_naira = n;
   }
   if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null;
-  if (body.eligibility_condition !== undefined) updates.eligibility_condition = body.eligibility_condition || null;
-  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules : [];
+  if (body.eligibility_condition !== undefined) {
+    if (body.eligibility_condition != null && String(body.eligibility_condition).length > 200) return NextResponse.json({ error: 'Condition too long' }, { status: 400 });
+    updates.eligibility_condition = body.eligibility_condition || null;
+  }
+  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules.slice(0, 50) : [];
   if (body.is_active !== undefined) updates.is_active = !!body.is_active;
 
   const { data: before } = await supabaseAdmin.from('giftbox_items').select('*').eq('id', id).single();

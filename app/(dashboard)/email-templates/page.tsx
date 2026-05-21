@@ -208,9 +208,11 @@ export default function EmailTemplatesPage() {
               <span style={styles.previewLabel}>Subject:</span>
               <span style={styles.previewSubject}>{renderPreview(draftSubject, selected.variables)}</span>
             </div>
-            <div
+            <iframe
+              title="Email preview"
               style={styles.previewFrame}
-              dangerouslySetInnerHTML={{ __html: renderPreview(draftHtml, selected.variables) }}
+              sandbox=""
+              srcDoc={renderPreview(draftHtml, selected.variables)}
             />
 
             <label style={styles.checkboxRow}>
@@ -265,7 +267,7 @@ const styles: Record<string, React.CSSProperties> = {
   previewSubjectRow: { display: 'flex', gap: 8, padding: '10px 14px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-default)', borderBottom: 'none', borderRadius: '8px 8px 0 0' },
   previewLabel: { fontSize: 11, fontWeight: 700, color: 'var(--fg-secondary)' },
   previewSubject: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' },
-  previewFrame: { padding: 14, backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '0 0 8px 8px', maxHeight: 420, overflowY: 'auto' },
+  previewFrame: { width: '100%', height: 420, backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '0 0 8px 8px' },
   checkboxRow: { display: 'flex', alignItems: 'center', marginTop: 20, fontSize: 12, color: 'var(--fg-secondary)' },
   footer: { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 },
   cancelBtn: { padding: '10px 18px', fontSize: 13, fontWeight: 600, backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer' },

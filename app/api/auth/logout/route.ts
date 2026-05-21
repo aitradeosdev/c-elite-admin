@@ -9,6 +9,12 @@ export async function POST(req: NextRequest) {
   if (token) {
     const admin = await verifyAdminJWT(token);
     if (admin) {
+      try {
+        const { data: cur } = await supabaseAdmin
+          .from('admin_users').select('token_version').eq('id', admin.admin_id).single();
+        const next = ((cur?.token_version as number) ?? 0) + 1;
+        await supabaseAdmin.from('admin_users').update({ token_version: next }).eq('id', admin.admin_id);
+      } catch {}
       await supabaseAdmin.from('audit_log').insert({
         admin_id: admin.admin_id,
         action: 'LOGOUT',
@@ -22,6 +28,8 @@ export async function POST(req: NextRequest) {
   const response = NextResponse.json({ success: true });
   response.cookies.set('admin_token', '', {
     httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
     expires: new Date(0),
     path: '/',
   });

@@ -69,17 +69,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const admin = await getAdmin();
-  if (!admin || (!admin.is_super_admin && !admin.page_permissions?.includes('users'))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const canFreeze = admin.is_super_admin || (admin.page_permissions || []).includes('users_freeze');
+  if (!canFreeze) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  }
   const body = await req.json();
   const { action, reason } = body;
 
   if (action === 'freeze') {
-    if (!reason?.trim()) {
+    if (typeof reason !== 'string' || !reason.trim()) {
       return NextResponse.json({ error: 'Reason is required to freeze an account' }, { status: 400 });
+    }
+    if (reason.trim().length > 500) {
+      return NextResponse.json({ error: 'Reason too long (max 500 chars)' }, { status: 400 });
     }
 
     const { data: before } = await supabaseAdmin

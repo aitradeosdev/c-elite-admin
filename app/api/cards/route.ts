@@ -52,22 +52,34 @@ export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for') || 'unknown';
 
   if (body.type === 'card') {
-    const { name, logo_url, is_active, sort_order } = body;
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 80) return NextResponse.json({ error: 'Invalid name' }, { status: 400 });
+    const logo_url = body.logo_url == null ? null : String(body.logo_url);
+    if (logo_url && (logo_url.length > 500 || !/^https:\/\//.test(logo_url))) {
+      return NextResponse.json({ error: 'logo_url must be https and <=500 chars' }, { status: 400 });
+    }
+    const sort_order = Math.max(0, Math.min(10000, Number(body.sort_order ?? 0) || 0));
     const { data, error } = await supabaseAdmin
       .from('cards')
-      .insert({ name, logo_url, is_active: is_active ?? true, sort_order: sort_order ?? 0 })
+      .insert({ name, logo_url, is_active: body.is_active ?? true, sort_order })
       .select('id')
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    await logAction(admin.admin_id, 'CREATE_CARD', data.id, null, { name, logo_url, is_active }, ip);
+    await logAction(admin.admin_id, 'CREATE_CARD', data.id, null, { name, logo_url, is_active: body.is_active }, ip);
     return NextResponse.json({ success: true, id: data.id });
   }
 
   if (body.type === 'country') {
-    const { card_id, country_code, country_name, currency_symbol, is_active } = body;
+    const card_id = String(body.card_id || '');
+    const country_code = String(body.country_code || '').toUpperCase();
+    const country_name = String(body.country_name || '').trim();
+    const currency_symbol = String(body.currency_symbol || '').trim();
+    if (!/^[A-Z]{2,3}$/.test(country_code)) return NextResponse.json({ error: 'Invalid country_code' }, { status: 400 });
+    if (!country_name || country_name.length > 80) return NextResponse.json({ error: 'Invalid country_name' }, { status: 400 });
+    if (!currency_symbol || currency_symbol.length > 8) return NextResponse.json({ error: 'Invalid currency_symbol' }, { status: 400 });
     const { data, error } = await supabaseAdmin
       .from('card_countries')
-      .insert({ card_id, country_code, country_name, currency_symbol, is_active: is_active ?? true })
+      .insert({ card_id, country_code, country_name, currency_symbol, is_active: body.is_active ?? true })
       .select('id')
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -89,10 +101,22 @@ export async function PATCH(req: NextRequest) {
   if (body.type === 'card') {
     const { id } = body;
     const updates: any = {};
-    if (body.name !== undefined) updates.name = String(body.name);
-    if (body.logo_url !== undefined) updates.logo_url = body.logo_url;
+    if (body.name !== undefined) {
+      const n = String(body.name).trim();
+      if (!n || n.length > 80) return NextResponse.json({ error: 'Invalid name' }, { status: 400 });
+      updates.name = n;
+    }
+    if (body.logo_url !== undefined) {
+      const u = body.logo_url == null ? null : String(body.logo_url);
+      if (u && (u.length > 500 || !/^https:\/\//.test(u))) {
+        return NextResponse.json({ error: 'logo_url must be https and <=500 chars' }, { status: 400 });
+      }
+      updates.logo_url = u;
+    }
     if (body.is_active !== undefined) updates.is_active = !!body.is_active;
-    if (body.sort_order !== undefined) updates.sort_order = Number(body.sort_order);
+    if (body.sort_order !== undefined) {
+      updates.sort_order = Math.max(0, Math.min(10000, Number(body.sort_order) || 0));
+    }
     const { data: before } = await supabaseAdmin.from('cards').select('*').eq('id', id).single();
     const { error } = await supabaseAdmin.from('cards').update(updates).eq('id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -103,9 +127,21 @@ export async function PATCH(req: NextRequest) {
   if (body.type === 'country') {
     const { id } = body;
     const updates: any = {};
-    if (body.country_code !== undefined) updates.country_code = body.country_code;
-    if (body.country_name !== undefined) updates.country_name = body.country_name;
-    if (body.currency_symbol !== undefined) updates.currency_symbol = body.currency_symbol;
+    if (body.country_code !== undefined) {
+      const c = String(body.country_code).toUpperCase();
+      if (!/^[A-Z]{2,3}$/.test(c)) return NextResponse.json({ error: 'Invalid country_code' }, { status: 400 });
+      updates.country_code = c;
+    }
+    if (body.country_name !== undefined) {
+      const n = String(body.country_name).trim();
+      if (!n || n.length > 80) return NextResponse.json({ error: 'Invalid country_name' }, { status: 400 });
+      updates.country_name = n;
+    }
+    if (body.currency_symbol !== undefined) {
+      const s = String(body.currency_symbol).trim();
+      if (!s || s.length > 8) return NextResponse.json({ error: 'Invalid currency_symbol' }, { status: 400 });
+      updates.currency_symbol = s;
+    }
     if (body.is_active !== undefined) updates.is_active = !!body.is_active;
     const { data: before } = await supabaseAdmin.from('card_countries').select('*').eq('id', id).single();
     const { error } = await supabaseAdmin.from('card_countries').update(updates).eq('id', id);
@@ -115,7 +151,8 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (body.type === 'reorder') {
-    const { ids } = body;
+    const ids = Array.isArray(body.ids) ? body.ids.slice(0, 200) : [];
+    if (ids.length === 0) return NextResponse.json({ error: 'ids required' }, { status: 400 });
     await Promise.all(ids.map((id: string, index: number) =>
       supabaseAdmin.from('cards').update({ sort_order: index }).eq('id', id)
     ));

@@ -37,7 +37,38 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'No changes provided' }, { status: 400 });
   }
 
-  const keys = Object.keys(changes);
+  const ALLOWED_KEYS = new Set<string>([
+    'tag_transfer_enabled', 'bill_vtpass_enabled', 'gateway_paystack_enabled', 'gateway_monnify_enabled',
+    'min_withdrawal_amount', 'max_withdrawal_amount', 'max_daily_withdrawal', 'withdraw_fee',
+    'min_electricity_amount', 'electricity_quick_amounts',
+    'transfer_bank_fee', 'transfer_bank_min', 'transfer_bank_max',
+    'min_airtime_amount', 'max_airtime_amount',
+    'min_data_amount', 'max_data_amount',
+    'min_cable_amount', 'max_cable_amount',
+    'signup_bonus_amount', 'signup_bonus_condition', 'signup_bonus_active',
+    'newbie_bonus_amount', 'newbie_bonus_active',
+    'referral_active', 'referral_bonus_amount', 'referral_min_trade_usd', 'referral_max_per_day',
+    'level_bonus_active', 'levels_active',
+    'pin_reset_freeze_hours',
+    'large_withdrawal_flag_threshold',
+    'signup_rate_limit_per_hour',
+    'anomaly_dormant_days', 'anomaly_dormant_amount',
+    'anomaly_rapid_window_mins', 'anomaly_rapid_ratio',
+    'anomaly_failures_window_mins', 'anomaly_failures_threshold',
+    'critical_alert_amount', 'alert_email_batch',
+    'paystack_webhook_ips', 'monnify_webhook_ips',
+    'terms_url', 'privacy_url', 'live_chat_url',
+    'store_url_android', 'store_url_ios',
+    'app_current_version', 'app_update_type', 'app_update_message',
+    'emergency_mode', 'withdrawal_narrations',
+    'iana_timezone',
+  ]);
+  const incoming = Object.keys(changes);
+  const rejected = incoming.filter((k) => !ALLOWED_KEYS.has(k));
+  if (rejected.length > 0) {
+    return NextResponse.json({ error: `Unknown app_config keys: ${rejected.join(', ')}` }, { status: 400 });
+  }
+  const keys = incoming;
   const { data: before } = await supabaseAdmin
     .from('app_config').select('key, value').in('key', keys);
   const beforeMap: Record<string, string> = {};

@@ -4,10 +4,7 @@ import { supabaseAdmin } from '../../lib/supabase';
 import { signAdminJWT } from '../../lib/jwt';
 
 function getClientIp(req: NextRequest): string {
-  return req.headers.get('cf-connecting-ip')
-      || req.headers.get('x-real-ip')
-      || (req.headers.get('x-forwarded-for') || '').split(',').pop()?.trim()
-      || 'unknown';
+  return (req.headers.get('x-forwarded-for') || '').split(',')[0]?.trim() || 'unknown';
 }
 
 export async function POST(req: NextRequest) {
@@ -28,9 +25,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Too many attempts. Try again later.' }, { status: 429 });
   }
 
+  const acctKey = `admin:${String(username || '').toLowerCase()}|${String(email || '').toLowerCase()}`;
+  const { data: acctOk } = await supabaseAdmin.rpc('check_rate_limit_by_key', {
+    p_key: acctKey,
+    p_action: 'admin_login_account',
+    p_limit: 10,
+    p_window_secs: 1800,
+  });
+  if (acctOk === false) {
+    return NextResponse.json({ error: 'Too many attempts. Try again later.' }, { status: 429 });
+  }
+
   const { data: admin, error } = await supabaseAdmin
     .from('admin_users')
-    .select('id, username, email, password_hash, role_title, is_super_admin, is_active, page_permissions, theme_preference')
+    .select('id, username, email, password_hash, role_title, is_super_admin, is_active, page_permissions, theme_preference, token_version')
     .eq('username', username)
     .eq('email', email)
     .eq('is_active', true)
@@ -50,6 +58,26 @@ export async function POST(req: NextRequest) {
       entity_id: admin.id,
       ip_address: ip,
     });
+
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const { count: failCount } = await supabaseAdmin
+      .from('audit_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('admin_id', admin.id)
+      .eq('action', 'LOGIN_FAILED')
+      .gte('created_at', since);
+    if ((failCount ?? 0) >= 5) {
+      try {
+        await supabaseAdmin.from('admin_alerts').insert({
+          admin_id: admin.id,
+          severity: 'high',
+          event_type: 'admin_login_burst',
+          subject: `Repeated failed admin logins for ${admin.email}`,
+          detail: { admin_id: admin.id, email: admin.email, fail_count: failCount, ip },
+        });
+      } catch { /* alert insert is best-effort */ }
+    }
+
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 
@@ -74,6 +102,7 @@ export async function POST(req: NextRequest) {
     is_super_admin: admin.is_super_admin,
     page_permissions: admin.page_permissions || [],
     username: admin.username,
+    token_version: admin.token_version ?? 0,
   }, isMobile ? '30d' : '8h');
 
   const themePref: 'light' | 'dark' | 'system' =

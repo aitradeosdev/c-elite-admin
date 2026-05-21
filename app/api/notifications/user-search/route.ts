@@ -14,13 +14,13 @@ export async function GET(req: NextRequest) {
   if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const q = sanitizeSearch(new URL(req.url).searchParams.get('q') || '');
-  if (!q) return NextResponse.json({ users: [] });
+  if (q.length < 3) return NextResponse.json({ users: [] });
 
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('id, full_name, username, email')
     .or(`username.ilike.%${q}%,email.ilike.%${q}%,full_name.ilike.%${q}%`)
     .limit(10);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
   return NextResponse.json({ users: data || [] });
 }
