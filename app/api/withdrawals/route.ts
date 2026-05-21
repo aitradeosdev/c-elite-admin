@@ -22,7 +22,7 @@ function formatCSVField(val: any): string {
 
 export async function GET(req: NextRequest) {
   const admin = await getAdmin();
-  if (!gated(admin)) {
+  if (!admin || !gated(admin)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
