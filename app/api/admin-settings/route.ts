@@ -29,6 +29,8 @@ const KEYS = [
 const URL_KEYS = new Set(['live_chat_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios']);
 const URL_MAX_LEN = 2048;
 const URL_RE = /^https:\/\/[^\s<>"']{3,}$/i;
+// bidi/RTL-override, zero-width, BOM, and C0/C1 control chars
+const CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
 
 const ALLOWED_UPDATE = new Set(KEYS);
 
@@ -89,9 +91,13 @@ export async function PATCH(req: NextRequest) {
     if (raw.length > URL_MAX_LEN) {
       return NextResponse.json({ error: `${k} exceeds ${URL_MAX_LEN} characters` }, { status: 400 });
     }
+    // (control-char check below)
+    if (CONTROL_RE.test(raw)) {
+      return NextResponse.json({ error: `${k} contains disallowed characters` }, { status: 400 });
+    }
     if (!URL_RE.test(raw)) {
       return NextResponse.json({
-        error: `${k} must be a valid https:// (or http://) URL`,
+        error: `${k} must be a valid https:// URL`,
       }, { status: 400 });
     }
   }

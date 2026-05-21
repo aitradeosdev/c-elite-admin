@@ -14,7 +14,9 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await ctx.params;
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  }
 
   const { data: row } = await supabaseAdmin
     .from('feature_overrides')

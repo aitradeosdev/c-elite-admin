@@ -16,6 +16,14 @@ export async function GET(req: NextRequest) {
   const q = sanitizeSearch(new URL(req.url).searchParams.get('q') || '');
   if (q.length < 3) return NextResponse.json({ users: [] });
 
+  const { data: rlOk } = await supabaseAdmin.rpc('check_rate_limit_by_key', {
+    p_key: `admin_user_search:${admin.admin_id}`,
+    p_action: 'admin_user_search',
+    p_limit: 60,
+    p_window_secs: 60,
+  });
+  if (rlOk === false) return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('id, full_name, username, email')

@@ -37,13 +37,29 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json();
   const { id, ...updates } = body;
-  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  }
 
   const allowed: any = {};
-  if (updates.name !== undefined) allowed.name = String(updates.name).trim();
-  if (updates.target_usd !== undefined) allowed.target_usd = Number(updates.target_usd);
-  if (updates.bonus_naira !== undefined) allowed.bonus_naira = Number(updates.bonus_naira);
-  if (updates.badge_url !== undefined) allowed.badge_url = updates.badge_url || null;
+  if (updates.name !== undefined) allowed.name = String(updates.name).trim().slice(0, 80);
+  if (updates.target_usd !== undefined) {
+    const n = Number(updates.target_usd);
+    if (!Number.isFinite(n) || n < 0 || n > 1e9) return NextResponse.json({ error: 'Invalid target_usd' }, { status: 400 });
+    allowed.target_usd = n;
+  }
+  if (updates.bonus_naira !== undefined) {
+    const n = Number(updates.bonus_naira);
+    if (!Number.isFinite(n) || n < 0 || n > 1e9) return NextResponse.json({ error: 'Invalid bonus_naira' }, { status: 400 });
+    allowed.bonus_naira = n;
+  }
+  if (updates.badge_url !== undefined) {
+    const u = updates.badge_url == null ? null : String(updates.badge_url);
+    if (u && (u.length > 500 || !/^https:\/\/[^\s<>"']{3,}$/i.test(u))) {
+      return NextResponse.json({ error: 'badge_url must be https and <=500 chars' }, { status: 400 });
+    }
+    allowed.badge_url = u;
+  }
   if (updates.is_active !== undefined) allowed.is_active = !!updates.is_active;
   allowed.updated_at = new Date().toISOString();
 

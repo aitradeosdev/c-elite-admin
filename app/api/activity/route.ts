@@ -8,11 +8,9 @@ function canAccessActivity(admin: { is_super_admin: boolean; page_permissions: s
 
 function csvCell(v: any): string {
   if (v === null || v === undefined) return '';
-  const s = typeof v === 'string' ? v : JSON.stringify(v);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-  return s;
+  const raw = typeof v === 'string' ? v : JSON.stringify(v);
+  const s = /^[=+\-@\t\r]/.test(raw) ? "'" + raw : raw;
+  return '"' + s.replace(/"/g, '""') + '"';
 }
 
 function toCsv(rows: any[]): string {

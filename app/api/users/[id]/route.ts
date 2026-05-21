@@ -92,7 +92,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('users')
       .select('is_frozen, freeze_reason')
       .eq('id', id)
-      .single();
+      .maybeSingle();
+    if (!before) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
     await supabaseAdmin
       .from('users')
@@ -117,7 +118,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('users')
       .select('is_frozen, freeze_reason')
       .eq('id', id)
-      .single();
+      .maybeSingle();
+    if (!before) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
     await supabaseAdmin
       .from('users')

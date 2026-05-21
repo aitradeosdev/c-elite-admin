@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+
+const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 12);
 import { supabaseAdmin } from '../../lib/supabase';
 import { signAdminJWT } from '../../lib/jwt';
 
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error || !admin) {
-    await bcrypt.compare(password, '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012');
+    await bcrypt.compare(password, DUMMY_HASH);
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 

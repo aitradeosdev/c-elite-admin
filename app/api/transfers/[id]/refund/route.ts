@@ -18,6 +18,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!gated(admin)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await ctx.params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  }
   const body = await req.json().catch(() => ({}));
   const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
   if (!reason) return NextResponse.json({ error: 'Refund reason required' }, { status: 400 });
