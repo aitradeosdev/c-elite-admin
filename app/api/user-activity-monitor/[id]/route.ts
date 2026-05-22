@@ -12,6 +12,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   if (!admin?.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await ctx.params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  }
 
   const [user, sessions, txns, withdrawals, transfers] = await Promise.all([
     supabaseAdmin.from('users').select('id, username, full_name, email, phone, country, last_active_at, is_frozen, is_active, created_at').eq('id', id).maybeSingle(),

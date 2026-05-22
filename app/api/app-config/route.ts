@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 import { redactAudit } from '../../lib/redact';
+import { validateConfigUrl } from '../../lib/configUrls';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -67,6 +68,10 @@ export async function PATCH(req: NextRequest) {
   const rejected = incoming.filter((k) => !ALLOWED_KEYS.has(k));
   if (rejected.length > 0) {
     return NextResponse.json({ error: `Unknown app_config keys: ${rejected.join(', ')}` }, { status: 400 });
+  }
+  for (const k of incoming) {
+    const urlErr = validateConfigUrl(k, changes[k]);
+    if (urlErr) return NextResponse.json({ error: urlErr }, { status: 400 });
   }
   const keys = incoming;
   const { data: before } = await supabaseAdmin

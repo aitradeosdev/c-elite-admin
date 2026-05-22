@@ -87,14 +87,14 @@ export async function GET(req: NextRequest) {
     const header = 'ID,User,Email,Type,Amount,Status,Reference,Date\n';
     const csvBody = (data || []).map((t: any) =>
       [
-        t.id,
+        formatCSVField(t.id),
         formatCSVField((t as any).users?.username || ''),
         formatCSVField((t as any).users?.email || ''),
-        t.type || '',
-        t.amount,
-        t.status || '',
+        formatCSVField(t.type || ''),
+        formatCSVField(t.amount),
+        formatCSVField(t.status || ''),
         formatCSVField(t.reference_id || ''),
-        t.created_at,
+        formatCSVField(t.created_at),
       ].join(',')
     ).join('\n');
 
