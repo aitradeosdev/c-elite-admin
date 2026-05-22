@@ -38,16 +38,16 @@ export async function POST(req: NextRequest) {
   if (title.length > 120 || message.length > 1000) {
     return NextResponse.json({ error: 'Title or message too long' }, { status: 400 });
   }
-  const ALLOWED_AUDIENCE = new Set(['all', 'user', 'verified', 'unverified', 'active', 'inactive']);
+  const ALLOWED_AUDIENCE = new Set(['all', 'all_anon', 'active_7d', 'inactive', 'specific']);
   if (!ALLOWED_AUDIENCE.has(String(audience))) {
     return NextResponse.json({ error: 'Invalid audience' }, { status: 400 });
   }
-  const ALLOWED_TYPE = new Set(['info', 'warning', 'success', 'promo', 'system']);
+  const ALLOWED_TYPE = new Set(['general', 'promo', 'update', 'system']);
   if (type != null && !ALLOWED_TYPE.has(String(type))) {
     return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
   }
 
-  if (audience === 'user') {
+  if (audience === 'specific') {
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!target_user_id || !UUID_RE.test(String(target_user_id))) {
       return NextResponse.json({ error: 'Invalid target_user_id' }, { status: 400 });
