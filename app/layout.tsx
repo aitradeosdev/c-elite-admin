@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { Inter, JetBrains_Mono } from 'next/font/google';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import './globals.css';
 import { ThemeProvider } from './_ui/theme';
 
@@ -55,6 +56,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
         <ThemeProvider initialMode={initialMode} initialResolved={initialTheme}>{children}</ThemeProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
