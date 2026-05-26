@@ -17,12 +17,25 @@ interface Field {
   sort_order: number;
 }
 
-interface CardType {
+interface InstalledCountry {
+  id: string;
+  country_code: string;
+  is_active: boolean;
+}
+
+interface AvailableCountry {
+  country_code: string;
+  country_name: string;
+  is_active: boolean;
+}
+
+interface Template {
   id: string;
   name: string;
   is_active: boolean;
   sort_order: number;
   fields: Field[];
+  countries: InstalledCountry[];
   expanded?: boolean;
 }
 
@@ -35,8 +48,8 @@ const INPUT_TYPE_OPTIONS = [
 export default function FieldBuilderPage() {
   const [cards, setCards] = useState<CardBrand[]>([]);
   const [selectedCard, setSelectedCard] = useState<CardBrand | null>(null);
-  const [selectedCountry, setSelectedCountry] = useState<{ country_code: string; country_name: string } | null>(null);
-  const [cardTypes, setCardTypes] = useState<CardType[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [countries, setCountries] = useState<AvailableCountry[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [showAddType, setShowAddType] = useState(false);
@@ -45,8 +58,8 @@ export default function FieldBuilderPage() {
 
   const [editTypeId, setEditTypeId] = useState<string | null>(null);
   const [editTypeName, setEditTypeName] = useState('');
-
   const [deleteTypeId, setDeleteTypeId] = useState<string | null>(null);
+
   const [fieldFormTypeId, setFieldFormTypeId] = useState<string | null>(null);
   const [fieldFormMode, setFieldFormMode] = useState<'add' | 'edit'>('add');
   const [editFieldId, setEditFieldId] = useState<string | null>(null);
@@ -54,6 +67,8 @@ export default function FieldBuilderPage() {
   const [fieldInputType, setFieldInputType] = useState<'text' | 'image' | 'image_text'>('text');
   const [fieldRequired, setFieldRequired] = useState(true);
   const [savingField, setSavingField] = useState(false);
+
+  const [busyCountry, setBusyCountry] = useState<string | null>(null);
 
   useEffect(() => { fetchCards(); }, []);
 
@@ -63,64 +78,61 @@ export default function FieldBuilderPage() {
     setCards(data.cards || []);
   };
 
-  const fetchTypes = async (cardId: string, countryCode: string, silent = false) => {
+  const fetchTemplates = async (cardId: string, silent = false) => {
     if (!silent) setLoading(true);
-    const res = await fetch(`/api/field-builder?card_id=${cardId}&country_code=${countryCode}`);
+    const res = await fetch(`/api/field-builder?card_id=${cardId}`);
     const data = await res.json();
-    setCardTypes((data.types || []).map((t: CardType) => ({ ...t, expanded: false })));
+    setTemplates((data.templates || []).map((t: Template) => ({ ...t, expanded: false })));
+    setCountries(data.countries || []);
     if (!silent) setLoading(false);
   };
 
   const selectCard = (card: CardBrand) => {
     setSelectedCard(card);
-    setSelectedCountry(null);
-    setCardTypes([]);
+    setTemplates([]);
+    setCountries([]);
+    fetchTemplates(card.id);
   };
 
-  const selectCountry = (country: { country_code: string; country_name: string }) => {
-    setSelectedCountry(country);
-    if (selectedCard) fetchTypes(selectedCard.id, country.country_code);
+  const refresh = () => { if (selectedCard) fetchTemplates(selectedCard.id, true); };
+
+  const toggleExpand = (id: string) => {
+    setTemplates((prev) => prev.map((t) => t.id === id ? { ...t, expanded: !t.expanded } : t));
   };
 
-  const toggleExpand = (typeId: string) => {
-    setCardTypes((prev) => prev.map((t) => t.id === typeId ? { ...t, expanded: !t.expanded } : t));
-  };
+  const countryName = (code: string) => countries.find((c) => c.country_code === code)?.country_name || code;
 
   const handleAddType = async () => {
-    if (!newTypeName.trim() || !selectedCard || !selectedCountry) return;
+    if (!newTypeName.trim() || !selectedCard) return;
     setSavingType(true);
     await fetch('/api/field-builder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'card_type', card_id: selectedCard.id, country_code: selectedCountry.country_code, name: newTypeName.trim() }),
+      body: JSON.stringify({ type: 'template', card_id: selectedCard.id, name: newTypeName.trim() }),
     });
     setSavingType(false);
     setNewTypeName(''); setShowAddType(false);
-    fetchTypes(selectedCard.id, selectedCountry.country_code, true);
+    refresh();
   };
 
-  const handleToggleType = async (cardType: CardType) => {
+  const handleToggleType = async (tpl: Template) => {
     await fetch('/api/field-builder', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'card_type', id: cardType.id, is_active: !cardType.is_active }),
+      body: JSON.stringify({ type: 'template', id: tpl.id, is_active: !tpl.is_active }),
     });
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
+    refresh();
   };
 
-  const handleSaveEditType = async (typeId: string) => {
+  const handleSaveEditType = async (id: string) => {
     if (!editTypeName.trim()) return;
     await fetch('/api/field-builder', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'card_type', id: typeId, name: editTypeName.trim() }),
+      body: JSON.stringify({ type: 'template', id, name: editTypeName.trim() }),
     });
     setEditTypeId(null);
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
-  };
-
-  const handleDeleteType = async (typeId: string) => {
-    setDeleteTypeId(typeId);
+    refresh();
   };
 
   const confirmDeleteType = async () => {
@@ -128,19 +140,41 @@ export default function FieldBuilderPage() {
     await fetch('/api/field-builder', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'card_type', id: deleteTypeId }),
+      body: JSON.stringify({ type: 'template', id: deleteTypeId }),
     });
     setDeleteTypeId(null);
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
+    refresh();
   };
 
-  const openAddField = (typeId: string) => {
-    setFieldFormTypeId(typeId); setFieldFormMode('add');
+  const addToCountry = async (templateId: string, countryCode: string) => {
+    setBusyCountry(`${templateId}:${countryCode}`);
+    await fetch('/api/field-builder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'add_country', template_id: templateId, country_code: countryCode }),
+    });
+    setBusyCountry(null);
+    refresh();
+  };
+
+  const toggleCountry = async (cardTypeId: string, isActive: boolean) => {
+    setBusyCountry(cardTypeId);
+    await fetch('/api/field-builder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'country', card_type_id: cardTypeId, is_active: isActive }),
+    });
+    setBusyCountry(null);
+    refresh();
+  };
+
+  const openAddField = (templateId: string) => {
+    setFieldFormTypeId(templateId); setFieldFormMode('add');
     setEditFieldId(null); setFieldLabel(''); setFieldInputType('text'); setFieldRequired(true);
   };
 
-  const openEditField = (typeId: string, field: Field) => {
-    setFieldFormTypeId(typeId); setFieldFormMode('edit');
+  const openEditField = (templateId: string, field: Field) => {
+    setFieldFormTypeId(templateId); setFieldFormMode('edit');
     setEditFieldId(field.id); setFieldLabel(field.label);
     setFieldInputType(field.input_type); setFieldRequired(field.is_required);
   };
@@ -152,7 +186,7 @@ export default function FieldBuilderPage() {
       await fetch('/api/field-builder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'field', card_type_id: fieldFormTypeId, label: fieldLabel.trim(), input_type: fieldInputType, is_required: fieldRequired }),
+        body: JSON.stringify({ type: 'field', template_id: fieldFormTypeId, label: fieldLabel.trim(), input_type: fieldInputType, is_required: fieldRequired }),
       });
     } else {
       await fetch('/api/field-builder', {
@@ -163,7 +197,7 @@ export default function FieldBuilderPage() {
     }
     setSavingField(false);
     setFieldFormTypeId(null);
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
+    refresh();
   };
 
   const handleDeleteField = async (fieldId: string) => {
@@ -172,7 +206,7 @@ export default function FieldBuilderPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'field', id: fieldId }),
     });
-    fetchTypes(selectedCard!.id, selectedCountry!.country_code, true);
+    refresh();
   };
 
   const inputTypeBadge = (type: string) => {
@@ -197,35 +231,16 @@ export default function FieldBuilderPage() {
         {cards.length === 0 && <p style={styles.emptyText}>No cards yet</p>}
       </div>
 
-      <div style={styles.panel2}>
-        <p style={styles.panelHeader}>Countries</p>
-        {selectedCard ? (
-          selectedCard.countries.filter((c) => c.is_active).map((country) => (
-            <div
-              key={country.country_code}
-              style={{ ...styles.panelItem, ...(selectedCountry?.country_code === country.country_code ? styles.panelItemActive : {}) }}
-              onClick={() => selectCountry(country)}
-            >
-              <span style={styles.panelItemLabel}>{country.country_name}</span>
-            </div>
-          ))
-        ) : (
-          <p style={styles.emptyText}>Select a card</p>
-        )}
-        {selectedCard && selectedCard.countries.filter((c) => c.is_active).length === 0 && (
-          <p style={styles.emptyText}>No countries</p>
-        )}
-      </div>
-
       <div style={styles.panel3}>
-        {!selectedCard || !selectedCountry ? (
-          <p style={styles.emptyText}>Select a card and country</p>
+        {!selectedCard ? (
+          <p style={styles.emptyText}>Select a card</p>
         ) : (
           <>
             <div style={styles.panel3Header}>
-              <span style={styles.panel3Title}>{selectedCard.name} — {selectedCountry.country_name}</span>
+              <span style={styles.panel3Title}>{selectedCard.name} — Card Types</span>
               <button style={styles.addTypeBtn} onClick={() => setShowAddType(true)}>+ Add Card Type</button>
             </div>
+            <p style={styles.hintText}>Create a card type once (with its fields), then add it to each country below.</p>
 
             {showAddType && (
               <div style={styles.inlineForm}>
@@ -245,47 +260,99 @@ export default function FieldBuilderPage() {
 
             {loading && <p style={styles.emptyText}>Loading...</p>}
 
-            {cardTypes.map((cardType) => (
-              <div key={cardType.id} style={styles.typeBlock}>
-                <div style={styles.typeHeader}>
-                  {editTypeId === cardType.id ? (
-                    <>
-                      <input
-                        style={{ ...styles.inlineInput, flex: 1 }}
-                        value={editTypeName}
-                        onChange={(e) => setEditTypeName(e.target.value)}
-                        autoFocus
-                      />
-                      <button style={styles.saveSmallBtn} onClick={() => handleSaveEditType(cardType.id)}>Save</button>
-                      <button style={styles.cancelSmallBtn} onClick={() => setEditTypeId(null)}>Cancel</button>
-                    </>
-                  ) : (
-                    <>
-                      <span style={styles.typeName}>{cardType.name}</span>
-                      <div
-                        style={{ ...styles.toggle, backgroundColor: cardType.is_active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
-                        onClick={() => handleToggleType(cardType)}
-                      >
-                        <div style={{ ...styles.toggleThumb, left: cardType.is_active ? 22 : 2 }} />
-                      </div>
-                      <button style={styles.iconBtn} onClick={() => { setEditTypeId(cardType.id); setEditTypeName(cardType.name); }}>
-                        <EditIcon />
-                      </button>
-                      <button style={styles.iconBtnRed} onClick={() => handleDeleteType(cardType.id)}>
-                        <DeleteIcon />
-                      </button>
-                      <button style={styles.expandBtn} onClick={() => toggleExpand(cardType.id)}>
-                        {cardType.expanded ? '▲' : '▼'}
-                      </button>
-                    </>
-                  )}
-                </div>
+            {templates.map((tpl) => {
+              const installedCodes = new Set(tpl.countries.map((c) => c.country_code));
+              const notAdded = countries.filter((c) => !installedCodes.has(c.country_code));
+              return (
+                <div key={tpl.id} style={styles.typeBlock}>
+                  <div style={styles.typeHeader}>
+                    {editTypeId === tpl.id ? (
+                      <>
+                        <input
+                          style={{ ...styles.inlineInput, flex: 1 }}
+                          value={editTypeName}
+                          onChange={(e) => setEditTypeName(e.target.value)}
+                          autoFocus
+                        />
+                        <button style={styles.saveSmallBtn} onClick={() => handleSaveEditType(tpl.id)}>Save</button>
+                        <button style={styles.cancelSmallBtn} onClick={() => setEditTypeId(null)}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={styles.typeName}>{tpl.name}</span>
+                        <span style={styles.countCount}>{tpl.countries.filter((c) => c.is_active).length} {tpl.countries.filter((c) => c.is_active).length === 1 ? 'country' : 'countries'}</span>
+                        <div
+                          style={{ ...styles.toggle, backgroundColor: tpl.is_active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
+                          onClick={() => handleToggleType(tpl)}
+                        >
+                          <div style={{ ...styles.toggleThumb, left: tpl.is_active ? 22 : 2 }} />
+                        </div>
+                        <button style={styles.iconBtn} onClick={() => { setEditTypeId(tpl.id); setEditTypeName(tpl.name); }}><EditIcon /></button>
+                        <button style={styles.iconBtnRed} onClick={() => setDeleteTypeId(tpl.id)}><DeleteIcon /></button>
+                        <button style={styles.expandBtn} onClick={() => toggleExpand(tpl.id)}>{tpl.expanded ? '▲' : '▼'}</button>
+                      </>
+                    )}
+                  </div>
 
-                {cardType.expanded && (
-                  <div style={styles.fieldsBlock}>
-                    {cardType.fields.map((field) => (
-                      <div key={field.id}>
-                        {fieldFormTypeId === cardType.id && fieldFormMode === 'edit' && editFieldId === field.id ? (
+                  {tpl.expanded && (
+                    <div style={styles.body}>
+                      <p style={styles.sectionLabel}>Countries</p>
+                      <div style={styles.chipsWrap}>
+                        {tpl.countries.length === 0 && <span style={styles.emptyInline}>Not added to any country yet.</span>}
+                        {tpl.countries.map((c) => (
+                          <div
+                            key={c.id}
+                            style={{ ...styles.chip, ...(c.is_active ? styles.chipOn : styles.chipOff) }}
+                            onClick={() => busyCountry !== c.id && toggleCountry(c.id, !c.is_active)}
+                            title={c.is_active ? 'Active — click to disable' : 'Disabled — click to enable'}
+                          >
+                            {c.is_active ? '● ' : '○ '}{countryName(c.country_code)}
+                          </div>
+                        ))}
+                      </div>
+                      {notAdded.length > 0 && (
+                        <div style={styles.addWrap}>
+                          <span style={styles.addLabel}>Add to:</span>
+                          {notAdded.map((c) => (
+                            <button
+                              key={c.country_code}
+                              style={styles.chipAdd}
+                              disabled={busyCountry === `${tpl.id}:${c.country_code}`}
+                              onClick={() => addToCountry(tpl.id, c.country_code)}
+                            >
+                              + {c.country_name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <p style={{ ...styles.sectionLabel, marginTop: 14 }}>Fields</p>
+                      <div style={styles.fieldsBlock}>
+                        {tpl.fields.map((field) => (
+                          <div key={field.id}>
+                            {fieldFormTypeId === tpl.id && fieldFormMode === 'edit' && editFieldId === field.id ? (
+                              <FieldForm
+                                label={fieldLabel} setLabel={setFieldLabel}
+                                inputType={fieldInputType} setInputType={setFieldInputType}
+                                required={fieldRequired} setRequired={setFieldRequired}
+                                onSave={handleSaveField} onCancel={() => setFieldFormTypeId(null)}
+                                saving={savingField}
+                              />
+                            ) : (
+                              <div style={styles.fieldRow}>
+                                <span style={styles.fieldLabel}>{field.label}</span>
+                                <span style={styles.inputTypeBadge}>{inputTypeBadge(field.input_type)}</span>
+                                <span style={field.is_required ? styles.requiredBadge : styles.optionalBadge}>
+                                  {field.is_required ? 'Required' : 'Optional'}
+                                </span>
+                                <button style={styles.iconBtn} onClick={() => openEditField(tpl.id, field)}><EditIcon /></button>
+                                <button style={styles.iconBtnRed} onClick={() => handleDeleteField(field.id)}><DeleteIcon /></button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {fieldFormTypeId === tpl.id && fieldFormMode === 'add' ? (
                           <FieldForm
                             label={fieldLabel} setLabel={setFieldLabel}
                             inputType={fieldInputType} setInputType={setFieldInputType}
@@ -294,48 +361,28 @@ export default function FieldBuilderPage() {
                             saving={savingField}
                           />
                         ) : (
-                          <div style={styles.fieldRow}>
-                            <span style={styles.dragHandle}>⠿</span>
-                            <span style={styles.fieldLabel}>{field.label}</span>
-                            <span style={styles.inputTypeBadge}>{inputTypeBadge(field.input_type)}</span>
-                            <span style={field.is_required ? styles.requiredBadge : styles.optionalBadge}>
-                              {field.is_required ? 'Required' : 'Optional'}
-                            </span>
-                            <button style={styles.iconBtn} onClick={() => openEditField(cardType.id, field)}><EditIcon /></button>
-                            <button style={styles.iconBtnRed} onClick={() => handleDeleteField(field.id)}><DeleteIcon /></button>
-                          </div>
+                          <button style={styles.addFieldBtn} onClick={() => openAddField(tpl.id)}>+ Add Field</button>
                         )}
                       </div>
-                    ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
-                    {fieldFormTypeId === cardType.id && fieldFormMode === 'add' ? (
-                      <FieldForm
-                        label={fieldLabel} setLabel={setFieldLabel}
-                        inputType={fieldInputType} setInputType={setFieldInputType}
-                        required={fieldRequired} setRequired={setFieldRequired}
-                        onSave={handleSaveField} onCancel={() => setFieldFormTypeId(null)}
-                        saving={savingField}
-                      />
-                    ) : (
-                      <button style={styles.addFieldBtn} onClick={() => openAddField(cardType.id)}>+ Add Field</button>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {!loading && cardTypes.length === 0 && (
+            {!loading && templates.length === 0 && (
               <p style={styles.emptyText}>No card types yet. Add one above.</p>
             )}
           </>
         )}
       </div>
+
       {deleteTypeId && (
         <>
           <div style={styles.modalOverlay} />
           <div style={styles.modal}>
             <p style={styles.modalTitle}>Delete Card Type</p>
-            <p style={styles.modalText}>This will delete the card type and all its fields. This cannot be undone.</p>
+            <p style={styles.modalText}>This deletes the card type and its fields. Countries already added keep working (they just unlink from this template). This cannot be undone.</p>
             <div style={styles.modalActions}>
               <button style={styles.cancelSmallBtn} onClick={() => setDeleteTypeId(null)}>Cancel</button>
               <button style={{ ...styles.saveSmallBtn, backgroundColor: 'var(--tone-danger-fg)' }} onClick={confirmDeleteType}>Delete</button>
@@ -406,7 +453,6 @@ function DeleteIcon() {
 const styles: Record<string, React.CSSProperties> = {
   container: { display: 'flex', height: 'calc(100vh - 48px)', overflow: 'hidden', margin: -24 },
   panel1: { width: 200, backgroundColor: 'var(--bg-surface)', borderRight: '1px solid var(--border-default)', overflowY: 'auto', flexShrink: 0 },
-  panel2: { width: 220, backgroundColor: 'var(--bg-subtle)', borderRight: '1px solid var(--border-default)', overflowY: 'auto', flexShrink: 0 },
   panel3: { flex: 1, overflowY: 'auto', padding: 20, backgroundColor: 'var(--bg-surface)' },
   panelHeader: { fontSize: 11, fontWeight: 700, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '12px 14px 8px', margin: 0, borderBottom: '1px solid var(--border-default)' },
   panelItem: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--fg-secondary)' },
@@ -414,7 +460,9 @@ const styles: Record<string, React.CSSProperties> = {
   panelItemLabel: { fontSize: 12, fontWeight: 600 },
   cardLogo: { width: 24, height: 24, objectFit: 'contain', borderRadius: 3, flexShrink: 0 },
   emptyText: { fontSize: 12, color: 'var(--fg-tertiary)', padding: '12px 14px', margin: 0 },
-  panel3Header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  emptyInline: { fontSize: 12, color: 'var(--fg-tertiary)' },
+  hintText: { fontSize: 12, color: 'var(--fg-tertiary)', margin: '0 0 14px' },
+  panel3Header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   panel3Title: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)' },
   addTypeBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
   inlineForm: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, backgroundColor: 'var(--bg-subtle)', padding: 10, borderRadius: 8 },
@@ -423,15 +471,24 @@ const styles: Record<string, React.CSSProperties> = {
   cancelSmallBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
   typeBlock: { border: '1px solid var(--border-default)', borderRadius: 8, marginBottom: 10, overflow: 'hidden' },
   typeHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', backgroundColor: 'var(--bg-subtle)' },
-  typeName: { fontSize: 12, fontWeight: 600, color: 'var(--fg-primary)', flex: 1 },
+  typeName: { fontSize: 12, fontWeight: 600, color: 'var(--fg-primary)' },
+  countCount: { fontSize: 11, color: 'var(--fg-tertiary)', flex: 1 },
   toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
   toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
   iconBtn: { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-tertiary)', padding: 4, display: 'flex', alignItems: 'center' },
   iconBtnRed: { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tone-danger-fg)', padding: 4, display: 'flex', alignItems: 'center' },
   expandBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--fg-tertiary)', padding: 4 },
-  fieldsBlock: { padding: '8px 14px 12px 30px', borderTop: '1px solid var(--border-default)' },
+  body: { padding: '12px 14px 14px', borderTop: '1px solid var(--border-default)' },
+  sectionLabel: { fontSize: 11, fontWeight: 700, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 8px' },
+  chipsWrap: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  chip: { padding: '4px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, cursor: 'pointer', userSelect: 'none' },
+  chipOn: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' },
+  chipOff: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)' },
+  addWrap: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 8 },
+  addLabel: { fontSize: 11, color: 'var(--fg-tertiary)', fontWeight: 600 },
+  chipAdd: { padding: '4px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: '1px dashed var(--border-default)', backgroundColor: 'var(--bg-surface)', color: 'var(--fg-secondary)' },
+  fieldsBlock: { },
   fieldRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border-subtle)' },
-  dragHandle: { fontSize: 14, color: 'var(--fg-tertiary)', cursor: 'grab', userSelect: 'none' },
   fieldLabel: { fontSize: 12, color: 'var(--fg-secondary)', flex: 1 },
   inputTypeBadge: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' },
   requiredBadge: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },

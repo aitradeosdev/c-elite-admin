@@ -37,7 +37,7 @@ const FIELDS: { section: string; items: Field[] }[] = [
     items: [
       { key: 'alert_critical_amount', label: 'Critical Amount (₦)', hint: 'Single-transaction amount that triggers a high-severity admin alert.', inputType: 'number' },
       { key: 'security_alerts_batch_size', label: 'Email Batch Size', hint: 'Max security alert emails sent per cron run.', inputType: 'number' },
-      { key: 'alert_timezone', label: 'Alert Timezone', hint: 'IANA timezone used when rendering alert timestamps (e.g. Africa/Lagos).', inputType: 'text' },
+      { key: 'alert_timezone', label: 'Alert Email Timezone', hint: 'IANA timezone (e.g. Africa/Lagos) used only for timestamps shown in security alert emails. Does not affect anomaly detection or withdrawal limits.', inputType: 'text' },
     ],
   },
 ];

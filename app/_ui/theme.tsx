@@ -74,9 +74,6 @@ export function ThemeProvider({
   initialMode?: ThemeMode;
   initialResolved?: ResolvedTheme;
 }) {
-  // Seeded from the server-read cookie so SSR and the client agree —
-  // otherwise SSR has no document and the theme switcher would highlight
-  // the wrong segment until hydration.
   const [mode, setModeState] = useState<ThemeMode>(() => initialMode ?? readCookieTheme());
   const [resolved, setResolved] = useState<ResolvedTheme>(
     () => initialResolved ?? resolveTheme(initialMode ?? readCookieTheme()),

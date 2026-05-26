@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
           subject: `Repeated failed admin logins for ${admin.email}`,
           detail: { admin_id: admin.id, email: admin.email, fail_count: fail30m, ip },
         });
-      } catch { /* alert insert is best-effort */ }
+      } catch {}
     }
     if ((fail24h ?? 0) >= 25) {
       await supabaseAdmin.from('admin_users').update({ is_active: false }).eq('id', admin.id);

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
-const FIELDS = [
+interface Field { key: string; label: string; hint: string; type?: 'number' | 'text'; }
+
+const FIELDS: { section: string; items: Field[] }[] = [
   {
     section: 'Withdrawals',
     items: [
@@ -14,9 +16,10 @@ const FIELDS = [
     ],
   },
   {
-    section: 'Transfer Fees',
+    section: 'Transfers',
     items: [
       { key: 'transfer_tag_fee', label: 'Tag Transfer Fee (₦)', hint: 'Flat fee charged on sender for @tag transfers. Set 0 for free.' },
+      { key: 'transfer_quick_amounts', label: 'Tag Transfer Quick Amounts (CSV)', hint: 'Comma-separated preset buttons on the tag-transfer screen. Example: 500,1000,2000,5000,10000', type: 'text' },
     ],
   },
   {
@@ -85,9 +88,8 @@ export default function LimitsFeesPage() {
               <label style={styles.label}>{f.label}</label>
               <input
                 style={styles.input}
-                type="number"
-                min={0}
-                step="1"
+                type={f.type === 'text' ? 'text' : 'number'}
+                {...(f.type === 'text' ? {} : { min: 0, step: '1' })}
                 value={draft[f.key] ?? ''}
                 onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
               />

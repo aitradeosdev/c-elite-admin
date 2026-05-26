@@ -37,7 +37,7 @@ function rejectCrossOrigin(req: NextRequest): NextResponse | null {
       const o = new URL(origin);
       const u = new URL(req.url);
       if (o.host === u.host && o.protocol === u.protocol) return null;
-    } catch { /* fall through */ }
+    } catch {}
   }
 
   return new NextResponse(JSON.stringify({ error: 'Origin not allowed' }), {

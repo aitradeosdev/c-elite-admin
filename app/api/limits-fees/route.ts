@@ -12,9 +12,11 @@ const KEYS = [
   'withdraw_fee',
   'transfer_tag_fee',
   'transfer_bank_fee',
+  'transfer_quick_amounts',
   'large_withdrawal_flag_threshold',
 ];
 
+const CSV_KEYS = new Set(['transfer_quick_amounts']);
 const ALLOWED = new Set(KEYS);
 
 async function getAdmin(_req?: any) {
@@ -45,9 +47,18 @@ export async function PATCH(req: NextRequest) {
   if (keys.length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
 
   for (const k of keys) {
-    const n = Number(changes[k]);
-    if (!Number.isFinite(n) || n < 0) {
-      return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
+    if (CSV_KEYS.has(k)) {
+      const v = changes[k];
+      if (typeof v !== 'string') return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
+      const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
+      if (parts.length === 0 || parts.some((p) => !Number.isFinite(Number(p)) || Number(p) < 0)) {
+        return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
+      }
+    } else {
+      const n = Number(changes[k]);
+      if (!Number.isFinite(n) || n < 0) {
+        return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
+      }
     }
   }
 

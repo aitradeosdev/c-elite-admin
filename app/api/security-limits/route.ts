@@ -6,9 +6,11 @@ import { redactAudit } from '../../lib/redact';
 const KEYS = [
   'signup_rate_limit_per_hour',
   'paystack_webhook_ips',
+  'monnify_webhook_ips',
 ];
 
-const TEXT_KEYS = new Set(['paystack_webhook_ips']);
+const IP_KEYS = new Set(['paystack_webhook_ips', 'monnify_webhook_ips']);
+const TEXT_KEYS = new Set(['paystack_webhook_ips', 'monnify_webhook_ips']);
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$/;
 const ALLOWED = new Set(KEYS);
 
@@ -42,8 +44,8 @@ export async function PATCH(req: NextRequest) {
 
   for (const k of keys) {
     const v = changes[k];
-    if (k === 'paystack_webhook_ips') {
-      if (typeof v !== 'string') return NextResponse.json({ error: 'Invalid value for paystack_webhook_ips' }, { status: 400 });
+    if (IP_KEYS.has(k)) {
+      if (typeof v !== 'string') return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
       const parts = String(v).split(',').map((s) => s.trim()).filter(Boolean);
       for (const ip of parts) {
         if (!IPV4_RE.test(ip)) return NextResponse.json({ error: `Invalid IP: ${ip}` }, { status: 400 });
