@@ -52,13 +52,11 @@ interface Stats {
   level_tier_count: number;
   signup_awarded_today: number;
   signup_awarded_total: number;
-  anniversary_awarded_today: number;
 }
 
 const CONFIG_KEYS = [
   'levels_active',
   'signup_bonus_active', 'signup_bonus_amount', 'signup_bonus_condition',
-  'anniversary_bonus_active', 'anniversary_bonus_amount',
 ];
 
 export default function BonusesPage() {
@@ -215,17 +213,6 @@ export default function BonusesPage() {
             </select>
           </Row>
           <div style={styles.stat}>Awarded today: <b>{stats?.signup_awarded_today ?? 0}</b> · Total: <b>{stats?.signup_awarded_total ?? 0}</b></div>
-        </div>
-
-        <div style={styles.card}>
-          <div style={styles.cardHead}>
-            <span style={styles.cardTitle}>Anniversary Bonus</span>
-            <Toggle on={getToggle('anniversary_bonus_active')} onClick={() => toggleKey('anniversary_bonus_active')} />
-          </div>
-          <Row label="Amount (₦)">
-            <input style={styles.smallInput} type="number" value={getValue('anniversary_bonus_amount')} onChange={(e) => setValue('anniversary_bonus_amount', e.target.value)} />
-          </Row>
-          <div style={styles.stat}>Awarded today: <b>{stats?.anniversary_awarded_today ?? 0}</b></div>
         </div>
 
         <div style={{ ...styles.card, opacity: 0.5 }}>

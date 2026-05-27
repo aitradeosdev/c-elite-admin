@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   todayStart.setHours(0, 0, 0, 0);
   const todayIso = todayStart.toISOString();
 
-  const [levelToday, levelTiers, signupToday, signupTotal, anniversaryToday] = await Promise.all([
+  const [levelToday, levelTiers, signupToday, signupTotal] = await Promise.all([
     supabaseAdmin.from('user_level_claims').select('id', { count: 'exact', head: true })
       .gte('claimed_at', todayIso),
     supabaseAdmin.from('level_tiers').select('id', { count: 'exact', head: true })
@@ -25,8 +25,6 @@ export async function GET(req: NextRequest) {
       .eq('type', 'signup_bonus').gte('created_at', todayIso),
     supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true })
       .eq('type', 'signup_bonus'),
-    supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true })
-      .eq('type', 'anniversary_bonus').gte('created_at', todayIso),
   ]);
 
   return NextResponse.json({
@@ -35,7 +33,6 @@ export async function GET(req: NextRequest) {
       level_tier_count: levelTiers.count || 0,
       signup_awarded_today: signupToday.count || 0,
       signup_awarded_total: signupTotal.count || 0,
-      anniversary_awarded_today: anniversaryToday.count || 0,
     },
   });
 }
