@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from './_ui/theme';
@@ -45,6 +45,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     resolveInitialTheme(),
     resolveInitialMode(),
   ]);
+  const nonce = (await headers()).get('x-nonce') || undefined;
   return (
     <html
       lang="en"
@@ -53,7 +54,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       suppressHydrationWarning
     >
       <body>
-        <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
         <ThemeProvider initialMode={initialMode} initialResolved={initialTheme}>{children}</ThemeProvider>
       </body>
     </html>
