@@ -82,7 +82,10 @@ export default function FieldBuilderPage() {
     if (!silent) setLoading(true);
     const res = await fetch(`/api/field-builder?card_id=${cardId}`);
     const data = await res.json();
-    setTemplates((data.templates || []).map((t: Template) => ({ ...t, expanded: false })));
+    setTemplates((prev) => {
+      const wasExpanded = new Map(prev.map((t) => [t.id, t.expanded]));
+      return (data.templates || []).map((t: Template) => ({ ...t, expanded: wasExpanded.get(t.id) ?? false }));
+    });
     setCountries(data.countries || []);
     if (!silent) setLoading(false);
   };
