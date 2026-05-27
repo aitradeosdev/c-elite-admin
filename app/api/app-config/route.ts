@@ -48,7 +48,7 @@ export async function PATCH(req: NextRequest) {
     'min_cable_amount', 'max_cable_amount',
     'signup_bonus_amount', 'signup_bonus_condition', 'signup_bonus_active',
     'newbie_bonus_amount', 'newbie_bonus_active',
-    'referral_active', 'referral_bonus_amount', 'referral_min_trade_usd', 'referral_max_per_day',
+    'referral_active', 'referral_referrer_bonus', 'referral_referee_bonus', 'referral_min_trade_usd', 'referral_max_per_day',
     'level_bonus_active', 'levels_active',
     'pin_reset_freeze_hours',
     'large_withdrawal_flag_threshold',
@@ -62,6 +62,7 @@ export async function PATCH(req: NextRequest) {
     'store_url_android', 'store_url_ios',
     'app_current_version', 'app_update_type', 'app_update_message',
     'emergency_mode', 'withdrawal_narrations',
+    'coupon_terms_of_use',
     'iana_timezone',
   ]);
   const incoming = Object.keys(changes);
