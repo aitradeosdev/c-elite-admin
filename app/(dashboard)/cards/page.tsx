@@ -239,6 +239,11 @@ interface Card {
   countries: Country[];
 }
 
+function codeToFlag(code: string): string {
+  if (!code || code.length !== 2) return '';
+  return code.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0)));
+}
+
 export default function CardsPage() {
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
@@ -515,7 +520,7 @@ export default function CardsPage() {
               {countriesCard.countries.map((country) => (
                 <div key={country.id} style={styles.countryRow}>
                   <div style={{ flex: 1 }}>
-                    <span style={styles.countryName}>{country.country_name}</span>
+                    <span style={styles.countryName}>{codeToFlag(country.country_code)}  {country.country_name}</span>
                     <span style={styles.currencySymbol}> ({country.currency_symbol})</span>
                   </div>
                   <div
@@ -537,7 +542,7 @@ export default function CardsPage() {
                 <input
                   style={styles.input}
                   placeholder="Search country"
-                  value={countryOpen ? countryQuery : (ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || '')}
+                  value={countryOpen ? countryQuery : (newCountryCode ? `${codeToFlag(newCountryCode)}  ${ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || ''}` : '')}
                   onFocus={() => { setCountryOpen(true); setCountryQuery(''); }}
                   onChange={(e) => { setCountryQuery(e.target.value); setCountryOpen(true); }}
                 />
@@ -560,7 +565,7 @@ export default function CardsPage() {
                           setCountryQuery('');
                         }}
                       >
-                        <span style={{ fontWeight: 600 }}>{c.name}</span>
+                        <span style={{ fontWeight: 600 }}>{codeToFlag(c.code)}  {c.name}</span>
                         <span style={{ color: 'var(--fg-tertiary)', fontSize: 11, marginLeft: 6 }}>{c.currency} {c.symbol}</span>
                       </div>
                     ))}
