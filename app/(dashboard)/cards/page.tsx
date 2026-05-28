@@ -265,6 +265,7 @@ export default function CardsPage() {
   const [newCurrencyName, setNewCurrencyName] = useState('');
   const [newCountryActive, setNewCountryActive] = useState(true);
   const [addingCountry, setAddingCountry] = useState(false);
+  const addingCountryLockRef = useRef(false);
   const [countryQuery, setCountryQuery] = useState('');
   const [countryOpen, setCountryOpen] = useState(false);
   const countryBoxRef = useRef<HTMLDivElement>(null);
@@ -347,27 +348,37 @@ export default function CardsPage() {
 
   const handleAddCountry = async () => {
     if (!newCountryCode || !newCurrencySymbol || !newCurrencyName) return;
+    // Synchronous lock: state-based `addingCountry` only disables the button on the next React
+    // render, so rapid clicks before that paint can still fire multiple POSTs (each happily
+    // inserting another row since there's a unique constraint server-side now, but the
+    // duplicate clicks would still surface as 409s). Ref-lock kills the race in JS too.
+    if (addingCountryLockRef.current) return;
+    addingCountryLockRef.current = true;
     setAddingCountry(true);
-    const countryName = ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || newCountryCode;
-    await fetch('/api/cards', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'country',
-        card_id: countriesCard!.id,
-        country_code: newCountryCode,
-        country_name: countryName,
-        currency_symbol: newCurrencySymbol,
-        is_active: newCountryActive,
-      }),
-    });
-    setAddingCountry(false);
-    setNewCountryCode(''); setNewCurrencySymbol(''); setNewCurrencyName('');
-    await fetchCards(true);
-    setCountriesCard((prev) => {
-      const updated = cards.find((c) => c.id === prev?.id);
-      return updated || prev;
-    });
+    try {
+      const countryName = ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || newCountryCode;
+      await fetch('/api/cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'country',
+          card_id: countriesCard!.id,
+          country_code: newCountryCode,
+          country_name: countryName,
+          currency_symbol: newCurrencySymbol,
+          is_active: newCountryActive,
+        }),
+      });
+      setNewCountryCode(''); setNewCurrencySymbol(''); setNewCurrencyName('');
+      await fetchCards(true);
+      setCountriesCard((prev) => {
+        const updated = cards.find((c) => c.id === prev?.id);
+        return updated || prev;
+      });
+    } finally {
+      setAddingCountry(false);
+      addingCountryLockRef.current = false;
+    }
   };
 
   const handleToggleCountry = async (country: Country) => {

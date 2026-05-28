@@ -82,7 +82,14 @@ export async function POST(req: NextRequest) {
       .insert({ card_id, country_code, country_name, currency_symbol, is_active: body.is_active ?? true })
       .select('id')
       .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      // 23505 = unique_violation on (card_id, country_code). Treat as idempotent: the country
+      // is already on this card. Caller's UI just refetches and sees the existing row.
+      if ((error as any).code === '23505') {
+        return NextResponse.json({ error: 'This country is already on this card.' }, { status: 409 });
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
     await logAction(admin.admin_id, 'ADD_CARD_COUNTRY', data.id, null, { card_id, country_code, country_name, currency_symbol }, ip);
     return NextResponse.json({ success: true });
   }
