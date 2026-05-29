@@ -348,10 +348,6 @@ export default function CardsPage() {
 
   const handleAddCountry = async () => {
     if (!newCountryCode || !newCurrencySymbol || !newCurrencyName) return;
-    // Synchronous lock: state-based `addingCountry` only disables the button on the next React
-    // render, so rapid clicks before that paint can still fire multiple POSTs (each happily
-    // inserting another row since there's a unique constraint server-side now, but the
-    // duplicate clicks would still surface as 409s). Ref-lock kills the race in JS too.
     if (addingCountryLockRef.current) return;
     addingCountryLockRef.current = true;
     setAddingCountry(true);

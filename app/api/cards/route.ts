@@ -83,8 +83,6 @@ export async function POST(req: NextRequest) {
       .select('id')
       .single();
     if (error) {
-      // 23505 = unique_violation on (card_id, country_code). Treat as idempotent: the country
-      // is already on this card. Caller's UI just refetches and sees the existing row.
       if ((error as any).code === '23505') {
         return NextResponse.json({ error: 'This country is already on this card.' }, { status: 409 });
       }

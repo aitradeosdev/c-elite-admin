@@ -47,7 +47,6 @@ export async function PATCH(req: NextRequest) {
     'min_data_amount', 'max_data_amount',
     'min_cable_amount', 'max_cable_amount',
     'signup_bonus_amount', 'signup_bonus_condition', 'signup_bonus_active',
-    'newbie_bonus_amount', 'newbie_bonus_active',
     'referral_active', 'referral_referrer_bonus', 'referral_referee_bonus', 'referral_min_trade_usd', 'referral_max_per_day',
     'level_bonus_active', 'levels_active',
     'pin_reset_freeze_hours',
