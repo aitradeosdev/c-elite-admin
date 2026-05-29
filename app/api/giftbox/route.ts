@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 import { redactAudit } from '../../lib/redact';
+import { bustPromoCache } from '../../lib/promoCacheBust';
 
 async function getAdmin(_req?: any) {
   return verifyAdminFromRequest();
@@ -73,6 +74,7 @@ export async function POST(req: NextRequest) {
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
+  bustPromoCache();
   return NextResponse.json({ success: true, id: data.id });
 }
 
@@ -123,5 +125,6 @@ export async function PATCH(req: NextRequest) {
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
 
+  bustPromoCache();
   return NextResponse.json({ success: true });
 }
