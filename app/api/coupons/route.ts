@@ -22,8 +22,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ coupons: data || [] });
 }
 
-const COUPON_TYPES = new Set(['signup', 'referral', 'trade', 'event', 'manual']);
 const COUPON_CODE_RE = /^[A-Z0-9_-]{3,32}$/;
+const COUPON_TYPE_RE = /^[A-Za-z0-9 _\-&()]+$/;
+function isValidCouponType(t: unknown): boolean {
+  const s = String(t || '').trim();
+  return s.length >= 1 && s.length <= 80 && COUPON_TYPE_RE.test(s);
+}
 
 export async function POST(req: NextRequest) {
   const admin = await getAdmin(req);
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest) {
   if (!COUPON_CODE_RE.test(normCode)) {
     return NextResponse.json({ error: 'Invalid coupon code format' }, { status: 400 });
   }
-  if (!COUPON_TYPES.has(String(type))) {
+  if (!isValidCouponType(type)) {
     return NextResponse.json({ error: 'Invalid coupon type' }, { status: 400 });
   }
   if (terms_of_use != null && String(terms_of_use).length > 5000) {
@@ -103,7 +107,7 @@ export async function PATCH(req: NextRequest) {
   }
   if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null;
   if (body.type !== undefined) {
-    if (!COUPON_TYPES.has(String(body.type))) return NextResponse.json({ error: 'Invalid coupon type' }, { status: 400 });
+    if (!isValidCouponType(body.type)) return NextResponse.json({ error: 'Invalid coupon type' }, { status: 400 });
     updates.type = body.type;
   }
   if (body.is_active !== undefined) updates.is_active = !!body.is_active;
