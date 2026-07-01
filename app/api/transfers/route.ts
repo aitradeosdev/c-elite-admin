@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
   const dateTo = searchParams.get('date_to') || '';
   const search = sanitizeSearch(searchParams.get('search') || '');
   const csv = searchParams.get('csv') === '1';
+  const pdf = searchParams.get('pdf') === '1';
   const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
   let query = supabaseAdmin
@@ -56,38 +57,49 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (csv) {
+  if (csv || pdf) {
     const CAP = 50000;
     const { data, error } = await query.order('created_at', { ascending: false }).range(0, CAP - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const exportRows = (data || []).map((t: any) => {
+      const senderName = t.sender?.username || t.sender?.full_name || '';
+      const recipientName = t.type === 'tag'
+        ? (t.recipient?.username || t.recipient?.full_name || '')
+        : (t.recipient_account_name || '');
+      return {
+        ID: t.id,
+        Type: t.type || '',
+        Sender: senderName,
+        Recipient: recipientName,
+        Bank: t.recipient_bank_name || '',
+        Account: t.recipient_account_number || '',
+        Amount: t.amount,
+        Fee: t.fee || 0,
+        Status: t.status || '',
+        Date: t.created_at,
+      };
+    });
 
     await supabaseAdmin.from('audit_log').insert({
       admin_id: admin.admin_id,
       action: 'EXPORT_CSV',
       entity: 'transfers',
       entity_id: null,
-      diff: { rows: (data || []).length, filters: { type, status, dateFrom, dateTo, search } },
+      diff: { rows: exportRows.length, filters: { type, status, dateFrom, dateTo, search } },
     });
 
+    if (pdf) {
+      return NextResponse.json({ rows: exportRows });
+    }
+
     const header = 'ID,Type,Sender,Recipient,Bank,Account,Amount,Fee,Status,Date\n';
-    const csvBody = (data || []).map((t: any) => {
-      const senderName = t.sender?.username || t.sender?.full_name || '';
-      const recipientName = t.type === 'tag'
-        ? (t.recipient?.username || t.recipient?.full_name || '')
-        : (t.recipient_account_name || '');
-      return [
-        t.id,
-        t.type || '',
-        formatCSVField(senderName),
-        formatCSVField(recipientName),
-        formatCSVField(t.recipient_bank_name || ''),
-        formatCSVField(t.recipient_account_number || ''),
-        t.amount,
-        t.fee || 0,
-        t.status || '',
-        t.created_at,
-      ].join(',');
-    }).join('\n');
+    const csvBody = exportRows.map((r) =>
+      [
+        r.ID, r.Type, r.Sender, r.Recipient, r.Bank, r.Account,
+        r.Amount, r.Fee, r.Status, r.Date,
+      ].map(formatCSVField).join(',')
+    ).join('\n');
 
     return new Response(header + csvBody, {
       headers: {

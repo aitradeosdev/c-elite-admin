@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
   const dateTo = searchParams.get('date_to') || '';
   const search = sanitizeSearch(searchParams.get('search') || '');
   const csv = searchParams.get('csv') === '1';
+  const pdf = searchParams.get('pdf') === '1';
   const reviewOnly = searchParams.get('review') === '1';
   const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
@@ -86,35 +87,55 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (csv) {
+  if (csv || pdf) {
     const CAP = 50000;
     const { data, error } = await query.order('created_at', { ascending: false }).range(0, CAP - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const rows = data || [];
+    const userIds = Array.from(new Set(rows.map((w: any) => w.user_id).filter(Boolean)));
+    let usersMap: Record<string, any> = {};
+    if (userIds.length) {
+      const { data: users } = await supabaseAdmin
+        .from('users').select('id, username, full_name').in('id', userIds);
+      usersMap = Object.fromEntries((users || []).map((u: any) => [u.id, u]));
+    }
+
+    const exportRows = rows.map((w: any) => {
+      const u = usersMap[w.user_id] || null;
+      return {
+        ID: w.id,
+        User: u?.username || u?.full_name || '',
+        Amount: w.amount,
+        Bank: w.bank_name || '',
+        Account: w.account_number || '',
+        AccountName: w.account_name || '',
+        Status: w.status || '',
+        Gateway: w.gateway || '',
+        GatewayRef: w.gateway_reference || '',
+        Date: w.created_at,
+      };
+    });
 
     await supabaseAdmin.from('audit_log').insert({
       admin_id: admin.admin_id,
       action: 'EXPORT_CSV',
       entity: 'withdrawals',
       entity_id: null,
-      diff: { rows: (data || []).length, filters: { status, dateFrom, dateTo, search, reviewOnly } },
+      diff: { rows: exportRows.length, filters: { status, dateFrom, dateTo, search, reviewOnly } },
     });
 
+    if (pdf) {
+      return NextResponse.json({ rows: exportRows });
+    }
+
     const header = 'ID,User,Amount,Bank,Account,AccountName,Status,Gateway,GatewayRef,Date\n';
-    const body = (data || []).map((w: any) => {
-      const uname = w.user?.username || w.user?.full_name || '';
-      return [
-        w.id,
-        formatCSVField(uname),
-        w.amount,
-        formatCSVField(w.bank_name || ''),
-        formatCSVField(w.account_number || ''),
-        formatCSVField(w.account_name || ''),
-        w.status || '',
-        w.gateway || '',
-        formatCSVField(w.gateway_reference || ''),
-        w.created_at,
-      ].join(',');
-    }).join('\n');
+    const body = exportRows.map((r) =>
+      [
+        r.ID, r.User, r.Amount, r.Bank, r.Account, r.AccountName,
+        r.Status, r.Gateway, r.GatewayRef, r.Date,
+      ].map(formatCSVField).join(',')
+    ).join('\n');
 
     return new Response(header + body, {
       headers: {

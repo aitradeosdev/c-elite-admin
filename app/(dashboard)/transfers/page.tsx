@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { Printer } from 'lucide-react';
+import { printTable } from '../../lib/printExport';
 
 function formatNaira(n: number | string | null | undefined) {
   const v = Number(n || 0);
@@ -97,13 +99,40 @@ export default function TransfersPage() {
     setExporting(false);
   };
 
+  const exportPdf = async () => {
+    setExporting(true);
+    const params = buildParams();
+    params.set('pdf', '1');
+    params.delete('page');
+    params.delete('limit');
+    const res = await fetch('/api/transfers?' + params.toString());
+    const json = await res.json();
+    const rows = json.rows || [];
+    const ok = printTable({
+      title: 'Transfers',
+      meta: rows.length + ' rows · generated ' + new Date().toLocaleString(),
+      columns: ['ID', 'Type', 'Sender', 'Recipient', 'Bank', 'Account', 'Amount', 'Fee', 'Status', 'Date'],
+      rows: rows.map((r: any) => [
+        r.ID, r.Type, r.Sender, r.Recipient, r.Bank, r.Account, r.Amount, r.Fee, r.Status, r.Date,
+      ]),
+    });
+    if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+    setExporting(false);
+  };
+
   return (
     <div>
       <div style={s.header}>
         <span style={s.title}>Transfers</span>
-        <button style={s.exportBtn} onClick={exportCSV} disabled={exporting}>
-          {exporting ? 'Exporting...' : 'Export CSV'}
-        </button>
+        <div style={s.headerActions}>
+          <button style={s.exportBtn} onClick={exportCSV} disabled={exporting}>
+            {exporting ? 'Exporting...' : 'Export CSV'}
+          </button>
+          <button style={s.printBtn} onClick={exportPdf} disabled={exporting}>
+            <Printer size={14} />
+            Print / PDF
+          </button>
+        </div>
       </div>
 
       <div style={s.filters}>
@@ -200,7 +229,9 @@ export default function TransfersPage() {
 const s: Record<string, React.CSSProperties> = {
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
+  headerActions: { display: 'flex', gap: 10, alignItems: 'center' },
   exportBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  printBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
   filters: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
   filterInput: { border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', minWidth: 140 },
   filterSelect: { border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', backgroundColor: 'var(--bg-surface)', minWidth: 120 },

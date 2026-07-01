@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Download, AlertTriangle } from 'lucide-react';
+import { Download, AlertTriangle, Printer } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Input, Textarea, Tabs, SidePanel,
 } from '../../_ui';
+import { printTable } from '../../lib/printExport';
 
 type Tab = 'all' | 'pending_review' | 'held' | 'processing' | 'success' | 'failed' | 'refunded';
 
@@ -140,6 +141,26 @@ export default function WithdrawalsPage() {
     URL.revokeObjectURL(url);
   };
 
+  const exportPdf = async () => {
+    const params = new URLSearchParams();
+    if (tab !== 'all') params.set('status', tab);
+    if (search) params.set('search', search);
+    params.set('pdf', '1');
+    const res = await fetch('/api/withdrawals?' + params.toString());
+    const json = await res.json();
+    const rows = json.rows || [];
+    const ok = printTable({
+      title: 'Withdrawals',
+      meta: `${rows.length} rows · generated ${new Date().toLocaleString()}`,
+      columns: ['ID', 'User', 'Amount', 'Bank', 'Account', 'Account Name', 'Status', 'Gateway', 'Gateway Ref', 'Date'],
+      rows: rows.map((r: any) => [
+        r.ID, r.User, r.Amount, r.Bank, r.Account, r.AccountName,
+        r.Status, r.Gateway, r.GatewayRef, r.Date,
+      ]),
+    });
+    if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+  };
+
   const canAct = (status: string) => status === 'pending_review' || status === 'held';
 
   return (
@@ -148,9 +169,14 @@ export default function WithdrawalsPage() {
         title="Withdrawals"
         subtitle="Live withdrawal queue across all statuses. Auto-refreshes every 5 seconds."
         actions={
-          <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={exportCSV}>
-            Export CSV
-          </Button>
+          <div style={{ display: 'inline-flex', gap: 8 }}>
+            <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={exportCSV}>
+              Export CSV
+            </Button>
+            <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={exportPdf}>
+              Print / PDF
+            </Button>
+          </div>
         }
       />
 

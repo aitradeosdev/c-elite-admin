@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Download, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
+import { Download, ChevronLeft, ChevronRight, Filter, X, Printer } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Input, Select, Kpi, KpiGrid,
 } from '../../_ui';
+import { printTable } from '../../lib/printExport';
 
 function formatNaira(n: number | string | null | undefined) {
   const v = Number(n || 0);
@@ -112,21 +113,50 @@ export default function TransactionsOverviewPage() {
     setExporting(false);
   };
 
+  const exportPdf = async () => {
+    const params = buildParams();
+    params.set('pdf', '1');
+    params.delete('page');
+    params.delete('limit');
+    const res = await fetch('/api/transactions?' + params.toString());
+    const json = await res.json();
+    const rows = json.rows || [];
+    const ok = printTable({
+      title: 'Transactions',
+      meta: `${rows.length} rows · generated ${new Date().toLocaleString()}`,
+      columns: ['ID', 'User', 'Email', 'Type', 'Amount', 'Status', 'Reference', 'Date'],
+      rows: rows.map((r: any) => [
+        r.ID, r.User, r.Email, r.Type, r.Amount, r.Status, r.Reference, r.Date,
+      ]),
+    });
+    if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+  };
+
   return (
     <div>
       <PageHeader
         title="Transactions"
         subtitle="Full audit-log view of every money movement on the platform."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Download size={14} />}
-            onClick={exportCSV}
-            loading={exporting}
-          >
-            {exporting ? 'Exporting' : 'Export CSV'}
-          </Button>
+          <div style={{ display: 'inline-flex', gap: 8 }}>
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Download size={14} />}
+              onClick={exportCSV}
+              loading={exporting}
+            >
+              {exporting ? 'Exporting' : 'Export CSV'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Printer size={14} />}
+              onClick={exportPdf}
+            >
+              Print / PDF
+            </Button>
+          </div>
         }
       />
 

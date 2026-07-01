@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Download, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { Download, ChevronLeft, ChevronRight, Search, Printer } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Input, Kpi, KpiGrid,
 } from '../../_ui';
+import { printTable } from '../../lib/printExport';
 
 function formatNaira(n: number | string | null | undefined) {
   const v = Number(n || 0);
@@ -20,6 +21,7 @@ export default function UsersPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const limit = 25;
 
   const load = async () => {
@@ -58,21 +60,63 @@ export default function UsersPage() {
     setExporting(false);
   };
 
+  const exportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      params.set('pdf', '1');
+      const res = await fetch('/api/users?' + params.toString());
+      const json = await res.json();
+      const rows = json.rows || [];
+      const ok = printTable({
+        title: 'Users',
+        meta: rows.length + ' rows · generated ' + new Date().toLocaleString(),
+        columns: ['ID', 'Name', 'Username', 'Email', 'Phone', 'Balance', 'Trades', 'Joined', 'Status'],
+        rows: rows.map((r: any) => [
+          r.id,
+          r.full_name,
+          r.username ? '@' + r.username : '',
+          r.email,
+          r.phone,
+          formatNaira(r.balance),
+          r.trades,
+          new Date(r.joined).toLocaleDateString(),
+          r.status,
+        ]),
+      });
+      if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
         title="Users"
         subtitle="Browse every registered customer, jump into individual profiles."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Download size={14} />}
-            onClick={exportCSV}
-            loading={exporting}
-          >
-            {exporting ? 'Exporting' : 'Export CSV'}
-          </Button>
+          <>
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Download size={14} />}
+              onClick={exportCSV}
+              loading={exporting}
+            >
+              {exporting ? 'Exporting' : 'Export CSV'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Printer size={14} />}
+              onClick={exportPdf}
+              loading={exportingPdf}
+            >
+              Print / PDF
+            </Button>
+          </>
         }
       />
 

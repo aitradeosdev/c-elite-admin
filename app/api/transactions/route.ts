@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const csv = searchParams.get('csv') === '1';
+  const pdf = searchParams.get('pdf') === '1';
   const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
   const today = new Date();
@@ -71,31 +72,39 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (csv) {
+  if (csv || pdf) {
     const CAP = 50000;
     const { data, error } = await query.order('created_at', { ascending: false }).range(0, CAP - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const exportRows = (data || []).map((t: any) => ({
+      ID: t.id,
+      User: t.users?.username || '',
+      Email: t.users?.email || '',
+      Type: t.type || '',
+      Amount: t.amount,
+      Status: t.status || '',
+      Reference: t.reference_id || '',
+      Date: t.created_at,
+    }));
 
     await supabaseAdmin.from('audit_log').insert({
       admin_id: admin.admin_id,
       action: 'EXPORT_CSV',
       entity: 'transactions',
       entity_id: null,
-      diff: { rows: (data || []).length, filters: { type, status, dateFrom, dateTo, search } },
+      diff: { rows: exportRows.length, filters: { type, status, dateFrom, dateTo, search } },
     });
 
+    if (pdf) {
+      return NextResponse.json({ rows: exportRows });
+    }
+
     const header = 'ID,User,Email,Type,Amount,Status,Reference,Date\n';
-    const csvBody = (data || []).map((t: any) =>
+    const csvBody = exportRows.map((r) =>
       [
-        formatCSVField(t.id),
-        formatCSVField((t as any).users?.username || ''),
-        formatCSVField((t as any).users?.email || ''),
-        formatCSVField(t.type || ''),
-        formatCSVField(t.amount),
-        formatCSVField(t.status || ''),
-        formatCSVField(t.reference_id || ''),
-        formatCSVField(t.created_at),
-      ].join(',')
+        r.ID, r.User, r.Email, r.Type, r.Amount, r.Status, r.Reference, r.Date,
+      ].map(formatCSVField).join(',')
     ).join('\n');
 
     return new Response(header + csvBody, {

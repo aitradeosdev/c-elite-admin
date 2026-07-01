@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const search = sanitizeSearch(searchParams.get('search') || '');
   const csv = searchParams.get('csv') === '1';
+  const pdf = searchParams.get('pdf') === '1';
   const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
 
   let query = supabaseAdmin
@@ -30,29 +31,19 @@ export async function GET(req: NextRequest) {
     query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,email.ilike.%${search}%`);
   }
 
-  if (csv) {
+  if (csv || pdf) {
     const CSV_MAX_ROWS = 50000;
     const { data, error } = await query
       .order('created_at', { ascending: false })
       .range(0, CSV_MAX_ROWS - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    try {
-      await supabaseAdmin.from('audit_log').insert({
-        admin_id: admin.admin_id,
-        action: 'EXPORT_CSV',
-        entity: 'users',
-        entity_id: 'bulk',
-        after_value: { rows: (data || []).length, search: search || null, cap: CSV_MAX_ROWS },
-        ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-      });
-    } catch {}
 
-    const userIds = (data || []).map((u: any) => u.id);
     const { data: txCounts } = await supabaseAdmin.rpc('count_user_transactions', {}) as any;
+    const tradeMap: Record<string, number> = {};
+    (txCounts || []).forEach((t: any) => { tradeMap[t.user_id] = Number(t.count) || 0; });
 
-    const rows = (data || []).map((u: any) => {
+    const exportRows = (data || []).map((u: any) => {
       const balance = u.wallets?.[0]?.balance ?? u.wallets?.balance ?? 0;
-      const trades = txCounts?.find((t: any) => t.user_id === u.id)?.count ?? 0;
       return {
         id: u.id,
         full_name: u.full_name || '',
@@ -60,11 +51,26 @@ export async function GET(req: NextRequest) {
         email: u.email || '',
         phone: u.phone || '',
         balance,
-        trades,
+        trades: tradeMap[u.id] || 0,
         joined: u.created_at,
         status: u.is_frozen ? 'Frozen' : u.is_active ? 'Active' : 'Inactive',
       };
     });
+
+    try {
+      await supabaseAdmin.from('audit_log').insert({
+        admin_id: admin.admin_id,
+        action: 'EXPORT_CSV',
+        entity: 'users',
+        entity_id: 'bulk',
+        after_value: { rows: exportRows.length, search: search || null, cap: CSV_MAX_ROWS },
+        ip_address: req.headers.get('x-forwarded-for') || 'unknown',
+      });
+    } catch {}
+
+    if (pdf) {
+      return NextResponse.json({ rows: exportRows });
+    }
 
     const csvCell = (v: unknown) => {
       const s = v == null ? '' : String(v);
@@ -73,7 +79,7 @@ export async function GET(req: NextRequest) {
       return `"${escaped}"`;
     };
     const header = 'ID,Name,Username,Email,Phone,Balance,Trades,Joined,Status\n';
-    const csvBody = rows.map((r: any) =>
+    const csvBody = exportRows.map((r: any) =>
       [r.id, r.full_name, r.username, r.email, r.phone, r.balance, r.trades, r.joined, r.status]
         .map(csvCell).join(',')
     ).join('\n');
