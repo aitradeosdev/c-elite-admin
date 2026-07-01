@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('admin_users')
-    .select('id, username, email, role_title, page_permissions, last_login_at, is_active, is_super_admin')
+    .select('id, username, email, role_title, page_permissions, last_login_at, is_active, is_super_admin, deleted_at')
     .order('created_at', { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -112,9 +112,13 @@ export async function PATCH(req: NextRequest) {
 
   const { data: before } = await supabaseAdmin
     .from('admin_users')
-    .select('email, role_title, page_permissions, is_active, is_super_admin')
+    .select('email, role_title, page_permissions, is_active, is_super_admin, deleted_at')
     .eq('id', id)
     .single();
+
+  if (before?.deleted_at) {
+    return NextResponse.json({ error: 'Cannot modify a deleted admin.' }, { status: 400 });
+  }
 
   if (is_active === false || revoke_sessions) {
     if (id === admin.admin_id) {
@@ -210,7 +214,10 @@ export async function DELETE(req: NextRequest) {
   if (target?.is_super_admin) return NextResponse.json({ error: 'Cannot delete super admin' }, { status: 400 });
   if (target?.is_active) return NextResponse.json({ error: 'Deactivate before deleting' }, { status: 400 });
 
-  const { error } = await supabaseAdmin.from('admin_users').delete().eq('id', id);
+  const { error } = await supabaseAdmin
+    .from('admin_users')
+    .update({ deleted_at: new Date().toISOString(), is_active: false })
+    .eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   await supabaseAdmin.from('audit_log').insert({

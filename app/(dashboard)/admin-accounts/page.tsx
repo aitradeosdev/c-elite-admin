@@ -38,6 +38,7 @@ interface AdminUser {
   last_login_at: string | null;
   is_active: boolean;
   is_super_admin: boolean;
+  deleted_at: string | null;
 }
 
 type PanelMode = 'create' | 'edit' | null;
@@ -62,6 +63,7 @@ export default function AdminAccountsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleteInput, setDeleteInput] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     fetchAdmins();
@@ -142,11 +144,17 @@ export default function AdminAccountsPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget || deleteInput !== 'DELETE') return;
-    await fetch('/api/admin-accounts', {
+    setDeleteError('');
+    const res = await fetch('/api/admin-accounts', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: deleteTarget.id }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setDeleteError(data.error || 'Failed to delete.');
+      return;
+    }
     setDeleteTarget(null);
     setDeleteInput('');
     fetchAdmins(true);
@@ -182,7 +190,7 @@ export default function AdminAccountsPage() {
               <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No admin accounts yet</td></tr>
             ) : admins.map((admin, i) => (
               <tr key={admin.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
-                <td style={{ ...styles.td, fontWeight: 600 }}>{admin.username}</td>
+                <td style={{ ...styles.td, fontWeight: 600 }}>{admin.username}{admin.deleted_at && <span style={styles.deletedTag}> (deleted admin)</span>}</td>
                 <td style={{ ...styles.td, color: admin.email ? 'var(--fg-secondary)' : 'var(--tone-danger-fg)' }}>{admin.email || '— (no alerts)'}</td>
                 <td style={styles.td}>{admin.role_title}</td>
                 <td style={{ ...styles.td, maxWidth: 200, color: 'var(--fg-secondary)' }}>{formatPages(admin.page_permissions)}</td>
@@ -194,14 +202,14 @@ export default function AdminAccountsPage() {
                 </td>
                 <td style={styles.td}>
                   <div style={styles.actions}>
-                    {!admin.is_super_admin && (
+                    {!admin.is_super_admin && !admin.deleted_at && (
                       <>
                         <button style={styles.editBtn} onClick={() => openEdit(admin)}>Edit</button>
                         <button style={styles.deactivateBtn} onClick={() => handleToggleActive(admin)}>
                           {admin.is_active ? 'Deactivate' : 'Reactivate'}
                         </button>
                         {!admin.is_active && (
-                          <button style={styles.deleteBtn} onClick={() => { setDeleteTarget(admin); setDeleteInput(''); }}>Delete</button>
+                          <button style={styles.deleteBtn} onClick={() => { setDeleteTarget(admin); setDeleteInput(''); setDeleteError(''); }}>Delete</button>
                         )}
                       </>
                     )}
@@ -292,8 +300,9 @@ export default function AdminAccountsPage() {
               value={deleteInput}
               onChange={(e) => setDeleteInput(e.target.value)}
             />
+            {deleteError && <p style={styles.modalError}>{deleteError}</p>}
             <div style={styles.modalActions}>
-              <button style={styles.modalCancelBtn} onClick={() => { setDeleteTarget(null); setDeleteInput(''); }}>Cancel</button>
+              <button style={styles.modalCancelBtn} onClick={() => { setDeleteTarget(null); setDeleteInput(''); setDeleteError(''); }}>Cancel</button>
               <button
                 style={{ ...styles.deleteBtn, opacity: deleteInput !== 'DELETE' ? 0.5 : 1, padding: '8px 20px' }}
                 disabled={deleteInput !== 'DELETE'}
@@ -338,6 +347,8 @@ const styles: Record<string, React.CSSProperties> = {
   editBtn: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
   deactivateBtn: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
   deleteBtn: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
+  deletedTag: { color: 'var(--tone-danger-fg)', fontWeight: 500, fontSize: 11 },
+  modalError: { color: 'var(--tone-danger-fg)', fontSize: 12, marginTop: 8 },
   overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.2)', zIndex: 49 },
   panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 400, backgroundColor: 'var(--bg-surface)', borderLeft: '1px solid var(--border-default)', padding: 24, zIndex: 50, overflowY: 'auto' },
   panelTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
