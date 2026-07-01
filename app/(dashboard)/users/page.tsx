@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Download, ChevronLeft, ChevronRight, Search, Printer } from 'lucide-react';
+import { Download, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Kpi, KpiGrid,
+  Button, Input, Kpi, KpiGrid, ExportModal,
 } from '../../_ui';
-import { printTable } from '../../lib/printExport';
+import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
 
 function formatNaira(n: number | string | null | undefined) {
   const v = Number(n || 0);
@@ -20,8 +20,9 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [exporting, setExporting] = useState(false);
-  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRange, setExportRange] = useState<RangeKey>('7d');
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
   const limit = 25;
 
   const load = async () => {
@@ -43,35 +44,45 @@ export default function UsersPage() {
   const totalPages = Math.ceil(total / limit);
 
   const exportCSV = async () => {
-    setExporting(true);
-    const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    params.set('csv', '1');
-    const res = await fetch('/api/users?' + params.toString());
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `users-${Date.now()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    setExporting(false);
-  };
-
-  const exportPdf = async () => {
-    setExportingPdf(true);
+    setExporting('csv');
     try {
       const params = new URLSearchParams();
       if (search) params.set('search', search);
+      const { from, to } = rangeToDates(exportRange);
+      if (from) params.set('date_from', from);
+      if (to) params.set('date_to', to);
+      params.set('csv', '1');
+      const res = await fetch('/api/users?' + params.toString());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `users-${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportPdf = async () => {
+    setExporting('pdf');
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      const { from, to, label } = rangeToDates(exportRange);
+      if (from) params.set('date_from', from);
+      if (to) params.set('date_to', to);
       params.set('pdf', '1');
       const res = await fetch('/api/users?' + params.toString());
       const json = await res.json();
       const rows = json.rows || [];
       const ok = printTable({
         title: 'Users',
-        meta: rows.length + ' rows · generated ' + new Date().toLocaleString(),
+        meta: label + ' · ' + rows.length + ' rows · generated ' + new Date().toLocaleString(),
         columns: ['ID', 'Name', 'Username', 'Email', 'Phone', 'Balance', 'Trades', 'Joined', 'Status'],
         rows: rows.map((r: any) => [
           r.id,
@@ -86,8 +97,9 @@ export default function UsersPage() {
         ]),
       });
       if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+      else setExportOpen(false);
     } finally {
-      setExportingPdf(false);
+      setExporting(null);
     }
   };
 
@@ -97,26 +109,14 @@ export default function UsersPage() {
         title="Users"
         subtitle="Browse every registered customer, jump into individual profiles."
         actions={
-          <>
-            <Button
-              variant="primary"
-              size="sm"
-              leftIcon={<Download size={14} />}
-              onClick={exportCSV}
-              loading={exporting}
-            >
-              {exporting ? 'Exporting' : 'Export CSV'}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              leftIcon={<Printer size={14} />}
-              onClick={exportPdf}
-              loading={exportingPdf}
-            >
-              Print / PDF
-            </Button>
-          </>
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<Download size={14} />}
+            onClick={() => setExportOpen(true)}
+          >
+            Export
+          </Button>
         }
       />
 
@@ -226,6 +226,19 @@ export default function UsersPage() {
           </Button>
         </div>
       )}
+
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        title="Users"
+        subtitle="Choose a time frame, then download CSV or print PDF."
+        range={exportRange}
+        onRangeChange={setExportRange}
+        metaLine="up to 50,000 rows"
+        exporting={exporting}
+        onCsv={exportCSV}
+        onPdf={exportPdf}
+      />
     </div>
   );
 }

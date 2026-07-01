@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Printer } from 'lucide-react';
-import { printTable } from '../../lib/printExport';
+import { Download } from 'lucide-react';
+import { ExportModal } from '../../_ui';
+import { printTable, rangeToDates } from '../../lib/printExport';
+import type { RangeKey } from '../../lib/printExport';
 
 function formatNaira(n: number | string | null | undefined) {
   const v = Number(n || 0);
@@ -34,7 +36,9 @@ export default function TransfersPage() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRange, setExportRange] = useState<RangeKey>('7d');
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
   const limit = 25;
 
   const [type, setType] = useState('');
@@ -81,43 +85,57 @@ export default function TransfersPage() {
   const totalPages = Math.ceil(total / limit);
 
   const exportCSV = async () => {
-    setExporting(true);
-    const params = buildParams();
-    params.set('csv', '1');
-    params.delete('page');
-    params.delete('limit');
-    const res = await fetch('/api/transfers?' + params.toString());
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `transfers-${Date.now()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    setExporting(false);
+    setExporting('csv');
+    try {
+      const params = buildParams();
+      params.set('csv', '1');
+      params.delete('page');
+      params.delete('limit');
+      const { from, to } = rangeToDates(exportRange);
+      if (from) params.set('date_from', from);
+      if (to) params.set('date_to', to);
+      const res = await fetch('/api/transfers?' + params.toString());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transfers-${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
   };
 
   const exportPdf = async () => {
-    setExporting(true);
-    const params = buildParams();
-    params.set('pdf', '1');
-    params.delete('page');
-    params.delete('limit');
-    const res = await fetch('/api/transfers?' + params.toString());
-    const json = await res.json();
-    const rows = json.rows || [];
-    const ok = printTable({
-      title: 'Transfers',
-      meta: rows.length + ' rows · generated ' + new Date().toLocaleString(),
-      columns: ['ID', 'Type', 'Sender', 'Recipient', 'Bank', 'Account', 'Amount', 'Fee', 'Status', 'Date'],
-      rows: rows.map((r: any) => [
-        r.ID, r.Type, r.Sender, r.Recipient, r.Bank, r.Account, r.Amount, r.Fee, r.Status, r.Date,
-      ]),
-    });
-    if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
-    setExporting(false);
+    setExporting('pdf');
+    try {
+      const params = buildParams();
+      params.set('pdf', '1');
+      params.delete('page');
+      params.delete('limit');
+      const { from, to, label } = rangeToDates(exportRange);
+      if (from) params.set('date_from', from);
+      if (to) params.set('date_to', to);
+      const res = await fetch('/api/transfers?' + params.toString());
+      const json = await res.json();
+      const rows = json.rows || [];
+      const ok = printTable({
+        title: 'Transfers',
+        meta: label + ' · ' + rows.length + ' rows · generated ' + new Date().toLocaleString(),
+        columns: ['ID', 'Type', 'Sender', 'Recipient', 'Bank', 'Account', 'Amount', 'Fee', 'Status', 'Date'],
+        rows: rows.map((r: any) => [
+          r.ID, r.Type, r.Sender, r.Recipient, r.Bank, r.Account, r.Amount, r.Fee, r.Status, r.Date,
+        ]),
+      });
+      if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+      else setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
   };
 
   return (
@@ -125,12 +143,9 @@ export default function TransfersPage() {
       <div style={s.header}>
         <span style={s.title}>Transfers</span>
         <div style={s.headerActions}>
-          <button style={s.exportBtn} onClick={exportCSV} disabled={exporting}>
-            {exporting ? 'Exporting...' : 'Export CSV'}
-          </button>
-          <button style={s.printBtn} onClick={exportPdf} disabled={exporting}>
-            <Printer size={14} />
-            Print / PDF
+          <button style={s.printBtn} onClick={() => setExportOpen(true)}>
+            <Download size={14} />
+            Export
           </button>
         </div>
       </div>
@@ -222,6 +237,19 @@ export default function TransfersPage() {
           >Next</button>
         </div>
       )}
+
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        title="Transfers"
+        subtitle="Choose a time frame, then download CSV or print PDF."
+        metaLine="up to 50,000 rows"
+        range={exportRange}
+        onRangeChange={setExportRange}
+        exporting={exporting}
+        onCsv={exportCSV}
+        onPdf={exportPdf}
+      />
     </div>
   );
 }
@@ -230,7 +258,6 @@ const s: Record<string, React.CSSProperties> = {
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
   headerActions: { display: 'flex', gap: 10, alignItems: 'center' },
-  exportBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
   printBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
   filters: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
   filterInput: { border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', minWidth: 140 },

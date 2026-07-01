@@ -21,6 +21,8 @@ export type { TabsProps } from './Tabs';
 export { Modal, SidePanel } from './Overlay';
 export type { ModalProps, SidePanelProps, ModalSize } from './Overlay';
 
+export { ExportModal } from './ExportModal';
+
 export { Table, THead, TBody, Tr, Th, Td, TableEmpty } from './Table';
 export type { TableProps, TrProps, ThProps, TdProps, TableDensity } from './Table';
 

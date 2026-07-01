@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const search = sanitizeSearch(searchParams.get('search') || '');
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
   const csv = searchParams.get('csv') === '1';
   const pdf = searchParams.get('pdf') === '1';
   const { page, limit, offset } = clampPagination(searchParams.get('page'), searchParams.get('limit'));
@@ -30,6 +32,8 @@ export async function GET(req: NextRequest) {
   if (search) {
     query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,email.ilike.%${search}%`);
   }
+  if (dateFrom) query = query.gte('created_at', dateFrom);
+  if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59.999Z');
 
   if (csv || pdf) {
     const CSV_MAX_ROWS = 50000;

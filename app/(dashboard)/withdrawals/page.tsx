@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Download, AlertTriangle, Printer } from 'lucide-react';
+import { Download, AlertTriangle } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Textarea, Tabs, SidePanel,
+  Button, Input, Textarea, Tabs, SidePanel, ExportModal,
 } from '../../_ui';
-import { printTable } from '../../lib/printExport';
+import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
 
 type Tab = 'all' | 'pending_review' | 'held' | 'processing' | 'success' | 'failed' | 'refunded';
 
@@ -52,6 +52,9 @@ export default function WithdrawalsPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRange, setExportRange] = useState<RangeKey>('7d');
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
 
   const [detail, setDetail] = useState<any | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -128,37 +131,55 @@ export default function WithdrawalsPage() {
   };
 
   const exportCSV = async () => {
-    const params = new URLSearchParams();
-    if (tab !== 'all') params.set('status', tab);
-    if (search) params.set('search', search);
-    params.set('csv', '1');
-    const res = await fetch('/api/withdrawals?' + params.toString());
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `withdrawals-${Date.now()}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    setExporting('csv');
+    try {
+      const params = new URLSearchParams();
+      if (tab !== 'all') params.set('status', tab);
+      if (search) params.set('search', search);
+      const { from, to } = rangeToDates(exportRange);
+      if (from) params.set('date_from', from);
+      if (to) params.set('date_to', to);
+      params.set('csv', '1');
+      const res = await fetch('/api/withdrawals?' + params.toString());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `withdrawals-${Date.now()}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
   };
 
   const exportPdf = async () => {
-    const params = new URLSearchParams();
-    if (tab !== 'all') params.set('status', tab);
-    if (search) params.set('search', search);
-    params.set('pdf', '1');
-    const res = await fetch('/api/withdrawals?' + params.toString());
-    const json = await res.json();
-    const rows = json.rows || [];
-    const ok = printTable({
-      title: 'Withdrawals',
-      meta: `${rows.length} rows · generated ${new Date().toLocaleString()}`,
-      columns: ['ID', 'User', 'Amount', 'Bank', 'Account', 'Account Name', 'Status', 'Gateway', 'Gateway Ref', 'Date'],
-      rows: rows.map((r: any) => [
-        r.ID, r.User, r.Amount, r.Bank, r.Account, r.AccountName,
-        r.Status, r.Gateway, r.GatewayRef, r.Date,
-      ]),
-    });
-    if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+    setExporting('pdf');
+    try {
+      const params = new URLSearchParams();
+      if (tab !== 'all') params.set('status', tab);
+      if (search) params.set('search', search);
+      const { from, to, label } = rangeToDates(exportRange);
+      if (from) params.set('date_from', from);
+      if (to) params.set('date_to', to);
+      params.set('pdf', '1');
+      const res = await fetch('/api/withdrawals?' + params.toString());
+      const json = await res.json();
+      const rows = json.rows || [];
+      const ok = printTable({
+        title: 'Withdrawals',
+        meta: `${label} · ${rows.length} rows · generated ${new Date().toLocaleString()}`,
+        columns: ['ID', 'User', 'Amount', 'Bank', 'Account', 'Account Name', 'Status', 'Gateway', 'Gateway Ref', 'Date'],
+        rows: rows.map((r: any) => [
+          r.ID, r.User, r.Amount, r.Bank, r.Account, r.AccountName,
+          r.Status, r.Gateway, r.GatewayRef, r.Date,
+        ]),
+      });
+      if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
+      setExportOpen(false);
+    } finally {
+      setExporting(null);
+    }
   };
 
   const canAct = (status: string) => status === 'pending_review' || status === 'held';
@@ -169,14 +190,9 @@ export default function WithdrawalsPage() {
         title="Withdrawals"
         subtitle="Live withdrawal queue across all statuses. Auto-refreshes every 5 seconds."
         actions={
-          <div style={{ display: 'inline-flex', gap: 8 }}>
-            <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={exportCSV}>
-              Export CSV
-            </Button>
-            <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={exportPdf}>
-              Print / PDF
-            </Button>
-          </div>
+          <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
+            Export
+          </Button>
         }
       />
 
@@ -369,6 +385,19 @@ export default function WithdrawalsPage() {
           </>
         )}
       </SidePanel>
+
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        title="Withdrawals"
+        subtitle="Choose a time frame, then download CSV or print PDF."
+        metaLine="up to 50,000 rows"
+        range={exportRange}
+        onRangeChange={setExportRange}
+        exporting={exporting}
+        onCsv={exportCSV}
+        onPdf={exportPdf}
+      />
     </div>
   );
 }

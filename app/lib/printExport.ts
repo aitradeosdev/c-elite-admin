@@ -41,3 +41,21 @@ export function printTable(opts: {
   setTimeout(() => { win.print(); }, 300);
   return true;
 }
+
+export type RangeKey = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month';
+
+export function rangeToDates(key: RangeKey): { from: string | null; to: string | null; label: string } {
+  const now = new Date();
+  const dayMs = 86_400_000;
+  const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (key === 'today') return { from: ymd(now), to: ymd(now), label: 'Today' };
+  if (key === 'yesterday') {
+    const y = new Date(now.getTime() - dayMs);
+    return { from: ymd(y), to: ymd(y), label: 'Yesterday' };
+  }
+  if (key === '7d') return { from: ymd(new Date(now.getTime() - 6 * dayMs)), to: ymd(now), label: 'Last 7 days' };
+  if (key === '30d') return { from: ymd(new Date(now.getTime() - 29 * dayMs)), to: ymd(now), label: 'Last 30 days' };
+  if (key === 'month') return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(now), label: 'This month' };
+  return { from: null, to: null, label: 'All time' };
+}
