@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
       ? Promise.resolve({ data: null, error: null })
       : supabaseAdmin
           .from('admin_users')
-          .select('id, username, role_title, is_super_admin, is_active, last_login_at')
+          .select('id, username, role_title, is_super_admin, is_active, last_login_at, deleted_at')
           .order('username', { ascending: true }),
   ]);
 

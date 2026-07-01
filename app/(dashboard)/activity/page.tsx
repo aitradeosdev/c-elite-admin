@@ -56,6 +56,7 @@ interface AdminRow {
   username: string | null;
   role_title: string | null;
   is_super_admin: boolean;
+  deleted_at: string | null;
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -253,6 +254,8 @@ export default function ActivityPage() {
     return out;
   }, [rows]);
 
+  const deletedIds = useMemo(() => new Set(admins.filter((a) => a.deleted_at).map((a) => a.id)), [admins]);
+
   return (
     <div>
       <PageHeader
@@ -266,7 +269,7 @@ export default function ActivityPage() {
             <Select value={filter} onChange={(e) => setFilter((e.target as HTMLSelectElement).value)}>
               <option value="all">All admins</option>
               {admins.map((a) => (
-                <option key={a.id} value={a.id}>@{a.username || 'unknown'}</option>
+                <option key={a.id} value={a.id}>@{a.username || 'unknown'}{a.deleted_at ? ' (deleted admin)' : ''}</option>
               ))}
             </Select>
           </div>
@@ -312,6 +315,7 @@ export default function ActivityPage() {
                     count={g.items.length}
                     items={g.items}
                     onOpen={setDetail}
+                    deletedIds={deletedIds}
                   />
                 ))}
               </TBody>
@@ -341,7 +345,7 @@ export default function ActivityPage() {
             <DetailGrid
               title="WHO"
               rows={[
-                ['Admin', `@${detail.admin_username || 'unknown'}`],
+                ['Admin', `@${detail.admin_username || 'unknown'}${deletedIds.has(detail.admin_id) ? ' (deleted admin)' : ''}`],
                 ...(detail.admin_role_title ? [['Role', detail.admin_role_title] as [string, string]] : []),
                 ['Super-admin', detail.admin_is_super ? 'Yes' : 'No'],
               ]}
@@ -455,6 +459,7 @@ function buildPrintHtml(rows: ActivityRow[], rangeLabel: string, filter: string,
   const adminLabel = filter === 'all'
     ? 'All admins'
     : `@${admins.find((a) => a.id === filter)?.username || 'unknown'}`;
+  const deletedIds = new Set(admins.filter((a) => a.deleted_at).map((a) => a.id));
   const grouped: Array<{ label: string; items: ActivityRow[] }> = [];
   const map = new Map<string, ActivityRow[]>();
   for (const r of rows) {
@@ -477,7 +482,7 @@ function buildPrintHtml(rows: ActivityRow[], rangeLabel: string, filter: string,
         ${g.items.map((r) => `
           <tr>
             <td>${esc(new Date(r.created_at).toLocaleTimeString())}</td>
-            <td>@${esc(r.admin_username || 'unknown')}${r.admin_is_super ? ' <span class="super">SUPER</span>' : ''}</td>
+            <td>@${esc(r.admin_username || 'unknown')}${deletedIds.has(r.admin_id) ? ' <span style="color:#C62828;">(deleted admin)</span>' : ''}${r.admin_is_super ? ' <span class="super">SUPER</span>' : ''}</td>
             <td>${esc(actionLabel(r.action))}</td>
             <td>${esc(r.target_label || r.entity || '—')}${r.target_username ? ` · @${esc(r.target_username)}` : ''}</td>
             <td class="mono">${esc(r.ip_address || '—')}</td>
@@ -511,8 +516,8 @@ ${sections || '<div style="color:#666;padding:32px;text-align:center;">No activi
 }
 
 function ActivitySection({
-  label, count, items, onOpen,
-}: { label: string; count: number; items: ActivityRow[]; onOpen: (r: ActivityRow) => void }) {
+  label, count, items, onOpen, deletedIds,
+}: { label: string; count: number; items: ActivityRow[]; onOpen: (r: ActivityRow) => void; deletedIds: Set<string> }) {
   return (
     <>
       <Tr>
@@ -527,6 +532,7 @@ function ActivitySection({
         <Tr key={r.id}>
           <Td emphasis="primary">
             @{r.admin_username || 'unknown'}
+            {deletedIds.has(r.admin_id) && <span style={{ color: 'var(--tone-danger-fg)', marginLeft: 6, fontSize: 11 }}>(deleted admin)</span>}
             {r.admin_is_super && <Badge tone="warning" size="sm" style={{ marginLeft: 6 }}>SUPER</Badge>}
           </Td>
           <Td>
