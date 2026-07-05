@@ -22,6 +22,11 @@ export async function getDashboardStats(can: (k: string) => boolean): Promise<Da
     jobs.push(q.then((r: any) => {
       s[key] = (r?.data || []).reduce((a: number, x: any) => a + Number(x[col] || 0), 0);
     }).catch(() => {}));
+  // like sum(), but adds into an existing key (for metrics built from >1 query)
+  const addSum = (key: string, q: any, col: string) =>
+    jobs.push(q.then((r: any) => {
+      s[key] = (s[key] || 0) + (r?.data || []).reduce((a: number, x: any) => a + Number(x[col] || 0), 0);
+    }).catch(() => {}));
 
   if (can('card_queue')) {
     count('pendingCards', supabaseAdmin.from('card_submissions').select('id', { count: 'exact', head: true }).eq('status', 'pending'));
@@ -51,7 +56,10 @@ export async function getDashboardStats(can: (k: string) => boolean): Promise<Da
   }
   if (can('bonuses_rewards')) {
     count('giftboxToday', supabaseAdmin.from('giftbox_claims').select('id', { count: 'exact', head: true }).gte('claimed_at', todayISO));
-    sum('rewardPool', supabaseAdmin.from('transactions').select('amount').eq('status', 'success').in('type', ['signup_bonus', 'giftbox_bonus', 'referral_bonus', 'level_bonus']).limit(100000), 'amount');
+    // reward pool = bonus-balance rewards (signup/giftbox/referral/level) + coupon rewards
+    // granted on credited card submissions (coupon_bonus is zeroed at credit-time if the coupon was voided)
+    addSum('rewardPool', supabaseAdmin.from('transactions').select('amount').eq('status', 'success').in('type', ['signup_bonus', 'giftbox_bonus', 'referral_bonus', 'level_bonus']).limit(100000), 'amount');
+    addSum('rewardPool', supabaseAdmin.from('card_submissions').select('coupon_bonus').in('status', ['approved', 'dispute_resolved']).gt('coupon_bonus', 0).limit(100000), 'coupon_bonus');
   }
   if (can('referral_management')) {
     count('referralsToday', supabaseAdmin.from('referrals').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));

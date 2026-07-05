@@ -102,7 +102,7 @@ export default async function DashboardPage() {
     ) },
     { perm: 'bonuses_rewards', node: (
       <Kpi key="rp" label="Reward pool" icon={<Coins size={14} />}
-        value={formatNaira(n('rewardPool'))} hint="All rewards granted — redeemed + unredeemed" />
+        value={formatNaira(n('rewardPool'))} hint="Bonuses + coupon rewards granted (all-time)" />
     ) },
     { perm: 'referral_management', node: (
       <Kpi key="rt" label="Referrals today" icon={<Share2 size={14} />}
