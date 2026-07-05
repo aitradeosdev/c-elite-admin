@@ -199,6 +199,17 @@ html, body {
   overflow-wrap: break-word;
 }
 
+/* Prevent iOS Safari from auto-zooming when a field is focused: any input
+   under 16px triggers it. Force >=16px on small screens (overrides inline
+   font sizes on e.g. the login form). */
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 a { color: var(--fg-link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
