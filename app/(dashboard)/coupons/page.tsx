@@ -209,7 +209,7 @@ export default function CouponsPage() {
         title="Coupons"
         subtitle="Create promo codes, set eligibility and rewards, and manage their lifecycle."
         actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <TermsOfUseManager onChange={setTerms} />
             <Button variant="primary" size="sm" onClick={openCreate}>+ Create Coupon</Button>
           </div>
