@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from './_ui/theme';
+import { NoZoom } from './_ui/NoZoom';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -62,6 +63,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     >
       <body>
         <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+        <NoZoom />
         <ThemeProvider initialMode={initialMode} initialResolved={initialTheme}>{children}</ThemeProvider>
       </body>
     </html>

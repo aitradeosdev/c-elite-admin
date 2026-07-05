@@ -197,6 +197,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow-wrap: break-word;
+  touch-action: manipulation;
 }
 
 /* Prevent iOS Safari from auto-zooming when a field is focused: any input
