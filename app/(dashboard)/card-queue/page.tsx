@@ -3,9 +3,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Share2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Input, Select, Textarea, Tabs, SidePanel, Modal,
 } from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { StatusDot } from '../_shared/statusUi';
 
 type Status = 'all' | 'pending' | 'approved' | 'rejected' | 'disputed';
 
@@ -54,6 +56,7 @@ function statusLabel(status: string) {
 }
 
 export default function CardQueuePage() {
+  const isMobile = useIsMobile();
   const [tab, setTab] = useState<Status>('pending');
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -247,6 +250,15 @@ export default function CardQueuePage() {
         />
       </div>
 
+      {isMobile ? (
+        <CardQueueMobile
+          rows={rows}
+          loading={loading}
+          onOpen={openDetail}
+          onApprove={(id) => { openDetail(id); setShowApprove(true); }}
+          onReject={(id) => { openDetail(id); setShowReject(true); }}
+        />
+      ) : (
       <Card>
         <CardBody flush>
           <Table flush>
@@ -277,7 +289,7 @@ export default function CardQueuePage() {
                   <Td align="right" mono>{r.amount_foreign || '—'}</Td>
                   <Td align="right" mono emphasis="primary">{formatNaira(r.payout_naira)}</Td>
                   <Td emphasis="secondary">{new Date(r.created_at).toLocaleString()}</Td>
-                  <Td><Badge tone={statusTone(r.status)}>{statusLabel(r.status)}</Badge></Td>
+                  <Td><StatusDot status={statusLabel(r.status)} tone={statusTone(r.status)} /></Td>
                   <Td align="right">
                     <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
                       {r.status === 'pending' && (
@@ -299,6 +311,7 @@ export default function CardQueuePage() {
           </Table>
         </CardBody>
       </Card>
+      )}
 
       <SidePanel
         open={!!detail}
@@ -364,7 +377,7 @@ export default function CardQueuePage() {
               <DetailRow label="Payout" value={formatNaira(detail.payout_naira)} bold />
               {detail.coupon_code && <DetailRow label="Coupon" value={`${detail.coupon_code} (+${formatNaira(detail.coupon_bonus)})`} />}
               <DetailRow label="Submitted" value={new Date(detail.created_at).toLocaleString()} />
-              <DetailRow label="Status" value={<Badge tone={statusTone(detail.status)}>{statusLabel(detail.status)}</Badge>} />
+              <DetailRow label="Status" value={<StatusDot status={statusLabel(detail.status)} tone={statusTone(detail.status)} />} />
             </div>
 
             {detail.submitted_fields && Object.keys(detail.submitted_fields).length > 0 && (
@@ -539,6 +552,52 @@ export default function CardQueuePage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function CardQueueMobile({ rows, loading, onOpen, onApprove, onReject }: {
+  rows: any[]; loading: boolean;
+  onOpen: (id: string) => void; onApprove: (id: string) => void; onReject: (id: string) => void;
+}) {
+  if (loading && rows.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2].map((k) => (
+          <div key={k} style={{ height: 96, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No submissions
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map((r: any) => (
+        <div key={r.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14, cursor: 'pointer' }} onClick={() => onOpen(r.id)}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{r.cards?.name || '—'}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>@{r.users?.username || '—'} · {r.card_types?.country_code || '—'}</div>
+            </div>
+            <StatusDot status={statusLabel(r.status)} tone={statusTone(r.status)} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 8 }}>
+            value {r.amount_foreign || '—'} · payout {formatNaira(r.payout_naira)} · {new Date(r.created_at).toLocaleString()}
+          </div>
+          {r.status === 'pending' && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }} onClick={(e) => e.stopPropagation()}>
+              <Button variant="success" size="sm" style={{ flex: 1 }} onClick={() => onApprove(r.id)}>Approve</Button>
+              <Button variant="dangerSubtle" size="sm" style={{ flex: 1 }} onClick={() => onReject(r.id)}>Reject</Button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

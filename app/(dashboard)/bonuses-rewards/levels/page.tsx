@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import {
+  PageHeader, Card, CardHeader, CardBody, CardFooter,
+  FieldShell, Input, Toggle, Button,
+} from '../../../_ui';
+import { StatusDot } from '../../_shared/statusUi';
 
 interface Tier {
   id: string;
@@ -85,15 +90,27 @@ export default function LevelsPage() {
   };
 
   return (
-    <div style={styles.page}>
-      <Link href="/bonuses-rewards" style={styles.breadcrumb}>← Back to Bonuses & Rewards</Link>
+    <div>
+      <Link
+        href="/bonuses-rewards"
+        style={{ display: 'inline-block', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', letterSpacing: '0.03em', color: 'var(--fg-tertiary)', textDecoration: 'none', marginBottom: 'var(--space-3)' }}
+      >
+        ← Back to Bonuses & Rewards
+      </Link>
 
-      <p style={styles.header}>Configure the six level tiers. Users advance sequentially — Newbie → Legend. Each tier has a trade target (USD) and a reward (₦). Badges are uploaded per tier to the <code>level-badges</code> bucket.</p>
+      <PageHeader
+        title="Level Tiers"
+        subtitle="Configure the six level tiers. Users advance sequentially — Newbie → Legend. Each tier has a trade target (USD) and a reward (₦); badges are uploaded per tier to the level-badges bucket."
+      />
 
       {loading ? (
-        <p style={styles.empty}>Loading...</p>
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+          </CardBody>
+        </Card>
       ) : (
-        <div style={styles.grid}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 'var(--space-4)' }}>
           {tiers.map((t) => {
             const name = getValue(t, 'name') as string;
             const target = getValue(t, 'target_usd') as number;
@@ -103,127 +120,94 @@ export default function LevelsPage() {
             const dirty = hasEdits(t.id);
 
             return (
-              <div key={t.id} style={styles.card}>
-                <div style={styles.cardHead}>
-                  <span style={styles.tierOrder}>TIER {t.tier_order}</span>
-                  <div
-                    style={{ ...styles.toggle, backgroundColor: active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
-                    onClick={() => setField(t.id, 'is_active', !active)}
-                  >
-                    <div style={{ ...styles.toggleThumb, left: active ? 22 : 2 }} />
-                  </div>
-                </div>
-
-                <div style={styles.badgeRow}>
-                  <div style={styles.badgePreview}>
-                    {badgeUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={badgeUrl} alt={t.name} style={styles.badgeImg} />
-                    ) : (
-                      <span style={styles.badgePlaceholder}>No badge</span>
-                    )}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <input
-                      ref={(el) => { fileInputs.current[t.id] = el; }}
-                      type="file"
-                      accept="image/svg+xml,image/png,image/jpeg,image/webp"
-                      style={{ display: 'none' }}
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) onFilePick(t, f); e.target.value = ''; }}
-                    />
-                    <button
-                      style={{ ...styles.uploadBtn, opacity: uploadingId === t.id ? 0.7 : 1 }}
-                      disabled={uploadingId === t.id}
-                      onClick={() => fileInputs.current[t.id]?.click()}
-                    >
-                      {uploadingId === t.id ? 'Uploading...' : badgeUrl ? 'Replace Badge' : 'Upload Badge'}
-                    </button>
-                    <p style={styles.uploadHint}>SVG, PNG, JPG, or WebP</p>
-                  </div>
-                </div>
-
-                <label style={styles.fieldLabel}>NAME</label>
-                <input
-                  style={styles.input}
-                  value={name}
-                  onChange={(e) => setField(t.id, 'name', e.target.value)}
+              <Card key={t.id}>
+                <CardHeader
+                  title={`Tier ${t.tier_order}`}
+                  actions={<Toggle checked={active} onChange={() => setField(t.id, 'is_active', !active)} />}
                 />
-
-                <div style={styles.fieldRow}>
-                  <div style={{ flex: 1 }}>
-                    <label style={styles.fieldLabel}>TARGET ($)</label>
-                    <input
-                      style={styles.input}
-                      type="number"
-                      value={String(target ?? '')}
-                      onChange={(e) => setField(t.id, 'target_usd', Number(e.target.value))}
-                    />
+                <CardBody>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+                    <div style={{ width: 72, height: 72, borderRadius: 'var(--radius-lg)', background: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+                      {badgeUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={badgeUrl} alt={t.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      ) : (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--fg-tertiary)' }}>No badge</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        ref={(el) => { fileInputs.current[t.id] = el; }}
+                        type="file"
+                        accept="image/svg+xml,image/png,image/jpeg,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFilePick(t, f); e.target.value = ''; }}
+                      />
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        loading={uploadingId === t.id}
+                        disabled={uploadingId === t.id}
+                        onClick={() => fileInputs.current[t.id]?.click()}
+                      >
+                        {uploadingId === t.id ? 'Uploading…' : badgeUrl ? 'Replace Badge' : 'Upload Badge'}
+                      </Button>
+                      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: '8px 0 0' }}>SVG, PNG, JPG, or WebP</p>
+                    </div>
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={styles.fieldLabel}>BONUS (₦)</label>
-                    <input
-                      style={styles.input}
-                      type="number"
-                      value={String(bonus ?? '')}
-                      onChange={(e) => setField(t.id, 'bonus_naira', Number(e.target.value))}
-                    />
+
+                  <FieldShell label="Name">
+                    <Input value={name} onChange={(e) => setField(t.id, 'name', e.target.value)} />
+                  </FieldShell>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 'var(--space-3)' }}>
+                    <FieldShell label="Target ($)">
+                      <Input
+                        type="number"
+                        mono
+                        value={String(target ?? '')}
+                        onChange={(e) => setField(t.id, 'target_usd', Number(e.target.value))}
+                      />
+                    </FieldShell>
+                    <FieldShell label="Bonus (₦)">
+                      <Input
+                        type="number"
+                        mono
+                        value={String(bonus ?? '')}
+                        onChange={(e) => setField(t.id, 'bonus_naira', Number(e.target.value))}
+                      />
+                    </FieldShell>
                   </div>
-                </div>
 
-                <div style={styles.statsLine}>
-                  <span style={styles.stat}>Claims: <b>{t.claims}</b></span>
-                  <span style={active ? styles.badgeActive : styles.badgeInactive}>{active ? 'Active' : 'Inactive'}</span>
-                </div>
-
-                <button
-                  style={{ ...styles.saveBtn, opacity: dirty && savingId !== t.id ? 1 : 0.5 }}
-                  disabled={!dirty || savingId === t.id}
-                  onClick={() => saveTier(t)}
-                >
-                  {savingId === t.id ? 'Saving...' : dirty ? 'Save Tier' : 'No Changes'}
-                </button>
-              </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-4)' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
+                      CLAIMS {t.claims.toLocaleString()}
+                    </span>
+                    <StatusDot status={active ? 'Active' : 'Inactive'} tone={active ? 'success' : 'neutral'} />
+                  </div>
+                </CardBody>
+                <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={savingId === t.id}
+                    disabled={!dirty || savingId === t.id}
+                    onClick={() => saveTier(t)}
+                  >
+                    {savingId === t.id ? 'Saving…' : dirty ? 'Save Tier' : 'No Changes'}
+                  </Button>
+                </CardFooter>
+              </Card>
             );
           })}
         </div>
       )}
 
-      {toast && <div style={styles.toast}>{toast}</div>}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, background: 'var(--fg-primary)', color: 'var(--bg-base)', padding: '10px 18px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', fontWeight: 600, zIndex: 51 }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { paddingBottom: 40 },
-  breadcrumb: { display: 'inline-block', fontSize: 12, color: 'var(--fg-secondary)', textDecoration: 'none', marginBottom: 12 },
-  header: { fontSize: 12, color: 'var(--fg-secondary)', marginBottom: 16, lineHeight: 1.6 },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)', padding: 20, textAlign: 'center' },
-
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 },
-  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 },
-  cardHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  tierOrder: { fontSize: 11, fontWeight: 700, color: 'var(--fg-tertiary)', letterSpacing: '0.08em' },
-
-  toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-
-  badgeRow: { display: 'flex', gap: 12, alignItems: 'center' },
-  badgePreview: { width: 72, height: 72, borderRadius: 12, backgroundColor: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
-  badgeImg: { width: '100%', height: '100%', objectFit: 'contain' },
-  badgePlaceholder: { fontSize: 10, color: 'var(--fg-tertiary)' },
-  uploadBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  uploadHint: { fontSize: 10, color: 'var(--fg-tertiary)', marginTop: 6, marginBottom: 0 },
-
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4, marginTop: 2 },
-  fieldRow: { display: 'flex', gap: 10 },
-  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
-
-  statsLine: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  stat: { fontSize: 11, color: 'var(--fg-secondary)' },
-  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeInactive: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-
-  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 6 },
-
-  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--bg-inverse)', color: 'var(--fg-inverse)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
-};

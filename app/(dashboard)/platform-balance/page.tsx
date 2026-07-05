@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader, Card, CardHeader, CardBody, CardFooter, FieldShell, Input, Button, Tabs } from '../../_ui';
+import { StatStrip } from '../_shared/statusUi';
 
 type Config = Record<string, string>;
 
@@ -52,95 +54,96 @@ export default function PlatformBalancePage() {
   const liveAt = config.platform_balance_live_at;
   const liveError = config.platform_balance_live_error;
 
-  if (loading) return <div><h1 style={styles.h1}>Platform Balance</h1><p style={styles.empty}>Loading…</p></div>;
+  if (loading) {
+    return (
+      <div>
+        <PageHeader title="Platform Balance" subtitle="Choose how the platform balance is sourced and reported." />
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
-      <h1 style={styles.h1}>Platform Balance</h1>
+      <PageHeader title="Platform Balance" subtitle="Choose how the platform balance is sourced and reported." />
 
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Mode</p>
-        <div style={styles.tiles}>
-          <div
-            style={{ ...styles.tile, ...(mode === 'static' ? styles.tileActive : {}) }}
-            onClick={() => !saving && setMode('static')}
-          >
-            <div style={styles.tileIcon}>📊</div>
-            <p style={styles.tileLabel}>Static</p>
-            <p style={styles.tileDesc}>Manually entered value</p>
-          </div>
-          <div
-            style={{ ...styles.tile, ...(mode === 'live' ? styles.tileActive : {}) }}
-            onClick={() => !saving && setMode('live')}
-          >
-            <div style={styles.tileIcon}>🔴</div>
-            <p style={styles.tileLabel}>Live</p>
-            <p style={styles.tileDesc}>Auto-fetched from gateway</p>
-          </div>
-        </div>
-      </div>
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader title="Mode" subtitle="Static uses a manually entered value; Live auto-fetches from the payment gateway." />
+        <CardBody>
+          <Tabs
+            value={mode}
+            onChange={(v) => !saving && setMode(v)}
+            items={[
+              { value: 'static', label: 'Static' },
+              { value: 'live', label: 'Live' },
+            ]}
+          />
+        </CardBody>
+      </Card>
 
       {mode === 'static' ? (
-        <div style={styles.card}>
-          <p style={styles.cardTitle}>Static Balance (₦)</p>
-          <div style={styles.row}>
-            <input
-              style={styles.input}
-              type="number"
-              min={0}
-              step="0.01"
-              value={staticInput}
-              onChange={(e) => setStaticInput(e.target.value)}
-              placeholder="0.00"
-            />
-            <button style={styles.saveBtn} onClick={saveStatic} disabled={saving}>
+        <Card>
+          <CardHeader title="Static Balance" />
+          <CardBody>
+            <FieldShell label="Static Balance (₦)">
+              <Input
+                type="number"
+                mono
+                min={0}
+                step="0.01"
+                value={staticInput}
+                onChange={(e) => setStaticInput(e.target.value)}
+                placeholder="0.00"
+              />
+            </FieldShell>
+          </CardBody>
+          <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button variant="primary" size="sm" onClick={saveStatic} disabled={saving} loading={saving}>
               {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
+            </Button>
+          </CardFooter>
+        </Card>
       ) : (
-        <div style={styles.card}>
-          <p style={styles.cardTitle}>Live Balance</p>
-          <p style={styles.info}>
-            Balance is automatically refreshed from the <strong>{gateway}</strong> API every 30 minutes.
-          </p>
-          <div style={styles.liveBox}>
-            <p style={styles.liveLabel}>Current Balance</p>
-            <p style={styles.liveValue}>
-              {liveValue ? `₦${Number(liveValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+        <Card>
+          <CardHeader title="Live Balance" />
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', margin: '0 0 var(--space-4)', lineHeight: 1.5 }}>
+              Balance is automatically refreshed from the <strong>{gateway}</strong> API every 30 minutes.
             </p>
-            <p style={styles.liveMeta}>
-              Last updated: {liveAt ? new Date(liveAt).toLocaleString() : 'Never'}
-            </p>
-            {liveError && <p style={styles.errorText}>Error: {liveError}</p>}
-          </div>
-        </div>
+            <StatStrip items={[
+              {
+                label: 'Current Balance',
+                value: liveValue ? `₦${Number(liveValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—',
+                mono: true,
+              },
+              {
+                label: 'Last Updated',
+                value: liveAt ? new Date(liveAt).toLocaleString() : 'Never',
+              },
+            ]} />
+            {liveError && (
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--tone-danger-fg)', margin: 'var(--space-2) 0 0' }}>
+                Error: {liveError}
+              </p>
+            )}
+          </CardBody>
+        </Card>
       )}
 
-      {toast && <div style={styles.toast}>{toast}</div>}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 20, right: 20, background: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)', color: 'var(--fg-primary)',
+          padding: '10px 16px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-xs)',
+          fontWeight: 600, boxShadow: 'var(--shadow-md)', zIndex: 100,
+        }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
-  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 14px' },
-  tiles: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  tile: { padding: 20, border: '2px solid var(--border-default)', borderRadius: 10, cursor: 'pointer', textAlign: 'center', transition: 'border-color 0.15s' },
-  tileActive: { borderColor: 'var(--accent-base)', backgroundColor: 'var(--bg-subtle)' },
-  tileIcon: { fontSize: 28, marginBottom: 6 },
-  tileLabel: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 4px' },
-  tileDesc: { fontSize: 11, color: 'var(--fg-tertiary)', margin: 0 },
-  row: { display: 'flex', gap: 10 },
-  input: { flex: 1, padding: '10px 12px', fontSize: 14, border: '1px solid var(--border-default)', borderRadius: 6 },
-  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  info: { fontSize: 12, color: 'var(--fg-secondary)', margin: '0 0 14px', lineHeight: 1.5 },
-  liveBox: { padding: 16, backgroundColor: 'var(--bg-subtle)', borderRadius: 8, border: '1px solid var(--border-default)' },
-  liveLabel: { fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', margin: '0 0 6px' },
-  liveValue: { fontSize: 24, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 8px' },
-  liveMeta: { fontSize: 11, color: 'var(--fg-tertiary)', margin: 0 },
-  errorText: { fontSize: 11, color: 'var(--tone-danger-fg)', marginTop: 8, margin: 0 },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)' },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
-};

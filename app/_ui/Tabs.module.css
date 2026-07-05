@@ -13,10 +13,12 @@
   gap: var(--space-2);
   padding: 6px var(--space-3);
   border-radius: var(--radius-md);
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: var(--weight-medium);
+  color: var(--fg-tertiary);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -32,12 +34,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
+  min-width: 16px;
   padding: 0 var(--space-1);
-  height: 18px;
-  border-radius: var(--radius-pill);
+  height: 16px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-semibold);
   background: var(--bg-muted);
   color: var(--fg-secondary);
 }

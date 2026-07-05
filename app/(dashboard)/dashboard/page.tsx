@@ -9,9 +9,10 @@ import { verifyAdminFromRequest } from '../../lib/jwt';
 import { buildCan, getDashboardStats, getRecentSubmissions } from '../../lib/dashboard';
 import AutoRefresh from './AutoRefresh';
 import {
-  PageHeader, Kpi, KpiGrid, SectionTitle, Card, CardHeader, CardBody, Badge,
+  PageHeader, Kpi, KpiGrid, SectionTitle, Card, CardHeader, CardBody,
   Table, THead, TBody, Tr, Th, Td, TableEmpty, Button,
 } from '../../_ui';
+import { StatusDot } from '../_shared/statusUi';
 
 function formatNaira(amount: number) {
   return '₦' + amount.toLocaleString('en-NG', { minimumFractionDigits: 2 });
@@ -184,7 +185,7 @@ export default async function DashboardPage() {
                     <Td align="right" mono>{formatNaira(row.payout_naira)}</Td>
                     <Td emphasis="secondary">{new Date(row.created_at).toLocaleDateString()}</Td>
                     <Td>
-                      <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
+                      <StatusDot status={statusLabel(row.status)} tone={statusTone(row.status)} />
                     </Td>
                     <Td align="right">
                       <Link href="/card-queue">

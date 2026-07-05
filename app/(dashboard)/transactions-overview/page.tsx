@@ -4,28 +4,12 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Download, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Select, Kpi, KpiGrid, ExportModal,
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Select, ExportModal,
 } from '../../_ui';
 import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
-
-function formatNaira(n: number | string | null | undefined) {
-  const v = Number(n || 0);
-  return '₦' + v.toLocaleString('en-NG', { minimumFractionDigits: 2 });
-}
-
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'purple' | 'neutral' {
-  switch (status) {
-    case 'success':
-    case 'completed': return 'success';
-    case 'pending':
-    case 'processing':
-    case 'pending_review': return 'warning';
-    case 'failed': return 'danger';
-    case 'refunded': return 'purple';
-    default: return 'neutral';
-  }
-}
+import { useIsMobile } from '../../lib/useIsMobile';
+import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
 
 const TYPE_GROUPS: { label: string; key: string; values: string[] }[] = [
   { label: 'Giftcards', key: 'giftcards', values: ['giftcard_credit'] },
@@ -36,7 +20,61 @@ const TYPE_GROUPS: { label: string; key: string; values: string[] }[] = [
 ];
 const STATUS_OPTIONS = ['', 'pending', 'pending_review', 'success', 'failed'];
 
+function TypeLabel({ type }: { type: string }) {
+  return (
+    <span style={{
+      fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.04em',
+      color: 'var(--fg-secondary)', background: 'var(--bg-subtle)',
+      border: '1px solid var(--border-default)', padding: '2px 7px',
+      borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
+    }}>{(type || '-').replace(/_/g, ' ')}</span>
+  );
+}
+
+function TransactionsMobile({ rows, loading }: { rows: any[]; loading: boolean }) {
+  if (loading && rows.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 84, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No transactions found
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map((t: any) => (
+        <div key={t.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+              {formatNaira(t.amount)}
+            </div>
+            <StatusDot status={t.status} />
+          </div>
+          <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginTop: 4, color: 'var(--fg-primary)' }}>
+            @{t.users?.username || '—'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <TypeLabel type={t.type} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
+              {t.reference_id || '—'} · {new Date(t.created_at).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TransactionsOverviewPage() {
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -156,54 +194,42 @@ export default function TransactionsOverviewPage() {
         title="Transactions"
         subtitle="Full audit-log view of every money movement on the platform."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Download size={14} />}
-            onClick={() => setExportOpen(true)}
-          >
+          <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
             Export
           </Button>
         }
       />
 
-      <KpiGrid style={{ marginBottom: 'var(--space-6)' }}>
-        <Kpi label="Total transactions" value={stats.totalCount.toLocaleString()} />
-        <Kpi label="Total volume" value={formatNaira(stats.totalAmount)} />
-        <Kpi label="Today transactions" value={stats.todayCount.toLocaleString()} />
-        <Kpi label="Today volume" value={formatNaira(stats.todayAmount)} />
-      </KpiGrid>
+      <StatStrip items={[
+        { label: 'Total transactions', value: stats.totalCount.toLocaleString() },
+        { label: 'Total volume', value: formatNaira(stats.totalAmount), mono: true },
+        { label: 'Today transactions', value: stats.todayCount.toLocaleString() },
+        { label: 'Today volume', value: formatNaira(stats.todayAmount), mono: true },
+      ]} />
 
-      <Card>
-        <CardBody tight>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Input
-              placeholder="Search user"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ minWidth: 200, maxWidth: 240 }}
-            />
-            <Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 160 }}>
-              <option value="">All types</option>
-              {TYPE_GROUPS.map((g) => (
-                <option key={g.key} value={g.values.join(',')}>{g.label}</option>
-              ))}
-            </Select>
-            <Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 160 }}>
-              <option value="">All statuses</option>
-              {STATUS_OPTIONS.filter(Boolean).map((st) => (
-                <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
-              ))}
-            </Select>
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ minWidth: 150 }} />
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ minWidth: 150 }} />
-            <Button variant="primary" size="sm" leftIcon={<Filter size={14} />} onClick={applyFilters}>Apply</Button>
-            <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>Clear</Button>
-          </div>
-        </CardBody>
-      </Card>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
+        <Input placeholder="Search user" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 200, maxWidth: 240 }} />
+        <Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 160 }}>
+          <option value="">All types</option>
+          {TYPE_GROUPS.map((g) => (
+            <option key={g.key} value={g.values.join(',')}>{g.label}</option>
+          ))}
+        </Select>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 160 }}>
+          <option value="">All statuses</option>
+          {STATUS_OPTIONS.filter(Boolean).map((st) => (
+            <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
+          ))}
+        </Select>
+        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ minWidth: 150 }} />
+        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ minWidth: 150 }} />
+        <Button variant="primary" size="sm" leftIcon={<Filter size={14} />} onClick={applyFilters}>Apply</Button>
+        <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>Clear</Button>
+      </div>
 
-      <div style={{ marginTop: 'var(--space-4)' }}>
+      {isMobile ? (
+        <TransactionsMobile rows={rows} loading={loading} />
+      ) : (
         <Card>
           <CardBody flush>
             <Table flush>
@@ -226,49 +252,33 @@ export default function TransactionsOverviewPage() {
                   <Tr key={t.id}>
                     <Td emphasis="primary">
                       {t.users?.username ? (
-                        <Link href={`/users/${t.user_id}`} style={{ color: 'var(--fg-link)' }}>
-                          @{t.users.username}
-                        </Link>
+                        <Link href={`/users/${t.user_id}`} style={{ color: 'var(--fg-link)' }}>@{t.users.username}</Link>
                       ) : '—'}
                     </Td>
-                    <Td>
-                      <Badge tone="purple" size="sm">{(t.type || '-').replace(/_/g, ' ')}</Badge>
-                    </Td>
+                    <Td><TypeLabel type={t.type} /></Td>
                     <Td align="right" mono emphasis="primary">{formatNaira(t.amount)}</Td>
-                    <Td><Badge tone={statusTone(t.status)}>{(t.status || '-').replace(/_/g, ' ')}</Badge></Td>
+                    <Td><StatusDot status={t.status} /></Td>
                     <Td emphasis="muted" mono style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {t.reference_id || '—'}
                     </Td>
-                    <Td emphasis="secondary">{new Date(t.created_at).toLocaleString()}</Td>
+                    <Td emphasis="secondary" mono>{new Date(t.created_at).toLocaleString()}</Td>
                   </Tr>
                 ))}
               </TBody>
             </Table>
           </CardBody>
         </Card>
-      </div>
+      )}
 
       {totalPages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 }}>
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<ChevronLeft size={14} />}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-          >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 'var(--space-4)' }}>
+          <Button variant="secondary" size="sm" leftIcon={<ChevronLeft size={14} />} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
             Previous
           </Button>
-          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>
-            Page {page} of {totalPages} ({total.toLocaleString()} results)
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
+            PAGE {page} / {totalPages} · {total.toLocaleString()} RESULTS
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            rightIcon={<ChevronRight size={14} />}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-          >
+          <Button variant="secondary" size="sm" rightIcon={<ChevronRight size={14} />} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
             Next
           </Button>
         </div>

@@ -4,17 +4,61 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Download, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Kpi, KpiGrid, ExportModal,
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, ExportModal,
 } from '../../_ui';
 import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
 
-function formatNaira(n: number | string | null | undefined) {
-  const v = Number(n || 0);
-  return '₦' + v.toLocaleString('en-NG', { minimumFractionDigits: 2 });
+function UserStatus({ u }: { u: any }) {
+  if (u.is_frozen) return <StatusDot status="Frozen" tone="danger" />;
+  if (u.is_active) return <StatusDot status="Active" tone="success" />;
+  return <StatusDot status="Inactive" tone="neutral" />;
+}
+
+function UsersMobile({ users, loading }: { users: any[]; loading: boolean }) {
+  if (loading && users.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 84, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (users.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No users found
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {users.map((u: any) => (
+        <Link key={u.id} href={`/users/${u.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{u.full_name || '—'}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>@{u.username || '—'}</div>
+              </div>
+              <UserStatus u={u} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginTop: 10 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{formatNaira(u.balance)}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>{u.trades || 0} trades · joined {new Date(u.created_at).toLocaleDateString()}</span>
+            </div>
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
 }
 
 export default function UsersPage() {
+  const isMobile = useIsMobile();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -109,46 +153,22 @@ export default function UsersPage() {
         title="Users"
         subtitle="Browse every registered customer, jump into individual profiles."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Download size={14} />}
-            onClick={() => setExportOpen(true)}
-          >
+          <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
             Export
           </Button>
         }
       />
 
-      <KpiGrid style={{ marginBottom: 'var(--space-6)' }}>
-        <Kpi label="Total users" value={total.toLocaleString()} hint="All-time registrations" />
-      </KpiGrid>
+      <StatStrip items={[{ label: 'Total users', value: total.toLocaleString() }]} />
 
-      <Card>
-        <CardBody tight style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
-            <Search
-              size={14}
-              style={{
-                position: 'absolute',
-                left: 10,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--fg-tertiary)',
-                pointerEvents: 'none',
-              }}
-            />
-            <Input
-              placeholder="Search name, username, or email"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ paddingLeft: 32 }}
-            />
-          </div>
-        </CardBody>
-      </Card>
+      <div style={{ position: 'relative', maxWidth: 360, marginBottom: 'var(--space-4)' }}>
+        <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-tertiary)', pointerEvents: 'none' }} />
+        <Input placeholder="Search name, username, or email" value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 32 }} />
+      </div>
 
-      <div style={{ marginTop: 'var(--space-4)' }}>
+      {isMobile ? (
+        <UsersMobile users={users} loading={loading} />
+      ) : (
         <Card>
           <CardBody flush>
             <Table flush>
@@ -178,16 +198,8 @@ export default function UsersPage() {
                     <Td emphasis="secondary">{u.phone || '—'}</Td>
                     <Td align="right" mono emphasis="primary">{formatNaira(u.balance)}</Td>
                     <Td align="right" mono>{u.trades || 0}</Td>
-                    <Td>
-                      {u.is_frozen ? (
-                        <Badge tone="danger">Frozen</Badge>
-                      ) : u.is_active ? (
-                        <Badge tone="success">Active</Badge>
-                      ) : (
-                        <Badge tone="neutral">Inactive</Badge>
-                      )}
-                    </Td>
-                    <Td emphasis="secondary">{new Date(u.created_at).toLocaleDateString()}</Td>
+                    <Td><UserStatus u={u} /></Td>
+                    <Td emphasis="secondary" mono>{new Date(u.created_at).toLocaleDateString()}</Td>
                     <Td align="right">
                       <Link href={`/users/${u.id}`}>
                         <Button variant="ghost" size="sm">View</Button>
@@ -199,29 +211,17 @@ export default function UsersPage() {
             </Table>
           </CardBody>
         </Card>
-      </div>
+      )}
 
       {totalPages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 }}>
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<ChevronLeft size={14} />}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-          >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 'var(--space-4)' }}>
+          <Button variant="secondary" size="sm" leftIcon={<ChevronLeft size={14} />} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
             Previous
           </Button>
-          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>
-            Page {page} of {totalPages}
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
+            PAGE {page} / {totalPages}
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            rightIcon={<ChevronRight size={14} />}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-          >
+          <Button variant="secondary" size="sm" rightIcon={<ChevronRight size={14} />} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
             Next
           </Button>
         </div>

@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, FieldShell, SidePanel, Modal,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { StatusDot, StatStrip } from '../_shared/statusUi';
 
 const ASSIGNABLE_PAGES = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -43,8 +49,103 @@ interface AdminUser {
 
 type PanelMode = 'create' | 'edit' | null;
 
+function formatPages(pages: string[]) {
+  if (!pages || pages.length === 0) return '-';
+  const labels = pages.map((p) => ASSIGNABLE_PAGES.find((a) => a.key === p)?.label || p);
+  if (labels.length <= 3) return labels.join(', ');
+  return labels.slice(0, 3).join(', ') + '...';
+}
+
+function AdminActions({
+  admin, onEdit, onToggle, onDelete,
+}: {
+  admin: AdminUser;
+  onEdit: (a: AdminUser) => void;
+  onToggle: (a: AdminUser) => void;
+  onDelete: (a: AdminUser) => void;
+}) {
+  if (admin.is_super_admin || admin.deleted_at) return <span style={{ color: 'var(--fg-tertiary)' }}>—</span>;
+  return (
+    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      <Button variant="ghost" size="sm" onClick={() => onEdit(admin)}>Edit</Button>
+      <Button variant="secondary" size="sm" onClick={() => onToggle(admin)}>
+        {admin.is_active ? 'Deactivate' : 'Reactivate'}
+      </Button>
+      {!admin.is_active && (
+        <Button variant="dangerSubtle" size="sm" onClick={() => onDelete(admin)}>Delete</Button>
+      )}
+    </div>
+  );
+}
+
+function AdminAccountsMobile({
+  admins, loading, onEdit, onToggle, onDelete,
+}: {
+  admins: AdminUser[];
+  loading: boolean;
+  onEdit: (a: AdminUser) => void;
+  onToggle: (a: AdminUser) => void;
+  onDelete: (a: AdminUser) => void;
+}) {
+  if (loading && admins.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 96, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (admins.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No admin accounts yet
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {admins.map((admin) => (
+        <div key={admin.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>
+                {admin.username}
+                {admin.deleted_at && <span style={{ color: 'var(--tone-danger-fg)', fontWeight: 500, fontSize: 'var(--text-xs)' }}> (deleted admin)</span>}
+              </div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', marginTop: 2 }}>{admin.role_title}</div>
+            </div>
+            <StatusDot status={admin.is_active ? 'Active' : 'Inactive'} tone={admin.is_active ? 'success' : 'neutral'} />
+          </div>
+          <div style={{ marginTop: 8, fontSize: 'var(--text-sm)', color: admin.email ? 'var(--fg-secondary)' : 'var(--tone-danger-fg)' }}>
+            {admin.email || '— (no alerts)'}
+          </div>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
+            {formatPages(admin.page_permissions)}
+          </div>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
+            last login {admin.last_login_at ? new Date(admin.last_login_at).toLocaleDateString() : 'never'}
+          </div>
+          {!admin.is_super_admin && !admin.deleted_at && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+              <Button variant="ghost" size="sm" onClick={() => onEdit(admin)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={() => onToggle(admin)}>
+                {admin.is_active ? 'Deactivate' : 'Reactivate'}
+              </Button>
+              {!admin.is_active && (
+                <Button variant="dangerSubtle" size="sm" onClick={() => onDelete(admin)}>Delete</Button>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function AdminAccountsPage() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [panelMode, setPanelMode] = useState<PanelMode>(null);
@@ -160,163 +261,170 @@ export default function AdminAccountsPage() {
     fetchAdmins(true);
   };
 
-  const formatPages = (pages: string[]) => {
-    if (!pages || pages.length === 0) return '-';
-    const labels = pages.map((p) => ASSIGNABLE_PAGES.find((a) => a.key === p)?.label || p);
-    if (labels.length <= 3) return labels.join(', ');
-    return labels.slice(0, 3).join(', ') + '...';
-  };
+  const openDelete = (admin: AdminUser) => { setDeleteTarget(admin); setDeleteInput(''); setDeleteError(''); };
+
+  const activeCount = admins.filter((a) => a.is_active && !a.deleted_at).length;
 
   return (
-    <div style={styles.page}>
-      <div style={styles.header}>
-        <span style={styles.title}>Admin Accounts</span>
-        <button style={styles.createBtn} onClick={openCreate}>+ Create Admin</button>
-      </div>
+    <div>
+      <PageHeader
+        title="Admin Accounts"
+        subtitle="Provision console operators, scope their page access, and revoke when needed."
+        actions={
+          <Button variant="primary" size="sm" onClick={openCreate}>+ Create Admin</Button>
+        }
+      />
 
-      <div style={styles.tableWrapper}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              {['Username', 'Email', 'Role Title', 'Assigned Pages', 'Last Login', 'Status', 'Actions'].map((col) => (
-                <th key={col} style={styles.th}>{col}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>Loading...</td></tr>
-            ) : admins.length === 0 ? (
-              <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No admin accounts yet</td></tr>
-            ) : admins.map((admin, i) => (
-              <tr key={admin.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
-                <td style={{ ...styles.td, fontWeight: 600 }}>{admin.username}{admin.deleted_at && <span style={styles.deletedTag}> (deleted admin)</span>}</td>
-                <td style={{ ...styles.td, color: admin.email ? 'var(--fg-secondary)' : 'var(--tone-danger-fg)' }}>{admin.email || '— (no alerts)'}</td>
-                <td style={styles.td}>{admin.role_title}</td>
-                <td style={{ ...styles.td, maxWidth: 200, color: 'var(--fg-secondary)' }}>{formatPages(admin.page_permissions)}</td>
-                <td style={styles.td}>{admin.last_login_at ? new Date(admin.last_login_at).toLocaleDateString() : 'Never'}</td>
-                <td style={styles.td}>
-                  <span style={admin.is_active ? styles.badgeActive : styles.badgeInactive}>
-                    {admin.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td style={styles.td}>
-                  <div style={styles.actions}>
-                    {!admin.is_super_admin && !admin.deleted_at && (
-                      <>
-                        <button style={styles.editBtn} onClick={() => openEdit(admin)}>Edit</button>
-                        <button style={styles.deactivateBtn} onClick={() => handleToggleActive(admin)}>
-                          {admin.is_active ? 'Deactivate' : 'Reactivate'}
-                        </button>
-                        {!admin.is_active && (
-                          <button style={styles.deleteBtn} onClick={() => { setDeleteTarget(admin); setDeleteInput(''); setDeleteError(''); }}>Delete</button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <StatStrip items={[
+        { label: 'Total accounts', value: admins.length.toLocaleString() },
+        { label: 'Active', value: activeCount.toLocaleString() },
+      ]} />
 
-      {panelMode && (
-        <>
-          <div style={styles.overlay} onClick={closePanel} />
-          <div style={styles.panel}>
-            <p style={styles.panelTitle}>{panelMode === 'create' ? 'Create Admin Account' : 'Edit Admin Account'}</p>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>USERNAME</label>
-              <input style={styles.input} value={username} onChange={(e) => setUsername(e.target.value)} disabled={panelMode === 'edit'} />
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>EMAIL <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--fg-tertiary)' }}>(receives security alerts)</span></label>
-              <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@cardelite.ng" />
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>PASSWORD {panelMode === 'edit' && <span style={{ fontWeight: 400, textTransform: 'none' }}>(leave blank to keep)</span>}</label>
-              <div style={styles.pwWrapper}>
-                <input style={{ ...styles.input, paddingRight: 36 }} type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} />
-                <button style={styles.eyeBtn} type="button" onClick={() => setShowPassword(!showPassword)}>
-                  <EyeIcon visible={showPassword} />
-                </button>
-              </div>
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>CONFIRM PASSWORD</label>
-              <div style={styles.pwWrapper}>
-                <input style={{ ...styles.input, paddingRight: 36 }} type={showConfirm ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
-                <button style={styles.eyeBtn} type="button" onClick={() => setShowConfirm(!showConfirm)}>
-                  <EyeIcon visible={showConfirm} />
-                </button>
-              </div>
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>ROLE TITLE</label>
-              <input style={styles.input} placeholder="e.g. Card Reviewer" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>ASSIGNED PAGES</label>
-              <div style={styles.checkList}>
-                {ASSIGNABLE_PAGES.map((page) => (
-                  <label key={page.key} style={styles.checkRow}>
-                    <div
-                      style={{ ...styles.checkbox, ...(selectedPages.includes(page.key) ? styles.checkboxChecked : {}) }}
-                      onClick={() => togglePage(page.key)}
-                    >
-                      {selectedPages.includes(page.key) && <span style={styles.checkmark}>✓</span>}
-                    </div>
-                    <span style={styles.checkLabel}>{page.label}</span>
-                  </label>
+      {isMobile ? (
+        <AdminAccountsMobile
+          admins={admins}
+          loading={loading}
+          onEdit={openEdit}
+          onToggle={handleToggleActive}
+          onDelete={openDelete}
+        />
+      ) : (
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Username</Th>
+                  <Th>Email</Th>
+                  <Th>Role Title</Th>
+                  <Th>Assigned Pages</Th>
+                  <Th>Last Login</Th>
+                  <Th>Status</Th>
+                  <Th align="right">Actions</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {loading ? (
+                  <TableEmpty colSpan={7}>Loading…</TableEmpty>
+                ) : admins.length === 0 ? (
+                  <TableEmpty colSpan={7}>No admin accounts yet</TableEmpty>
+                ) : admins.map((admin) => (
+                  <Tr key={admin.id}>
+                    <Td emphasis="primary">
+                      {admin.username}
+                      {admin.deleted_at && <span style={{ color: 'var(--tone-danger-fg)', fontWeight: 500, fontSize: 'var(--text-xs)' }}> (deleted admin)</span>}
+                    </Td>
+                    <Td style={{ color: admin.email ? undefined : 'var(--tone-danger-fg)' }} emphasis={admin.email ? 'secondary' : undefined}>
+                      {admin.email || '— (no alerts)'}
+                    </Td>
+                    <Td>{admin.role_title}</Td>
+                    <Td emphasis="secondary" style={{ maxWidth: 200 }}>{formatPages(admin.page_permissions)}</Td>
+                    <Td emphasis="secondary" mono>{admin.last_login_at ? new Date(admin.last_login_at).toLocaleDateString() : 'Never'}</Td>
+                    <Td>
+                      <StatusDot status={admin.is_active ? 'Active' : 'Inactive'} tone={admin.is_active ? 'success' : 'neutral'} />
+                    </Td>
+                    <Td align="right">
+                      <AdminActions admin={admin} onEdit={openEdit} onToggle={handleToggleActive} onDelete={openDelete} />
+                    </Td>
+                  </Tr>
                 ))}
-              </div>
-            </div>
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
 
-            {formError && <p style={styles.formError}>{formError}</p>}
+      <SidePanel
+        open={!!panelMode}
+        onClose={closePanel}
+        title={panelMode === 'create' ? 'Create Admin Account' : 'Edit Admin Account'}
+        footer={
+          <Button variant="primary" onClick={handleSave} disabled={saving} style={{ width: '100%' }}>
+            {saving ? 'Saving...' : panelMode === 'create' ? 'Create Account' : 'Save Changes'}
+          </Button>
+        }
+      >
+        <FieldShell label="Username">
+          <Input value={username} onChange={(e) => setUsername(e.target.value)} disabled={panelMode === 'edit'} />
+        </FieldShell>
 
-            <button style={styles.saveBtn} onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : panelMode === 'create' ? 'Create Account' : 'Save Changes'}
+        <FieldShell label={<>Email <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--fg-tertiary)' }}>(receives security alerts)</span></>}>
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@cardelite.ng" />
+        </FieldShell>
+
+        <FieldShell label={<>Password {panelMode === 'edit' && <span style={{ fontWeight: 400, textTransform: 'none' }}>(leave blank to keep)</span>}</>}>
+          <div style={{ position: 'relative' }}>
+            <Input style={{ paddingRight: 36 }} type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button style={eyeBtn} type="button" onClick={() => setShowPassword(!showPassword)}>
+              <EyeIcon visible={showPassword} />
             </button>
           </div>
-        </>
-      )}
+        </FieldShell>
 
-      {deleteTarget && (
-        <>
-          <div style={styles.modalOverlay} />
-          <div style={styles.modal}>
-            <p style={styles.modalTitle}>Delete Admin Account</p>
-            <p style={styles.modalText}>This action cannot be undone. Type <strong>DELETE</strong> to confirm.</p>
-            <input
-              style={styles.input}
-              placeholder="Type DELETE"
-              value={deleteInput}
-              onChange={(e) => setDeleteInput(e.target.value)}
-            />
-            {deleteError && <p style={styles.modalError}>{deleteError}</p>}
-            <div style={styles.modalActions}>
-              <button style={styles.modalCancelBtn} onClick={() => { setDeleteTarget(null); setDeleteInput(''); setDeleteError(''); }}>Cancel</button>
-              <button
-                style={{ ...styles.deleteBtn, opacity: deleteInput !== 'DELETE' ? 0.5 : 1, padding: '8px 20px' }}
-                disabled={deleteInput !== 'DELETE'}
-                onClick={handleDelete}
-              >
-                Delete
-              </button>
-            </div>
+        <FieldShell label="Confirm Password">
+          <div style={{ position: 'relative' }}>
+            <Input style={{ paddingRight: 36 }} type={showConfirm ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+            <button style={eyeBtn} type="button" onClick={() => setShowConfirm(!showConfirm)}>
+              <EyeIcon visible={showConfirm} />
+            </button>
           </div>
-        </>
-      )}
+        </FieldShell>
+
+        <FieldShell label="Role Title">
+          <Input placeholder="e.g. Card Reviewer" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
+        </FieldShell>
+
+        <FieldShell label="Assigned Pages">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            {ASSIGNABLE_PAGES.map((page) => {
+              const checked = selectedPages.includes(page.key);
+              return (
+                <label key={page.key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <div
+                    style={{
+                      width: 16, height: 16, borderWidth: '1.5px', borderStyle: 'solid',
+                      borderColor: checked ? 'var(--accent-base)' : 'var(--border-default)',
+                      borderRadius: 3, backgroundColor: checked ? 'var(--accent-base)' : 'var(--bg-surface)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer',
+                    }}
+                    onClick={() => togglePage(page.key)}
+                  >
+                    {checked && <span style={{ fontSize: 10, color: 'var(--accent-fg)', fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>{page.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </FieldShell>
+
+        {formError && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--tone-danger-fg)', margin: '8px 0' }}>{formError}</p>}
+      </SidePanel>
+
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => { setDeleteTarget(null); setDeleteInput(''); setDeleteError(''); }}
+        title="Delete Admin Account"
+        subtitle={<>This action cannot be undone. Type <strong>DELETE</strong> to confirm.</>}
+        size="sm"
+        footer={
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <Button variant="secondary" onClick={() => { setDeleteTarget(null); setDeleteInput(''); setDeleteError(''); }}>Cancel</Button>
+            <Button variant="danger" disabled={deleteInput !== 'DELETE'} onClick={handleDelete}>Delete</Button>
+          </div>
+        }
+      >
+        <Input placeholder="Type DELETE" value={deleteInput} onChange={(e) => setDeleteInput(e.target.value)} />
+        {deleteError && <p style={{ color: 'var(--tone-danger-fg)', fontSize: 'var(--text-sm)', marginTop: 8 }}>{deleteError}</p>}
+      </Modal>
     </div>
   );
 }
+
+const eyeBtn: React.CSSProperties = {
+  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+};
 
 function EyeIcon({ visible }: { visible: boolean }) {
   return visible ? (
@@ -331,44 +439,3 @@ function EyeIcon({ visible }: { visible: boolean }) {
     </svg>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { position: 'relative' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
-  createBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  tableWrapper: { overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-default)' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '10px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
-  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  badgeInactive: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  actions: { display: 'flex', gap: 6 },
-  editBtn: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  deactivateBtn: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  deleteBtn: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  deletedTag: { color: 'var(--tone-danger-fg)', fontWeight: 500, fontSize: 11 },
-  modalError: { color: 'var(--tone-danger-fg)', fontSize: 12, marginTop: 8 },
-  overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.2)', zIndex: 49 },
-  panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 400, backgroundColor: 'var(--bg-surface)', borderLeft: '1px solid var(--border-default)', padding: 24, zIndex: 50, overflowY: 'auto' },
-  panelTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
-  fieldGroup: { marginBottom: 14 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
-  pwWrapper: { position: 'relative' },
-  eyeBtn: { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 },
-  checkList: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 },
-  checkRow: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' },
-  checkbox: { width: 16, height: 16, borderWidth: '1.5px', borderStyle: 'solid', borderColor: 'var(--border-default)', borderRadius: 3, backgroundColor: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' },
-  checkboxChecked: { backgroundColor: 'var(--accent-base)', borderColor: 'var(--accent-base)' },
-  checkmark: { fontSize: 10, color: 'var(--accent-fg)', fontWeight: 700 },
-  checkLabel: { fontSize: 12, color: 'var(--fg-secondary)' },
-  formError: { fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0' },
-  saveBtn: { width: '100%', backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: 12, fontSize: 12, fontWeight: 700, cursor: 'pointer', marginTop: 16 },
-  modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 360, zIndex: 100 },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 8px' },
-  modalText: { fontSize: 13, color: 'var(--fg-secondary)', margin: '0 0 16px' },
-  modalActions: { display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' },
-  modalCancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-};

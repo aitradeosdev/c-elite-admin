@@ -1,14 +1,15 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-
-function formatNaira(n: number | string | null | undefined) {
-  const v = Number(n || 0);
-  return '₦' + v.toLocaleString('en-NG', { minimumFractionDigits: 2 });
-}
+import {
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Toggle, SidePanel,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
 
 function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return '-';
+  if (!iso) return '—';
   const diff = Date.now() - new Date(iso).getTime();
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}s ago`;
@@ -19,7 +20,140 @@ function timeAgo(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function presence(u: any): { label: string; tone: 'success' | 'danger' | 'neutral' } {
+  if (u.is_frozen) return { label: 'Frozen', tone: 'danger' };
+  if (u.is_online) return { label: 'Online', tone: 'success' };
+  return { label: 'Offline', tone: 'neutral' };
+}
+
+function OnlineDot() {
+  return <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--tone-success-fg)', boxShadow: '0 0 0 3px var(--tone-success-bg)', flex: 'none' }} />;
+}
+
+const microLabel: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.12em',
+  textTransform: 'uppercase', color: 'var(--fg-tertiary)',
+  margin: '20px 0 10px', display: 'flex', alignItems: 'center', gap: 8,
+};
+
+function MoneyRow({ amount, meta, status, when }: { amount: number | string; meta: string; status: string; when: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 96 }}>{formatNaira(amount)}</span>
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</span>
+      <StatusDot status={status} />
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap', minWidth: 64, textAlign: 'right' }}>{when}</span>
+    </div>
+  );
+}
+
+function emptyLine(msg: string) {
+  return <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: '6px 0' }}>{msg}</div>;
+}
+
+function DetailBody({ detail, detailLoading, terminate, actionBusy, err }: {
+  detail: any; detailLoading: boolean; terminate: () => void; actionBusy: boolean; err: string;
+}) {
+  if (detailLoading || !detail?.user) {
+    return <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)', padding: '20px 0' }}>Loading…</div>;
+  }
+  const p = presence(detail.user);
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
+        <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-lg)', background: 'var(--accent-base)', color: 'var(--accent-fg)', display: 'grid', placeItems: 'center', fontSize: 18, fontWeight: 700, flex: 'none' }}>
+          {(detail.user.full_name || detail.user.username || '?').charAt(0).toUpperCase()}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--fg-primary)' }}>@{detail.user.username || detail.user.full_name}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 3 }}>
+            {detail.user.email}{detail.user.phone ? ' · ' + detail.user.phone : ''}
+          </div>
+        </div>
+        <StatusDot status={p.label} tone={p.tone} />
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <Button variant="danger" size="sm" loading={actionBusy} onClick={terminate} style={{ width: '100%', justifyContent: 'center' }}>
+          {actionBusy ? 'Terminating…' : 'Terminate all sessions'}
+        </Button>
+      </div>
+
+      {err && (
+        <div style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: '1px solid var(--tone-danger-border)', padding: '10px 12px', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', marginTop: 12 }}>{err}</div>
+      )}
+
+      <div style={microLabel}>Sessions <span style={{ color: 'var(--fg-disabled)' }}>· {detail.sessions.length}</span></div>
+      {detail.sessions.length === 0 ? emptyLine('No sessions.') : detail.sessions.map((se: any) => (
+        <div key={se.id} style={{ padding: '11px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-secondary)' }}>{new Date(se.created_at).toLocaleString()}</span>
+            {se.ended_at
+              ? <StatusDot status={`Ended ${timeAgo(se.ended_at)}`} tone="neutral" />
+              : <StatusDot status="Active" tone="success" />}
+          </div>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>
+            {[se.device_model, se.os_version, se.app_version].filter(Boolean).join(' · ') || '—'} · IP {se.ip_address || '—'}
+          </div>
+        </div>
+      ))}
+
+      <div style={microLabel}>Recent withdrawals</div>
+      {detail.withdrawals.length === 0 ? emptyLine('None.') : detail.withdrawals.map((w: any) => (
+        <MoneyRow key={w.id} amount={w.amount} meta={`${w.bank_name || ''} · ${w.account_name || ''}`} status={w.status} when={timeAgo(w.created_at)} />
+      ))}
+
+      <div style={microLabel}>Recent transfers</div>
+      {detail.transfers.length === 0 ? emptyLine('None.') : detail.transfers.map((t: any) => (
+        <MoneyRow key={t.id} amount={t.amount} meta={t.type} status={t.status} when={timeAgo(t.created_at)} />
+      ))}
+
+      <div style={microLabel}>Recent transactions</div>
+      {detail.transactions.length === 0 ? emptyLine('None.') : detail.transactions.map((tx: any) => (
+        <MoneyRow key={tx.id} amount={tx.amount} meta={tx.type} status={tx.status} when={timeAgo(tx.created_at)} />
+      ))}
+    </>
+  );
+}
+
+function ActivityMobile({ rows, loading, onOpen }: { rows: any[]; loading: boolean; onOpen: (id: string) => void }) {
+  if (loading && rows.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 70, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>No users</div>;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map((u: any) => {
+        const p = presence(u);
+        return (
+          <div key={u.id} onClick={() => onOpen(u.id)} style={{ background: 'var(--bg-surface)', cursor: 'pointer', padding: 14, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ minWidth: 0, fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)', display: 'flex', alignItems: 'center', gap: 7 }}>
+                {u.is_online && <OnlineDot />}@{u.username || u.full_name || '—'}
+              </div>
+              <StatusDot status={p.label} tone={p.tone} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginTop: 8 }}>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email || '—'}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap' }}>{timeAgo(u.last_active_at)}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function UserActivityMonitorPage() {
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<any[]>([]);
   const [onlineCount, setOnlineCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -81,213 +215,107 @@ export default function UserActivityMonitorPage() {
     load();
   };
 
+  const closePanel = () => { setSelected(null); setDetail(null); setErr(''); };
   const totalPages = Math.ceil(total / limit);
 
   return (
     <div>
-      <div style={s.header}>
-        <span style={s.title}>User Activity Monitor</span>
-        <div style={s.statBlock}>
-          <span style={s.dotOnline} />
-          <span style={s.statLabel}>{onlineCount.toLocaleString()} online now</span>
+      <PageHeader
+        title="User activity monitor"
+        subtitle={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <OnlineDot />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', letterSpacing: '0.04em', color: 'var(--fg-tertiary)' }}>
+              LIVE · {onlineCount.toLocaleString()} ONLINE · AUTO-REFRESH 30s
+            </span>
+          </span>
+        }
+      />
+
+      <StatStrip items={[
+        { label: 'Online now', value: onlineCount.toLocaleString() },
+        { label: 'Total users', value: total.toLocaleString() },
+      ]} />
+
+      {err && !selected && (
+        <div style={{ backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: '1px solid var(--tone-danger-border)', padding: '10px 14px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-4)' }}>
+          {err}
         </div>
-      </div>
+      )}
 
-      {err && <div style={s.errorBar}>{err}</div>}
-
-      <div style={s.filters}>
-        <input
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <Input
           placeholder="Search username, name, email"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (setPage(1), load())}
-          style={s.filterInput}
+          style={{ minWidth: 260 }}
         />
-        <label style={s.toggleLabel}>
-          <input type="checkbox" checked={onlyOnline} onChange={(e) => { setOnlyOnline(e.target.checked); setPage(1); }} />
-          <span style={{ marginLeft: 6 }}>Online only</span>
-        </label>
-        <button style={s.applyBtn} onClick={() => { setPage(1); load(); }}>Apply</button>
+        <Toggle label="Online only" checked={onlyOnline} onChange={(next) => { setOnlyOnline(next); setPage(1); }} />
+        <Button variant="primary" size="sm" onClick={() => { setPage(1); load(); }}>Apply</Button>
       </div>
 
-      <div style={s.layout}>
-        <div style={s.listPane}>
-          <div style={s.tableWrap}>
-            <table style={s.table}>
-              <thead>
-                <tr>
-                  {['User', 'Email', 'Last Active', 'Status'].map(c => <th key={c} style={s.th}>{c}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={4} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>Loading...</td></tr>
+      {isMobile ? (
+        <ActivityMobile rows={rows} loading={loading} onOpen={openDetail} />
+      ) : (
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>User</Th>
+                  <Th>Email</Th>
+                  <Th>Last active</Th>
+                  <Th>Status</Th>
+                  <Th align="right"></Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {loading && rows.length === 0 ? (
+                  <TableEmpty colSpan={5}>Loading…</TableEmpty>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={4} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No users</td></tr>
-                ) : rows.map((u: any, i: number) => (
-                  <tr
-                    key={u.id}
-                    onClick={() => openDetail(u.id)}
-                    style={{
-                      backgroundColor: selected === u.id ? 'var(--tone-warning-bg)' : (i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)'),
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <td style={{ ...s.td, fontWeight: 600 }}>
-                      {u.is_online && <span style={s.dotOnlineSmall} />}
-                      @{u.username || u.full_name || '-'}
-                    </td>
-                    <td style={s.td}>{u.email || '-'}</td>
-                    <td style={s.td}>{timeAgo(u.last_active_at)}</td>
-                    <td style={s.td}>
-                      {u.is_frozen ? <span style={s.frozenBadge}>Frozen</span> :
-                       u.is_online ? <span style={s.onlineBadge}>Online</span> :
-                       <span style={s.offlineBadge}>Offline</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  <TableEmpty colSpan={5}>No users</TableEmpty>
+                ) : rows.map((u: any) => {
+                  const p = presence(u);
+                  return (
+                    <Tr key={u.id} interactive selected={selected === u.id} onClick={() => openDetail(u.id)}>
+                      <Td emphasis="primary">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                          {u.is_online ? <OnlineDot /> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--border-strong)', flex: 'none' }} />}
+                          @{u.username || u.full_name || '—'}
+                        </span>
+                      </Td>
+                      <Td emphasis="secondary">{u.email || '—'}</Td>
+                      <Td emphasis="secondary" mono>{timeAgo(u.last_active_at)}</Td>
+                      <Td><StatusDot status={p.label} tone={p.tone} /></Td>
+                      <Td align="right"><span style={{ color: 'var(--fg-disabled)' }}>›</span></Td>
+                    </Tr>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
 
-          {totalPages > 1 && (
-            <div style={s.pagination}>
-              <button style={{ ...s.pageBtn, opacity: page <= 1 ? 0.4 : 1 }} onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Previous</button>
-              <span style={s.pageInfo}>Page {page} of {totalPages}</span>
-              <button style={{ ...s.pageBtn, opacity: page >= totalPages ? 0.4 : 1 }} onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next</button>
-            </div>
-          )}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 'var(--space-4)' }}>
+          <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Previous</Button>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
+            PAGE {page} / {totalPages}
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next</Button>
         </div>
+      )}
 
-        <div style={s.detailPane}>
-          {!selected ? (
-            <div style={s.emptyDetail}>Select a user to view activity detail.</div>
-          ) : detailLoading ? (
-            <div style={s.emptyDetail}>Loading...</div>
-          ) : !detail?.user ? (
-            <div style={s.emptyDetail}>User not found.</div>
-          ) : (
-            <>
-              <div style={s.detailHeader}>
-                <div>
-                  <div style={s.detailName}>@{detail.user.username || detail.user.full_name}</div>
-                  <div style={s.detailSub}>{detail.user.email}{detail.user.phone ? ' · ' + detail.user.phone : ''}</div>
-                </div>
-                <button
-                  style={{ ...s.terminateBtn, opacity: actionBusy ? 0.5 : 1 }}
-                  onClick={terminate}
-                  disabled={actionBusy}
-                >{actionBusy ? 'Terminating...' : 'Terminate Sessions'}</button>
-              </div>
-
-              <div style={s.sectionLabel}>Sessions</div>
-              {detail.sessions.length === 0 ? <div style={s.muted}>No sessions.</div> : (
-                <div style={s.scrollBox}>
-                  {detail.sessions.map((se: any) => (
-                    <div key={se.id} style={s.sessionCard}>
-                      <div style={s.sessionRow}>
-                        <span style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>{new Date(se.created_at).toLocaleString()}</span>
-                        {se.ended_at
-                          ? <span style={s.endedPill}>Ended {timeAgo(se.ended_at)}</span>
-                          : <span style={s.activePill}>Active</span>}
-                      </div>
-                      <div style={s.sessionMeta}>IP: {se.ip_address || '-'}</div>
-                      <div style={s.sessionMeta}>
-                        {[se.device_model, se.os_version, se.app_version].filter(Boolean).join(' · ') || '-'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={s.sectionLabel}>Recent Withdrawals</div>
-              {detail.withdrawals.length === 0 ? <div style={s.muted}>None.</div> : (
-                <div style={s.scrollBox}>
-                  {detail.withdrawals.map((w: any) => (
-                    <div key={w.id} style={s.actionRow}>
-                      <span style={{ fontWeight: 700 }}>{formatNaira(w.amount)}</span>
-                      <span style={s.muted2}>{w.bank_name} · {w.account_name}</span>
-                      <span style={s.statusTag}>{w.status}</span>
-                      <span style={s.muted2}>{timeAgo(w.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={s.sectionLabel}>Recent Transfers</div>
-              {detail.transfers.length === 0 ? <div style={s.muted}>None.</div> : (
-                <div style={s.scrollBox}>
-                  {detail.transfers.map((t: any) => (
-                    <div key={t.id} style={s.actionRow}>
-                      <span style={{ fontWeight: 700 }}>{formatNaira(t.amount)}</span>
-                      <span style={s.muted2}>{t.type}</span>
-                      <span style={s.statusTag}>{t.status}</span>
-                      <span style={s.muted2}>{timeAgo(t.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={s.sectionLabel}>Recent Transactions</div>
-              {detail.transactions.length === 0 ? <div style={s.muted}>None.</div> : (
-                <div style={s.scrollBox}>
-                  {detail.transactions.map((tx: any) => (
-                    <div key={tx.id} style={s.actionRow}>
-                      <span style={{ fontWeight: 700 }}>{formatNaira(tx.amount)}</span>
-                      <span style={s.muted2}>{tx.type}</span>
-                      <span style={s.statusTag}>{tx.status}</span>
-                      <span style={s.muted2}>{timeAgo(tx.created_at)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+      <SidePanel
+        open={!!selected}
+        onClose={closePanel}
+        title="Activity detail"
+        subtitle={detail?.user ? `@${detail.user.username || detail.user.full_name}` : undefined}
+      >
+        <DetailBody detail={detail} detailLoading={detailLoading} terminate={terminate} actionBusy={actionBusy} err={err} />
+      </SidePanel>
     </div>
   );
 }
-
-const s: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
-  statBlock: { display: 'flex', alignItems: 'center', gap: 8, backgroundColor: 'var(--bg-surface)', padding: '8px 14px', borderRadius: 100, border: '1px solid var(--border-default)' },
-  dotOnline: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'var(--tone-success-fg)', display: 'inline-block' },
-  dotOnlineSmall: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'var(--tone-success-fg)', display: 'inline-block', marginRight: 6 },
-  statLabel: { fontSize: 12, fontWeight: 700, color: 'var(--tone-success-fg)' },
-  errorBar: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 12 },
-  filters: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
-  filterInput: { border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', minWidth: 260 },
-  toggleLabel: { fontSize: 12, fontWeight: 600, color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', cursor: 'pointer' },
-  applyBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  layout: { display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, alignItems: 'start' },
-  listPane: {},
-  detailPane: { backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 10, padding: 18, minHeight: 400 },
-  emptyDetail: { textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 13, padding: 40 },
-  detailHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--border-default)' },
-  detailName: { fontSize: 16, fontWeight: 800, color: 'var(--fg-primary)' },
-  detailSub: { fontSize: 12, color: 'var(--fg-tertiary)', marginTop: 3 },
-  terminateBtn: { backgroundColor: 'var(--tone-danger-fg)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 16px', fontSize: 11, fontWeight: 700, cursor: 'pointer' },
-  sectionLabel: { fontSize: 11, fontWeight: 700, color: 'var(--fg-secondary)', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 8 },
-  scrollBox: { maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 8 },
-  sessionCard: { padding: 10, borderBottom: '1px solid var(--border-subtle)' },
-  sessionRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  sessionMeta: { fontSize: 11, color: 'var(--fg-secondary)', marginTop: 2 },
-  activePill: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  endedPill: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  actionRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderBottom: '1px solid var(--border-subtle)', fontSize: 12 },
-  statusTag: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', padding: '2px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  muted: { fontSize: 12, color: 'var(--fg-tertiary)', padding: '6px 0' },
-  muted2: { fontSize: 11, color: 'var(--fg-tertiary)' },
-  tableWrap: { overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '10px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
-  onlineBadge: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  offlineBadge: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  frozenBadge: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 },
-  pageBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  pageInfo: { fontSize: 12, color: 'var(--fg-tertiary)' },
-};

@@ -54,7 +54,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       suppressHydrationWarning
     >
       <body>
-        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
         <ThemeProvider initialMode={initialMode} initialResolved={initialTheme}>{children}</ThemeProvider>
       </body>
     </html>

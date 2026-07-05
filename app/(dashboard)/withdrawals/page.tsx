@@ -3,10 +3,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Download, AlertTriangle } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Input, Textarea, Tabs, SidePanel, ExportModal,
 } from '../../_ui';
 import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { WithdrawalsMobile } from './WithdrawalsMobile';
 
 type Tab = 'all' | 'pending_review' | 'held' | 'processing' | 'success' | 'failed' | 'refunded';
 
@@ -46,7 +48,43 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'purple'
   }
 }
 
+function StatusDot({ status }: { status: string }) {
+  const tone = statusTone(status);
+  const color =
+    tone === 'success' ? 'var(--tone-success-fg)' :
+    tone === 'warning' ? 'var(--tone-warning-fg)' :
+    tone === 'danger'  ? 'var(--tone-danger-fg)'  :
+    tone === 'purple'  ? 'var(--tone-purple-fg)'  : 'var(--fg-secondary)';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 'var(--text-sm)', fontWeight: 500, color, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', flex: 'none' }} />
+      {(status || '-').replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+function StatCell({ label, value, mono, last }: { label: string; value: string; mono?: boolean; last?: boolean }) {
+  return (
+    <div style={{ padding: '13px 18px', borderRight: last ? undefined : '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--fg-tertiary)' }}>{label}</span>
+      <span style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', fontFamily: mono ? 'var(--font-mono)' : undefined }}>{value}</span>
+    </div>
+  );
+}
+
+function StatStrip({ rows, total }: { rows: any[]; total: number }) {
+  const sum = rows.reduce((a, r) => a + Number(r?.amount || 0), 0);
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', marginBottom: 'var(--space-4)' }}>
+      <StatCell label="In view" value={rows.length.toLocaleString()} />
+      <StatCell label="Amount in view" value={formatNaira(sum)} mono />
+      <StatCell label="Total in queue" value={total.toLocaleString()} last />
+    </div>
+  );
+}
+
 export default function WithdrawalsPage() {
+  const isMobile = useIsMobile();
   const [tab, setTab] = useState<Tab>('pending_review');
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -196,6 +234,8 @@ export default function WithdrawalsPage() {
         }
       />
 
+      <StatStrip rows={rows} total={total} />
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
         <Tabs<Tab> value={tab} onChange={setTab} items={TAB_ITEMS} />
         <Input
@@ -206,6 +246,16 @@ export default function WithdrawalsPage() {
         />
       </div>
 
+      {isMobile ? (
+        <WithdrawalsMobile
+          rows={rows}
+          loading={loading}
+          onOpen={openDetail}
+          onApprove={(id) => { openDetail(id); setShowApprove(true); }}
+          onReject={(id) => { openDetail(id); setShowReject(true); }}
+          canAct={canAct}
+        />
+      ) : (
       <Card>
         <CardBody flush>
           <Table flush>
@@ -227,7 +277,7 @@ export default function WithdrawalsPage() {
               ) : rows.length === 0 ? (
                 <TableEmpty colSpan={8}>No withdrawals</TableEmpty>
               ) : rows.map((w: any) => (
-                <Tr key={w.id}>
+                <Tr key={w.id} interactive onClick={() => openDetail(w.id)}>
                   <Td emphasis="primary">@{w.user?.username || w.user?.full_name || '—'}</Td>
                   <Td align="right" mono emphasis="primary">{formatNaira(w.amount)}</Td>
                   <Td emphasis="secondary">{w.bank_name || '—'}</Td>
@@ -239,9 +289,9 @@ export default function WithdrawalsPage() {
                   </Td>
                   <Td emphasis="muted" mono>{w.gateway_reference || '—'}</Td>
                   <Td emphasis="secondary">{new Date(w.created_at).toLocaleString()}</Td>
-                  <Td><Badge tone={statusTone(w.status)}>{(w.status || '-').replace(/_/g, ' ')}</Badge></Td>
+                  <Td><StatusDot status={w.status} /></Td>
                   <Td align="right">
-                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
                       {canAct(w.status) && (
                         <>
                           <Button variant="success" size="sm" onClick={() => { openDetail(w.id); setShowApprove(true); }}>
@@ -261,6 +311,7 @@ export default function WithdrawalsPage() {
           </Table>
         </CardBody>
       </Card>
+      )}
 
       {total > 0 && (
         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', marginTop: 12, textAlign: 'right' }}>
@@ -302,7 +353,7 @@ export default function WithdrawalsPage() {
               <DetailRow label="Account number" value={detail.account_number} />
               <DetailRow label="Gateway" value={detail.gateway || '—'} />
               <DetailRow label="Gateway ref" value={detail.gateway_reference || '—'} />
-              <DetailRow label="Status" value={<Badge tone={statusTone(detail.status)}>{(detail.status || '-').replace(/_/g, ' ')}</Badge>} />
+              <DetailRow label="Status" value={<StatusDot status={detail.status} />} />
               {detail.failure_reason && <DetailRow label="Reason" value={detail.failure_reason} />}
               <DetailRow label="Requested" value={new Date(detail.created_at).toLocaleString()} />
             </div>

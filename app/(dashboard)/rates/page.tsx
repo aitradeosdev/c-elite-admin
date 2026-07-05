@@ -1,6 +1,11 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import {
+  PageHeader, Card, CardBody,
+  Modal, FieldShell, Input, Toggle, Button,
+} from '../../_ui';
 
 interface Denomination {
   id: string;
@@ -135,162 +140,169 @@ export default function RatesPage() {
 
   const hasChanges = Object.keys(changes).length > 0;
 
-  if (loading) return <p style={styles.emptyText}>Loading...</p>;
+  const saveButton = (
+    <Button variant="primary" size="sm" onClick={handleSaveAll} disabled={saving} loading={saving}>
+      {saving ? 'Saving…' : `Save All Changes${hasChanges ? ` (${Object.keys(changes).length})` : ''}`}
+    </Button>
+  );
 
   return (
-    <div style={styles.page}>
-      {cards.length === 0 && <p style={styles.emptyText}>No active cards found. Add cards first.</p>}
+    <div>
+      <PageHeader
+        title="Rates"
+        subtitle="Manage gift-card buy rates by card, country, type and denomination."
+        actions={saveButton}
+      />
 
-      {cards.map((card) => (
-        <div key={card.id} style={styles.cardBlock}>
-          <div style={styles.level1Row} onClick={() => setOpenCards(toggle(openCards, card.id))}>
-            <div style={styles.level1Left}>
-              {card.logo_url && <img src={card.logo_url} alt={card.name} style={styles.logo} />}
-              <span style={styles.level1Name}>{card.name}</span>
-              <span style={styles.activeRates}>{card.activeRates} active rates</span>
-            </div>
-            <span style={{ ...styles.arrow, transform: openCards.has(card.id) ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-          </div>
-
-          {openCards.has(card.id) && card.countries.map((country) => (
-            <div key={country.id} style={styles.level2Block}>
-              <div style={styles.level2Row} onClick={() => setOpenCountries(toggle(openCountries, country.id))}>
-                <div style={styles.level2Left}>
-                  <span style={styles.level2Name}>{country.country_name}</span>
-                  <span style={styles.currencyBadge}>{country.currency_symbol}</span>
-                </div>
-                <span style={{ ...styles.arrow, transform: openCountries.has(country.id) ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-              </div>
-
-              {openCountries.has(country.id) && country.card_types.map((type) => (
-                <div key={type.id} style={styles.level3Block}>
-                  <div style={styles.level3Row} onClick={() => setOpenTypes(toggle(openTypes, type.id))}>
-                    <span style={styles.level3Name}>{type.name}</span>
-                    <span style={{ ...styles.arrow, transform: openTypes.has(type.id) ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+      {loading ? (
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+          </CardBody>
+        </Card>
+      ) : cards.length === 0 ? (
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>No active cards found. Add cards first.</p>
+          </CardBody>
+        </Card>
+      ) : (
+        <Card>
+          <CardBody flush>
+            {cards.map((card) => {
+              const cardOpen = openCards.has(card.id);
+              return (
+                <div key={card.id} style={styles.cardBlock}>
+                  <div style={styles.level1Row} onClick={() => setOpenCards(toggle(openCards, card.id))}>
+                    <div style={styles.level1Left}>
+                      {card.logo_url && <img src={card.logo_url} alt={card.name} style={styles.logo} />}
+                      <span style={styles.level1Name}>{card.name}</span>
+                      <span style={styles.metaBadge}>{card.activeRates} active rates</span>
+                    </div>
+                    <ChevronDown size={15} style={{ ...styles.chevron, transform: cardOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
                   </div>
 
-                  {openTypes.has(type.id) && (
-                    <div style={styles.level4Block}>
-                      {type.denominations.map((denom) => (
-                        <div key={denom.id} style={styles.level4Row}>
-                          <span style={styles.rangeLabel}>{denom.range_label}</span>
-                          <input
-                            style={styles.rateInput}
-                            type="number"
-                            value={getRate(denom)}
-                            onChange={(e) => handleRateChange(denom, e.target.value)}
-                          />
-                          <div
-                            style={{ ...styles.toggle, backgroundColor: getActive(denom) ? 'var(--accent-base)' : 'var(--bg-muted)' }}
-                            onClick={() => handleToggleChange(denom)}
-                          >
-                            <div style={{ ...styles.toggleThumb, left: getActive(denom) ? 22 : 2 }} />
+                  {cardOpen && card.countries.map((country) => {
+                    const countryOpen = openCountries.has(country.id);
+                    return (
+                      <div key={country.id} style={styles.level2Block}>
+                        <div style={styles.level2Row} onClick={() => setOpenCountries(toggle(openCountries, country.id))}>
+                          <div style={styles.level2Left}>
+                            <span style={styles.level2Name}>{country.country_name}</span>
+                            <span style={styles.currencyBadge}>{country.currency_symbol}</span>
                           </div>
+                          <ChevronDown size={14} style={{ ...styles.chevron, transform: countryOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
                         </div>
-                      ))}
-                      <button style={styles.addRangeBtn} onClick={() => setAddDenomTypeId(type.id)}>+ Add Range</button>
-                    </div>
-                  )}
+
+                        {countryOpen && country.card_types.map((type) => {
+                          const typeOpen = openTypes.has(type.id);
+                          return (
+                            <div key={type.id} style={styles.level3Block}>
+                              <div style={styles.level3Row} onClick={() => setOpenTypes(toggle(openTypes, type.id))}>
+                                <span style={styles.level3Name}>{type.name}</span>
+                                <ChevronDown size={13} style={{ ...styles.chevron, transform: typeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                              </div>
+
+                              {typeOpen && (
+                                <div style={styles.level4Block}>
+                                  {type.denominations.map((denom) => (
+                                    <div key={denom.id} style={styles.level4Row}>
+                                      <span style={styles.rangeLabel}>{denom.range_label}</span>
+                                      <Input
+                                        type="number"
+                                        mono
+                                        style={{ width: 130 }}
+                                        value={getRate(denom)}
+                                        onChange={(e) => handleRateChange(denom, e.target.value)}
+                                      />
+                                      <Toggle checked={getActive(denom)} onChange={() => handleToggleChange(denom)} />
+                                    </div>
+                                  ))}
+                                  <div style={{ paddingTop: 6 }}>
+                                    <Button variant="ghost" size="sm" onClick={() => setAddDenomTypeId(type.id)}>+ Add Range</Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      ))}
+              );
+            })}
+          </CardBody>
+        </Card>
+      )}
 
-      <button
-        style={{ ...styles.saveAllBtn, opacity: saving ? 0.7 : 1 }}
-        onClick={handleSaveAll}
-        disabled={saving}
+      <Modal
+        open={addDenomTypeId !== null}
+        onClose={() => setAddDenomTypeId(null)}
+        title="Add Denomination Range"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setAddDenomTypeId(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleAddDenom}
+              loading={addingDenom}
+              disabled={!rangeLabel || !minValue || !maxValue || !rateNaira || addingDenom}
+            >
+              {addingDenom ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
       >
-        {saving ? 'Saving...' : `Save All Changes${hasChanges ? ` (${Object.keys(changes).length})` : ''}`}
-      </button>
-
-      {toast && <div style={styles.toast}>{toast}</div>}
-
-      {addDenomTypeId && (
-        <>
-          <div style={styles.modalOverlay} onClick={() => setAddDenomTypeId(null)} />
-          <div style={styles.modal}>
-            <p style={styles.modalTitle}>Add Denomination Range</p>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>RANGE LABEL</label>
-              <input style={styles.input} placeholder="e.g. $25–$99" value={rangeLabel} onChange={(e) => setRangeLabel(e.target.value)} />
-            </div>
-            <div style={styles.fieldRow}>
-              <div style={{ flex: 1 }}>
-                <label style={styles.fieldLabel}>MIN VALUE</label>
-                <input style={styles.input} type="number" placeholder="25" value={minValue} onChange={(e) => setMinValue(e.target.value)} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={styles.fieldLabel}>MAX VALUE</label>
-                <input style={styles.input} type="number" placeholder="99" value={maxValue} onChange={(e) => setMaxValue(e.target.value)} />
-              </div>
-            </div>
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>RATE IN NAIRA (per unit)</label>
-              <input style={styles.input} type="number" placeholder="1500" value={rateNaira} onChange={(e) => setRateNaira(e.target.value)} />
-            </div>
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>ACTIVE</label>
-              <div style={{ ...styles.toggle, backgroundColor: denomActive ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setDenomActive(!denomActive)}>
-                <div style={{ ...styles.toggleThumb, left: denomActive ? 22 : 2 }} />
-              </div>
-            </div>
-
-            <div style={styles.modalActions}>
-              <button style={styles.cancelBtn} onClick={() => setAddDenomTypeId(null)}>Cancel</button>
-              <button
-                style={{ ...styles.saveBtn, opacity: (!rangeLabel || !minValue || !maxValue || !rateNaira) ? 0.5 : 1 }}
-                onClick={handleAddDenom}
-                disabled={!rangeLabel || !minValue || !maxValue || !rateNaira || addingDenom}
-              >
-                {addingDenom ? 'Saving...' : 'Save'}
-              </button>
-            </div>
+        <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+          <FieldShell label="Range Label">
+            <Input placeholder="e.g. $25–$99" value={rangeLabel} onChange={(e) => setRangeLabel(e.target.value)} />
+          </FieldShell>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--space-4)' }}>
+            <FieldShell label="Min Value">
+              <Input type="number" mono placeholder="25" value={minValue} onChange={(e) => setMinValue(e.target.value)} />
+            </FieldShell>
+            <FieldShell label="Max Value">
+              <Input type="number" mono placeholder="99" value={maxValue} onChange={(e) => setMaxValue(e.target.value)} />
+            </FieldShell>
           </div>
-        </>
+          <FieldShell label="Rate in Naira (per unit)">
+            <Input type="number" mono placeholder="1500" value={rateNaira} onChange={(e) => setRateNaira(e.target.value)} />
+          </FieldShell>
+          <FieldShell label="Active">
+            <Toggle checked={denomActive} onChange={() => setDenomActive(!denomActive)} />
+          </FieldShell>
+        </div>
+      </Modal>
+
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, background: 'var(--fg-primary)', color: 'var(--bg-base)', padding: '10px 18px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', fontWeight: 600, zIndex: 51 }}>
+          {toast}
+        </div>
       )}
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { paddingBottom: 80 },
-  emptyText: { fontSize: 12, color: 'var(--fg-tertiary)' },
-  cardBlock: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, marginBottom: 8, overflow: 'hidden' },
+  cardBlock: { borderBottom: '1px solid var(--border-subtle)' },
   level1Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', cursor: 'pointer' },
   level1Left: { display: 'flex', alignItems: 'center', gap: 10 },
   logo: { width: 32, height: 32, objectFit: 'contain', borderRadius: 4 },
-  level1Name: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)' },
-  activeRates: { fontSize: 12, color: 'var(--fg-tertiary)' },
-  arrow: { fontSize: 10, color: 'var(--fg-tertiary)', transition: 'transform 0.2s' },
+  level1Name: { fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' },
+  metaBadge: { fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.04em', color: 'var(--fg-tertiary)' },
+  chevron: { color: 'var(--fg-tertiary)', transition: 'transform 0.2s', flexShrink: 0 },
   level2Block: { borderTop: '1px solid var(--border-subtle)' },
-  level2Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px 10px 32px', cursor: 'pointer', backgroundColor: 'var(--bg-subtle)' },
+  level2Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px 10px 32px', cursor: 'pointer', background: 'var(--bg-subtle)' },
   level2Left: { display: 'flex', alignItems: 'center', gap: 8 },
-  level2Name: { fontSize: 13, fontWeight: 600, color: 'var(--fg-secondary)' },
-  currencyBadge: { backgroundColor: 'var(--bg-subtle)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--border-default)', borderRadius: 6, padding: '2px 6px', fontSize: 11, color: 'var(--fg-secondary)' },
+  level2Name: { fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)' },
+  currencyBadge: { border: '1px solid var(--border-default)', borderRadius: 6, padding: '2px 6px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-secondary)' },
   level3Block: { borderTop: '1px solid var(--border-subtle)' },
-  level3Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px 9px 48px', cursor: 'pointer', backgroundColor: 'var(--bg-surface)' },
-  level3Name: { fontSize: 13, fontWeight: 600, color: 'var(--fg-secondary)' },
-  level4Block: { padding: '4px 16px 8px 64px', borderTop: '1px solid var(--border-subtle)' },
-  level4Row: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-default)' },
-  rangeLabel: { fontSize: 13, color: 'var(--fg-secondary)', minWidth: 120 },
-  rateInput: { width: 120, border: '1.5px solid var(--border-default)', borderRadius: 6, padding: '6px 10px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none' },
-  toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  addRangeBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--tone-success-fg)', padding: '6px 0', marginTop: 4 },
-  saveAllBtn: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' },
-  toast: { position: 'fixed', bottom: 80, right: 24, backgroundColor: 'var(--bg-inverse)', color: 'var(--fg-inverse)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
-  modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 400, zIndex: 100 },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
-  fieldGroup: { marginBottom: 14 },
-  fieldRow: { display: 'flex', gap: 12, marginBottom: 14 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
-  modalActions: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 },
-  cancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
+  level3Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px 9px 48px', cursor: 'pointer' },
+  level3Name: { fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)' },
+  level4Block: { padding: '4px 16px 10px 64px', borderTop: '1px solid var(--border-subtle)' },
+  level4Row: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' },
+  rangeLabel: { fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', minWidth: 120 },
 };

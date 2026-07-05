@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Plus } from 'lucide-react';
+import {
+  PageHeader, Card as UICard, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, FieldShell, Toggle, Modal, SidePanel,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { StatusDot, StatStrip } from '../_shared/statusUi';
 
 const ISO_COUNTRIES = [
   { code: 'AF', name: 'Afghanistan', symbol: '؋', currency: 'AFN' },
@@ -49,7 +56,7 @@ const ISO_COUNTRIES = [
   { code: 'CG', name: 'Congo', symbol: 'FCF', currency: 'XAF' },
   { code: 'CD', name: 'Congo (DRC)', symbol: 'FC', currency: 'CDF' },
   { code: 'CR', name: 'Costa Rica', symbol: '₡', currency: 'CRC' },
-  { code: 'CI', name: 'Côte d\u2019Ivoire', symbol: 'CFA', currency: 'XOF' },
+  { code: 'CI', name: 'Côte d’Ivoire', symbol: 'CFA', currency: 'XOF' },
   { code: 'HR', name: 'Croatia', symbol: '€', currency: 'EUR' },
   { code: 'CU', name: 'Cuba', symbol: '$', currency: 'CUP' },
   { code: 'CY', name: 'Cyprus', symbol: '€', currency: 'EUR' },
@@ -244,7 +251,79 @@ function codeToFlag(code: string): string {
   return code.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0)));
 }
 
+function formatCountries(countries: Country[]) {
+  if (!countries || countries.length === 0) return '-';
+  const names = countries.map((c) => c.country_name);
+  if (names.length <= 2) return names.join(', ');
+  return names.slice(0, 2).join(', ') + '...';
+}
+
+function CardStatus({ active }: { active: boolean }) {
+  return <StatusDot status={active ? 'Active' : 'Inactive'} tone={active ? 'success' : 'neutral'} />;
+}
+
+function CardLogo({ card, size = 32 }: { card: Card; size?: number }) {
+  return card.logo_url
+    ? <img src={card.logo_url} alt={card.name} style={{ width: size, height: size, objectFit: 'contain', borderRadius: 4 }} />
+    : <div style={{ width: size, height: size, background: 'var(--bg-subtle)', borderRadius: 4, flex: 'none' }} />;
+}
+
+function CardsMobile({
+  cards, loading, onEdit, onCountries, onToggle,
+}: {
+  cards: Card[];
+  loading: boolean;
+  onEdit: (c: Card) => void;
+  onCountries: (c: Card) => void;
+  onToggle: (c: Card) => void;
+}) {
+  if (loading && cards.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 96, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (cards.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No card brands yet
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {cards.map((card) => (
+        <div key={card.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+              <CardLogo card={card} size={36} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{card.name}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>
+                  {card.countries.length} {card.countries.length === 1 ? 'country' : 'countries'} · sort {card.sort_order}
+                </div>
+              </div>
+            </div>
+            <CardStatus active={card.is_active} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <Button variant="ghost" size="sm" onClick={() => onEdit(card)}>Edit</Button>
+            <Button variant="ghost" size="sm" onClick={() => onCountries(card)}>Countries</Button>
+            <Button variant="secondary" size="sm" onClick={() => onToggle(card)}>
+              {card.is_active ? 'Deactivate' : 'Activate'}
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function CardsPage() {
+  const isMobile = useIsMobile();
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -395,13 +474,6 @@ export default function CardsPage() {
     fetchCards(true);
   };
 
-  const formatCountries = (countries: Country[]) => {
-    if (!countries || countries.length === 0) return '-';
-    const names = countries.map((c) => c.country_name);
-    if (names.length <= 2) return names.join(', ');
-    return names.slice(0, 2).join(', ') + '...';
-  };
-
   useEffect(() => {
     if (countriesCard) {
       const updated = cards.find((c) => c.id === countriesCard.id);
@@ -409,160 +481,164 @@ export default function CardsPage() {
     }
   }, [cards]);
 
+  const activeCount = cards.filter((c) => c.is_active).length;
+  const filteredCountries = ISO_COUNTRIES.filter((c) =>
+    c.name.toLowerCase().includes(countryQuery.toLowerCase()) ||
+    c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
+    c.currency.toLowerCase().includes(countryQuery.toLowerCase())
+  );
+
   return (
-    <div style={styles.page}>
-      <div style={styles.header}>
-        <span style={styles.title}>Card & Country Management</span>
-        <button style={styles.createBtn} onClick={openCreate}>+ Add Card Brand</button>
-      </div>
+    <div>
+      <PageHeader
+        title="Card & Country Management"
+        subtitle="Configure gift-card brands and the countries each one is available in."
+        actions={
+          <Button variant="primary" size="sm" leftIcon={<Plus size={14} />} onClick={openCreate}>
+            Add Card Brand
+          </Button>
+        }
+      />
 
-      <div style={styles.tableWrapper}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              {['Logo', 'Card Name', 'Countries', 'Status', 'Sort Order', 'Actions'].map((col) => (
-                <th key={col} style={styles.th}>{col}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>Loading...</td></tr>
-            ) : cards.length === 0 ? (
-              <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No card brands yet</td></tr>
-            ) : cards.map((card, i) => (
-              <tr key={card.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
-                <td style={styles.td}>
-                  {card.logo_url
-                    ? <img src={card.logo_url} alt={card.name} style={styles.logoThumb} />
-                    : <div style={styles.logoPlaceholder} />
-                  }
-                </td>
-                <td style={{ ...styles.td, fontWeight: 600 }}>{card.name}</td>
-                <td style={styles.td}>{card.countries.length} ({formatCountries(card.countries)})</td>
-                <td style={styles.td}>
-                  <span style={card.is_active ? styles.badgeActive : styles.badgeInactive}>
-                    {card.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td style={styles.td}>{card.sort_order}</td>
-                <td style={styles.td}>
-                  <div style={styles.actions}>
-                    <button style={styles.editBtn} onClick={() => openEdit(card)}>Edit</button>
-                    <button style={styles.manageBtn} onClick={() => openCountries(card)}>Countries</button>
-                    <button style={styles.toggleBtn} onClick={() => handleToggleCard(card)}>
-                      {card.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <span style={styles.dragHandle}>⠿</span>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <StatStrip items={[
+        { label: 'Total brands', value: cards.length.toLocaleString() },
+        { label: 'Active', value: activeCount.toLocaleString() },
+      ]} />
 
-      {showCardModal && (
-        <>
-          <div style={styles.modalOverlay} onClick={() => setShowCardModal(false)} />
-          <div style={styles.modal}>
-            <p style={styles.modalTitle}>{editCard ? 'Edit Card Brand' : 'Add Card Brand'}</p>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>CARD NAME</label>
-              <input style={styles.input} value={cardName} onChange={(e) => setCardName(e.target.value)} />
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>LOGO</label>
-              <div
-                style={styles.uploadBox}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {logoPreview ? (
-                  <img src={logoPreview} alt="Logo preview" style={styles.logoPreview} />
-                ) : (
-                  <>
-                    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="17 8 12 3 7 8" />
-                      <line x1={12} y1={3} x2={12} y2={15} />
-                    </svg>
-                    <span style={styles.uploadText}>{uploading ? 'Uploading...' : 'Upload Logo'}</span>
-                  </>
-                )}
-              </div>
-              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} />
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>ACTIVE</label>
-              <div style={{ ...styles.toggle, backgroundColor: cardActive ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setCardActive(!cardActive)}>
-                <div style={{ ...styles.toggleThumb, left: cardActive ? 22 : 2 }} />
-              </div>
-            </div>
-
-            {cardError && <p style={styles.formError}>{cardError}</p>}
-
-            <div style={styles.modalActions}>
-              <button style={styles.cancelBtn} onClick={() => setShowCardModal(false)}>Cancel</button>
-              <button style={styles.saveBtn} onClick={handleSaveCard} disabled={saving}>
-                {saving ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </>
+      {isMobile ? (
+        <CardsMobile
+          cards={cards}
+          loading={loading}
+          onEdit={openEdit}
+          onCountries={openCountries}
+          onToggle={handleToggleCard}
+        />
+      ) : (
+        <UICard>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Logo</Th>
+                  <Th>Card Name</Th>
+                  <Th>Countries</Th>
+                  <Th>Status</Th>
+                  <Th align="right">Sort Order</Th>
+                  <Th align="right">Actions</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {loading ? (
+                  <TableEmpty colSpan={6}>Loading…</TableEmpty>
+                ) : cards.length === 0 ? (
+                  <TableEmpty colSpan={6}>No card brands yet</TableEmpty>
+                ) : cards.map((card) => (
+                  <Tr key={card.id}>
+                    <Td><CardLogo card={card} /></Td>
+                    <Td emphasis="primary">{card.name}</Td>
+                    <Td emphasis="secondary">{card.countries.length} ({formatCountries(card.countries)})</Td>
+                    <Td><CardStatus active={card.is_active} /></Td>
+                    <Td align="right" mono>{card.sort_order}</Td>
+                    <Td align="right">
+                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(card)}>Edit</Button>
+                        <Button variant="ghost" size="sm" onClick={() => openCountries(card)}>Countries</Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleToggleCard(card)}>
+                          {card.is_active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                        <span style={{ fontSize: 16, color: 'var(--fg-tertiary)', cursor: 'grab', userSelect: 'none' }}>⠿</span>
+                      </div>
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
+          </CardBody>
+        </UICard>
       )}
 
-      {countriesCard && (
-        <>
-          <div style={styles.panelOverlay} onClick={() => setCountriesCard(null)} />
-          <div style={styles.panel}>
-            <p style={styles.panelTitle}>{countriesCard.name} — Countries</p>
+      <Modal
+        open={showCardModal}
+        onClose={() => setShowCardModal(false)}
+        title={editCard ? 'Edit Card Brand' : 'Add Card Brand'}
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setShowCardModal(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={handleSaveCard} loading={saving}>Save</Button>
+          </>
+        }
+      >
+        <FieldShell label="Card name">
+          <Input value={cardName} onChange={(e) => setCardName(e.target.value)} />
+        </FieldShell>
 
-            <div style={styles.countriesList}>
+        <FieldShell label="Logo">
+          <div
+            style={{ width: 100, height: 100, border: '2px dashed var(--border-default)', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: 6 }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {logoPreview ? (
+              <img src={logoPreview} alt="Logo preview" style={{ width: 96, height: 96, objectFit: 'contain', borderRadius: 6 }} />
+            ) : (
+              <>
+                <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1={12} y1={3} x2={12} y2={15} />
+                </svg>
+                <span style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>{uploading ? 'Uploading...' : 'Upload Logo'}</span>
+              </>
+            )}
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} />
+        </FieldShell>
+
+        <FieldShell label="Active">
+          <Toggle checked={cardActive} onChange={setCardActive} />
+        </FieldShell>
+
+        {cardError && <p style={{ fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0 0' }}>{cardError}</p>}
+      </Modal>
+
+      <SidePanel
+        open={!!countriesCard}
+        onClose={() => setCountriesCard(null)}
+        title={countriesCard ? `${countriesCard.name} — Countries` : 'Countries'}
+      >
+        {countriesCard && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
               {countriesCard.countries.length === 0 && (
                 <p style={{ fontSize: 12, color: 'var(--fg-tertiary)' }}>No countries added yet.</p>
               )}
               {countriesCard.countries.map((country) => (
-                <div key={country.id} style={styles.countryRow}>
+                <div key={country.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                   <div style={{ flex: 1 }}>
-                    <span style={styles.countryName}>{codeToFlag(country.country_code)}  {country.country_name}</span>
-                    <span style={styles.currencySymbol}> ({country.currency_symbol})</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>{codeToFlag(country.country_code)}  {country.country_name}</span>
+                    <span style={{ fontSize: 12, color: 'var(--fg-tertiary)' }}> ({country.currency_symbol})</span>
                   </div>
-                  <div
-                    style={{ ...styles.toggle, backgroundColor: country.is_active ? 'var(--accent-base)' : 'var(--bg-muted)' }}
-                    onClick={() => handleToggleCountry(country)}
-                  >
-                    <div style={{ ...styles.toggleThumb, left: country.is_active ? 22 : 2 }} />
-                  </div>
-                  <button style={styles.removeBtn} onClick={() => handleRemoveCountry(country)}>Remove</button>
+                  <Toggle checked={country.is_active} onChange={() => handleToggleCountry(country)} />
+                  <Button variant="dangerSubtle" size="sm" onClick={() => handleRemoveCountry(country)}>Remove</Button>
                 </div>
               ))}
             </div>
 
-            <p style={{ ...styles.fieldLabel, marginTop: 16 }}>+ ADD COUNTRY</p>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--fg-tertiary)', margin: '16px 0 10px' }}>+ Add Country</div>
 
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>COUNTRY</label>
+            <FieldShell label="Country">
               <div ref={countryBoxRef} style={{ position: 'relative' }}>
-                <input
-                  style={styles.input}
+                <Input
                   placeholder="Search country"
                   value={countryOpen ? countryQuery : (newCountryCode ? `${codeToFlag(newCountryCode)}  ${ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || ''}` : '')}
                   onFocus={() => { setCountryOpen(true); setCountryQuery(''); }}
                   onChange={(e) => { setCountryQuery(e.target.value); setCountryOpen(true); }}
                 />
                 {countryOpen && (
-                  <div style={styles.dropdown}>
-                    {ISO_COUNTRIES.filter((c) =>
-                      c.name.toLowerCase().includes(countryQuery.toLowerCase()) ||
-                      c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
-                      c.currency.toLowerCase().includes(countryQuery.toLowerCase())
-                    ).map((c) => (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                    {filteredCountries.map((c) => (
                       <div
                         key={c.code}
-                        style={styles.dropdownItem}
+                        style={{ padding: '10px 12px', fontSize: 13, color: 'var(--fg-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                         onMouseDown={(e) => {
                           e.preventDefault();
                           setNewCountryCode(c.code);
@@ -576,90 +652,39 @@ export default function CardsPage() {
                         <span style={{ color: 'var(--fg-tertiary)', fontSize: 11, marginLeft: 6 }}>{c.currency} {c.symbol}</span>
                       </div>
                     ))}
-                    {ISO_COUNTRIES.filter((c) =>
-                      c.name.toLowerCase().includes(countryQuery.toLowerCase()) ||
-                      c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
-                      c.currency.toLowerCase().includes(countryQuery.toLowerCase())
-                    ).length === 0 && (
+                    {filteredCountries.length === 0 && (
                       <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--fg-tertiary)' }}>No matches</div>
                     )}
                   </div>
                 )}
               </div>
-            </div>
+            </FieldShell>
 
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>CURRENCY SYMBOL</label>
-              <input style={styles.input} maxLength={5} placeholder="e.g. $" value={newCurrencySymbol} onChange={(e) => setNewCurrencySymbol(e.target.value)} />
-            </div>
+            <FieldShell label="Currency symbol">
+              <Input maxLength={5} placeholder="e.g. $" value={newCurrencySymbol} onChange={(e) => setNewCurrencySymbol(e.target.value)} />
+            </FieldShell>
 
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>CURRENCY NAME</label>
-              <input style={styles.input} placeholder="e.g. USD" value={newCurrencyName} onChange={(e) => setNewCurrencyName(e.target.value)} />
-            </div>
+            <FieldShell label="Currency name">
+              <Input placeholder="e.g. USD" value={newCurrencyName} onChange={(e) => setNewCurrencyName(e.target.value)} />
+            </FieldShell>
 
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>ACTIVE</label>
-              <div style={{ ...styles.toggle, backgroundColor: newCountryActive ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => setNewCountryActive(!newCountryActive)}>
-                <div style={{ ...styles.toggleThumb, left: newCountryActive ? 22 : 2 }} />
-              </div>
-            </div>
+            <FieldShell label="Active">
+              <Toggle checked={newCountryActive} onChange={setNewCountryActive} />
+            </FieldShell>
 
-            <button
-              style={{ ...styles.saveBtn, width: '100%', marginTop: 8, opacity: (!newCountryCode || !newCurrencySymbol || !newCurrencyName) ? 0.5 : 1 }}
+            <Button
+              variant="primary"
+              size="sm"
+              style={{ width: '100%', marginTop: 8 }}
               onClick={handleAddCountry}
+              loading={addingCountry}
               disabled={!newCountryCode || !newCurrencySymbol || !newCurrencyName || addingCountry}
             >
-              {addingCountry ? 'Adding...' : 'Add Country'}
-            </button>
-          </div>
-        </>
-      )}
+              Add Country
+            </Button>
+          </>
+        )}
+      </SidePanel>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { position: 'relative' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
-  createBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  tableWrapper: { overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-default)' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '10px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
-  logoThumb: { width: 32, height: 32, objectFit: 'contain', borderRadius: 4 },
-  logoPlaceholder: { width: 32, height: 32, backgroundColor: 'var(--bg-subtle)', borderRadius: 4 },
-  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  badgeInactive: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600 },
-  actions: { display: 'flex', gap: 6, alignItems: 'center' },
-  editBtn: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  manageBtn: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  toggleBtn: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-  dragHandle: { fontSize: 16, color: 'var(--fg-tertiary)', cursor: 'grab', userSelect: 'none' },
-  modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 49 },
-  modal: { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', backgroundColor: 'var(--bg-surface)', borderRadius: 12, padding: 24, width: 480, zIndex: 50, maxHeight: '90vh', overflowY: 'auto' },
-  modalTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 20px' },
-  fieldGroup: { marginBottom: 14 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
-  uploadBox: { width: 100, height: 100, border: '2px dashed var(--border-default)', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: 6 },
-  uploadText: { fontSize: 11, color: 'var(--fg-tertiary)' },
-  logoPreview: { width: 96, height: 96, objectFit: 'contain', borderRadius: 6 },
-  toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  formError: { fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0' },
-  modalActions: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 },
-  cancelBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  panelOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.2)', zIndex: 49 },
-  panel: { position: 'fixed', top: 0, right: 0, bottom: 0, width: 440, backgroundColor: 'var(--bg-surface)', borderLeft: '1px solid var(--border-default)', padding: 24, zIndex: 50, overflowY: 'auto' },
-  panelTitle: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
-  countriesList: { display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 },
-  countryRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' },
-  countryName: { fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' },
-  currencySymbol: { fontSize: 12, color: 'var(--fg-tertiary)' },
-  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' },
-  dropdownItem: { padding: '10px 12px', fontSize: 13, color: 'var(--fg-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  removeBtn: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-};

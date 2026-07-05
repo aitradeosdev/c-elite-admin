@@ -6,6 +6,8 @@ import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
   Button, Select, Modal,
 } from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { StatusDot, StatStrip } from '../_shared/statusUi';
 
 export type RangeKey = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month';
 
@@ -153,6 +155,7 @@ function entityLabel(entity: string | null): string {
 }
 
 export default function ActivityPage() {
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [admins, setAdmins] = useState<AdminRow[]>([]);
   const [filter, setFilter] = useState<string>('all');
@@ -261,36 +264,42 @@ export default function ActivityPage() {
       <PageHeader
         title="Admin Activity"
         subtitle="Audit log of every admin action across the platform."
+        actions={
+          <>
+            <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
+              Export
+            </Button>
+            <Button variant="secondary" size="sm" onClick={load}>Refresh</Button>
+          </>
+        }
       />
 
-      <Card>
-        <CardBody tight style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <div style={{ minWidth: 260 }}>
-            <Select value={filter} onChange={(e) => setFilter((e.target as HTMLSelectElement).value)}>
-              <option value="all">All admins</option>
-              {admins.map((a) => (
-                <option key={a.id} value={a.id}>@{a.username || 'unknown'}{a.deleted_at ? ' (deleted admin)' : ''}</option>
-              ))}
-            </Select>
-          </div>
-          <div style={{ flex: 1 }} />
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<Download size={14} />}
-            onClick={() => setExportOpen(true)}
-          >
-            Export
-          </Button>
-          <Button variant="secondary" size="sm" onClick={load}>Refresh</Button>
-        </CardBody>
-      </Card>
+      <StatStrip items={[
+        { label: 'Actions in view', value: rows.length.toLocaleString() },
+        { label: 'Days', value: grouped.length.toLocaleString() },
+      ]} />
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <Select value={filter} onChange={(e) => setFilter((e.target as HTMLSelectElement).value)} style={{ minWidth: 260 }}>
+          <option value="all">All admins</option>
+          {admins.map((a) => (
+            <option key={a.id} value={a.id}>@{a.username || 'unknown'}{a.deleted_at ? ' (deleted admin)' : ''}</option>
+          ))}
+        </Select>
+      </div>
 
       {!!err && (
-        <div style={{ marginTop: 16, color: 'var(--tone-danger-fg)', fontSize: 13, fontWeight: 600 }}>{err}</div>
+        <div style={{ marginBottom: 'var(--space-4)', color: 'var(--tone-danger-fg)', fontSize: 13, fontWeight: 600 }}>{err}</div>
       )}
 
-      <div style={{ marginTop: 'var(--space-4)' }}>
+      {isMobile ? (
+        <ActivityMobile
+          grouped={grouped}
+          loading={loading}
+          onOpen={setDetail}
+          deletedIds={deletedIds}
+        />
+      ) : (
         <Card>
           <CardBody flush>
             <Table flush>
@@ -322,7 +331,7 @@ export default function ActivityPage() {
             </Table>
           </CardBody>
         </Card>
-      </div>
+      )}
 
       <Modal
         open={!!detail}
@@ -333,7 +342,7 @@ export default function ActivityPage() {
         {detail && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Badge tone={actionTone(detail.action)}>{actionLabel(detail.action)}</Badge>
+              <StatusDot status={actionLabel(detail.action)} tone={actionTone(detail.action)} />
               {detail.target_label && (
                 <span style={{ color: 'var(--fg-primary)', fontWeight: 700, fontSize: 14 }}>· {detail.target_label}</span>
               )}
@@ -536,7 +545,7 @@ function ActivitySection({
             {r.admin_is_super && <Badge tone="warning" size="sm" style={{ marginLeft: 6 }}>SUPER</Badge>}
           </Td>
           <Td>
-            <Badge tone={actionTone(r.action)}>{actionLabel(r.action)}</Badge>
+            <StatusDot status={actionLabel(r.action)} tone={actionTone(r.action)} />
           </Td>
           <Td emphasis="secondary">
             {r.target_label || (r.entity ? entityLabel(r.entity) : '—')}
@@ -549,6 +558,69 @@ function ActivitySection({
         </Tr>
       ))}
     </>
+  );
+}
+
+function ActivityMobile({
+  grouped, loading, onOpen, deletedIds,
+}: {
+  grouped: Array<{ key: string; label: string; items: ActivityRow[] }>;
+  loading: boolean;
+  onOpen: (r: ActivityRow) => void;
+  deletedIds: Set<string>;
+}) {
+  if (loading && grouped.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 84, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (grouped.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No activity in this window.
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {grouped.map((g) => (
+        <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.11em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--fg-secondary)' }}>{g.label}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>{g.items.length}</span>
+          </div>
+          {g.items.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => onOpen(r)}
+              style={{ textAlign: 'left', width: '100%', cursor: 'pointer', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>
+                    @{r.admin_username || 'unknown'}
+                    {deletedIds.has(r.admin_id) && <span style={{ color: 'var(--tone-danger-fg)', marginLeft: 6, fontSize: 11 }}>(deleted admin)</span>}
+                    {r.admin_is_super && <Badge tone="warning" size="sm" style={{ marginLeft: 6 }}>SUPER</Badge>}
+                  </div>
+                </div>
+                <StatusDot status={actionLabel(r.action)} tone={actionTone(r.action)} />
+              </div>
+              <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginTop: 6, color: 'var(--fg-secondary)' }}>
+                {r.target_label || (r.entity ? entityLabel(r.entity) : '—')}
+                {r.target_username && <span style={{ color: 'var(--fg-tertiary)' }}> · @{r.target_username}</span>}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 8 }}>
+                {timeAgo(r.created_at)}
+              </div>
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

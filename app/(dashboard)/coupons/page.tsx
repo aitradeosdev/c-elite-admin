@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  PageHeader, Card, CardHeader, CardBody, CardFooter,
+  Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Select, FieldShell, Toggle,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { formatNaira, StatusDot, type Tone } from '../_shared/statusUi';
 import { TermsOfUseManager } from './TermsOfUseManager';
 
 interface Rule { type: string; value: any }
@@ -44,7 +51,61 @@ const emptyForm: FormState = {
   terms_of_use: '',
 };
 
+const isExpired = (d: string | null) => !!(d && new Date(d) < new Date(new Date().toDateString()));
+
+function couponStatus(c: Coupon): { text: string; tone: Tone } {
+  if (!c.is_active) return { text: 'Disabled', tone: 'neutral' };
+  if (isExpired(c.expiry_date)) return { text: 'Expired', tone: 'danger' };
+  return { text: 'Active', tone: 'success' };
+}
+
+function CouponsMobile({
+  coupons, openEdit, toggleActive,
+}: {
+  coupons: Coupon[];
+  openEdit: (c: Coupon) => void;
+  toggleActive: (c: Coupon) => void;
+}) {
+  if (coupons.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No coupons yet.
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {coupons.map((c) => {
+        const st = couponStatus(c);
+        return (
+          <div key={c.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.01em' }}>
+                {c.code}
+              </div>
+              <StatusDot status={st.text} tone={st.tone} />
+            </div>
+            <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginTop: 4, color: 'var(--fg-primary)' }}>
+              {c.type || '—'} <span style={{ color: 'var(--fg-tertiary)' }}>·</span> {formatNaira(c.bonus_rate_naira || 0)}
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 8 }}>
+              min ${Number(c.min_trade_amount_usd || 0).toLocaleString()} · {c.use_count || 0} uses · expiry {c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : '—'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={() => toggleActive(c)}>
+                {c.is_active ? 'Disable' : 'Enable'}
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CouponsPage() {
+  const isMobile = useIsMobile();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [cards, setCards] = useState<CardOpt[]>([]);
   const [terms, setTerms] = useState<string[]>([]);
@@ -142,225 +203,179 @@ export default function CouponsPage() {
     else showToast('Failed to update coupon.');
   };
 
-  const isExpired = (d: string | null) => !!(d && new Date(d) < new Date(new Date().toDateString()));
-
-  const statusBadge = (c: Coupon) => {
-    if (!c.is_active) return { text: 'Disabled', style: styles.badgeDisabled };
-    if (isExpired(c.expiry_date)) return { text: 'Expired', style: styles.badgeExpired };
-    return { text: 'Active', style: styles.badgeActive };
-  };
-
   return (
-    <div style={styles.page}>
-      <div style={{ ...styles.headerRow, gap: 8 }}>
-        <TermsOfUseManager onChange={setTerms} />
-        <button style={styles.createBtn} onClick={openCreate}>+ Create Coupon</button>
-      </div>
+    <div>
+      <PageHeader
+        title="Coupons"
+        subtitle="Create promo codes, set eligibility and rewards, and manage their lifecycle."
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <TermsOfUseManager onChange={setTerms} />
+            <Button variant="primary" size="sm" onClick={openCreate}>+ Create Coupon</Button>
+          </div>
+        }
+      />
 
       {showForm && (
-        <div style={styles.card}>
-          <p style={styles.cardTitle}>{form.id ? 'Edit Coupon' : 'Create Coupon'}</p>
+        <Card style={{ marginBottom: 'var(--space-4)' }}>
+          <CardHeader title={form.id ? 'Edit Coupon' : 'Create Coupon'} />
+          <CardBody>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+              <FieldShell label="Code">
+                <Input
+                  value={form.code}
+                  onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
+                  placeholder="WELCOME10"
+                />
+              </FieldShell>
+              <FieldShell label="Min Trade ($)">
+                <Input
+                  type="number"
+                  mono
+                  value={form.min_trade_amount_usd}
+                  onChange={(e) => setForm({ ...form, min_trade_amount_usd: e.target.value })}
+                />
+              </FieldShell>
+            </div>
 
-          <div style={styles.fieldRow}>
-            <div style={{ flex: 1 }}>
-              <label style={styles.fieldLabel}>CODE</label>
-              <input
-                style={styles.input}
-                value={form.code}
-                onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                placeholder="WELCOME10"
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+              <FieldShell label="Expiry Date">
+                <Input
+                  type="date"
+                  value={form.expiry_date}
+                  onChange={(e) => setForm({ ...form, expiry_date: e.target.value })}
+                />
+              </FieldShell>
+              <FieldShell label="Type of Card">
+                <Select
+                  value={form.type}
+                  onChange={(e) => setForm({ ...form, type: e.target.value })}
+                >
+                  {!form.type && <option value="">Select card</option>}
+                  {cards.map((c) => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </Select>
+              </FieldShell>
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={styles.fieldLabel}>MIN TRADE ($)</label>
-              <input
-                style={styles.input}
-                type="number"
-                value={form.min_trade_amount_usd}
-                onChange={(e) => setForm({ ...form, min_trade_amount_usd: e.target.value })}
-              />
-            </div>
-          </div>
 
-          <div style={styles.fieldRow}>
-            <div style={{ flex: 1 }}>
-              <label style={styles.fieldLabel}>EXPIRY DATE</label>
-              <input
-                style={styles.input}
-                type="date"
-                value={form.expiry_date}
-                onChange={(e) => setForm({ ...form, expiry_date: e.target.value })}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+              <FieldShell label="Terms of Use">
+                <Select
+                  value={form.terms_of_use}
+                  onChange={(e) => setForm({ ...form, terms_of_use: e.target.value })}
+                >
+                  <option value="">— None —</option>
+                  {terms.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </Select>
+              </FieldShell>
+              <div />
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={styles.fieldLabel}>TYPE OF CARD</label>
-              <select
-                style={styles.input}
-                value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
-              >
-                {!form.type && <option value="">Select card</option>}
-                {cards.map((c) => (
-                  <option key={c.id} value={c.name}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
 
-          <div style={styles.fieldRow}>
-            <div style={{ flex: 1 }}>
-              <label style={styles.fieldLabel}>TERMS OF USE</label>
-              <select
-                style={styles.input}
-                value={form.terms_of_use}
-                onChange={(e) => setForm({ ...form, terms_of_use: e.target.value })}
-              >
-                <option value="">— None —</option>
-                {terms.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12, alignItems: 'end' }}>
+              <FieldShell label="Bonus (₦ flat)">
+                <Input
+                  type="number"
+                  mono
+                  value={form.bonus_rate_naira}
+                  onChange={(e) => setForm({ ...form, bonus_rate_naira: e.target.value })}
+                />
+              </FieldShell>
+              <FieldShell label="Status">
+                <Toggle
+                  checked={form.is_active}
+                  onChange={(v) => setForm({ ...form, is_active: v })}
+                  label={form.is_active ? 'Active' : 'Disabled'}
+                />
+              </FieldShell>
             </div>
-            <div style={{ flex: 1 }} />
-          </div>
 
-          <div style={styles.fieldRow}>
-            <div style={{ flex: 1 }}>
-              <label style={styles.fieldLabel}>BONUS (₦ flat)</label>
-              <input
-                style={styles.input}
-                type="number"
-                value={form.bonus_rate_naira}
-                onChange={(e) => setForm({ ...form, bonus_rate_naira: e.target.value })}
-              />
-            </div>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 10 }}>
-              <div
-                style={{ ...styles.toggle, backgroundColor: form.is_active ? 'var(--accent-base)' : 'var(--border-default)' }}
-                onClick={() => setForm({ ...form, is_active: !form.is_active })}
-              >
-                <div style={{ ...styles.toggleThumb, left: form.is_active ? 22 : 2 }} />
-              </div>
-              <span style={styles.toggleLabel}>{form.is_active ? 'Active' : 'Disabled'}</span>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 14, backgroundColor: 'var(--bg-subtle)', borderRadius: 8, padding: 10, border: '1px solid var(--border-default)' }}>
-            <label style={styles.fieldLabel}>ELIGIBILITY (OPTIONAL)</label>
-            <p style={{ fontSize: 11, color: 'var(--fg-tertiary)', margin: '2px 0 8px' }}>Restrict to users who have traded a specific card. Leave blank for no restriction.</p>
-            <select
-              style={styles.input}
-              value={form.restrict_card}
-              onChange={(e) => setForm({ ...form, restrict_card: e.target.value })}
+            <FieldShell
+              label="Eligibility (optional)"
+              help="Restrict to users who have traded a specific card. Leave blank for no restriction."
             >
-              <option value="">No restriction (anyone eligible)</option>
-              {cards.map((c) => (
-                <option key={c.id} value={c.name}>Has traded {c.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div style={styles.formActions}>
-            <button style={styles.cancelBtn} onClick={() => setShowForm(false)}>Cancel</button>
-            <button style={{ ...styles.saveBtn, opacity: saving ? 0.7 : 1 }} disabled={saving} onClick={handleSave}>
+              <Select
+                value={form.restrict_card}
+                onChange={(e) => setForm({ ...form, restrict_card: e.target.value })}
+              >
+                <option value="">No restriction (anyone eligible)</option>
+                {cards.map((c) => (
+                  <option key={c.id} value={c.name}>Has traded {c.name}</option>
+                ))}
+              </Select>
+            </FieldShell>
+          </CardBody>
+          <CardFooter style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <Button variant="secondary" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={saving} disabled={saving} onClick={handleSave}>
               {saving ? 'Saving...' : 'Save Coupon'}
-            </button>
-          </div>
-        </div>
+            </Button>
+          </CardFooter>
+        </Card>
       )}
 
-      <div style={styles.section}>
-        <p style={styles.sectionTitle}>All Coupons</p>
-        {loading ? (
-          <p style={styles.empty}>Loading...</p>
-        ) : coupons.length === 0 ? (
-          <p style={styles.empty}>No coupons yet.</p>
-        ) : (
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Code</th>
-                  <th style={styles.th}>Min</th>
-                  <th style={styles.th}>Type</th>
-                  <th style={styles.th}>Reward</th>
-                  <th style={styles.th}>Expiry</th>
-                  <th style={styles.th}>Uses</th>
-                  <th style={styles.th}>Status</th>
-                  <th style={styles.th}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {coupons.map((c) => {
-                  const b = statusBadge(c);
+      {loading ? (
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+          </CardBody>
+        </Card>
+      ) : isMobile ? (
+        <CouponsMobile coupons={coupons} openEdit={openEdit} toggleActive={toggleActive} />
+      ) : (
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Code</Th>
+                  <Th align="right">Min</Th>
+                  <Th>Type</Th>
+                  <Th align="right">Reward</Th>
+                  <Th>Expiry</Th>
+                  <Th align="right">Uses</Th>
+                  <Th>Status</Th>
+                  <Th>Actions</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {coupons.length === 0 ? (
+                  <TableEmpty colSpan={8}>No coupons yet.</TableEmpty>
+                ) : coupons.map((c) => {
+                  const st = couponStatus(c);
                   return (
-                    <tr key={c.id}>
-                      <td style={{ ...styles.td, fontWeight: 700 }}>{c.code}</td>
-                      <td style={styles.td}>${Number(c.min_trade_amount_usd || 0).toLocaleString()}</td>
-                      <td style={styles.td}>
-                        <span style={styles.typeGift}>{c.type || '—'}</span>
-                      </td>
-                      <td style={styles.td}>₦{Number(c.bonus_rate_naira || 0).toLocaleString()}</td>
-                      <td style={styles.td}>{c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : '—'}</td>
-                      <td style={styles.td}>{c.use_count || 0}</td>
-                      <td style={styles.td}><span style={b.style}>{b.text}</span></td>
-                      <td style={styles.td}>
-                        <button style={styles.btnEdit} onClick={() => openEdit(c)}>Edit</button>
-                        <button style={styles.btnReject} onClick={() => toggleActive(c)}>
-                          {c.is_active ? 'Disable' : 'Enable'}
-                        </button>
-                      </td>
-                    </tr>
+                    <Tr key={c.id}>
+                      <Td emphasis="primary" mono>{c.code}</Td>
+                      <Td align="right" mono emphasis="secondary">${Number(c.min_trade_amount_usd || 0).toLocaleString()}</Td>
+                      <Td emphasis="secondary">{c.type || '—'}</Td>
+                      <Td align="right" mono emphasis="primary">{formatNaira(c.bonus_rate_naira || 0)}</Td>
+                      <Td emphasis="secondary" mono>{c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : '—'}</Td>
+                      <Td align="right" mono emphasis="secondary">{c.use_count || 0}</Td>
+                      <Td><StatusDot status={st.text} tone={st.tone} /></Td>
+                      <Td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>Edit</Button>
+                          <Button variant="secondary" size="sm" onClick={() => toggleActive(c)}>
+                            {c.is_active ? 'Disable' : 'Enable'}
+                          </Button>
+                        </div>
+                      </Td>
+                    </Tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
 
-      {toast && <div style={styles.toast}>{toast}</div>}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, background: 'var(--fg-primary)', color: 'var(--bg-base)', padding: '10px 18px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', fontWeight: 600, zIndex: 51 }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { paddingBottom: 40 },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)', padding: 20, textAlign: 'center' },
-
-  headerRow: { display: 'flex', justifyContent: 'flex-end', marginBottom: 12 },
-  createBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
-
-  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16, marginBottom: 16 },
-  cardTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 12px' },
-  fieldRow: { display: 'flex', gap: 12, marginBottom: 12 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
-
-  toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-  toggleLabel: { fontSize: 12, fontWeight: 600, color: 'var(--fg-primary)' },
-
-  formActions: { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 },
-  cancelBtn: { backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1.5px solid var(--border-default)', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-
-  section: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 12px' },
-  tableWrap: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', textAlign: 'left', padding: '8px 10px', fontWeight: 600, fontSize: 11 },
-  td: { padding: '8px 10px', borderBottom: '1px solid var(--border-default)', color: 'var(--fg-secondary)' },
-
-  typeGift: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  typeGen: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-
-  badgeActive: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeDisabled: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeExpired: { backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-
-  btnEdit: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '4px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', marginRight: 6 },
-  btnReject: { backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1.5px solid var(--border-default)', borderRadius: 100, padding: '4px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' },
-
-  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
-};

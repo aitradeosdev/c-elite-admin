@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import {
+  PageHeader, Card, CardBody,
+  Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Textarea, FieldShell, Toggle, SidePanel,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { StatusDot } from '../_shared/statusUi';
 
 interface Template {
   key: string;
@@ -13,6 +20,7 @@ interface Template {
 }
 
 export default function NotificationTemplatesPage() {
+  const isMobile = useIsMobile();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -106,151 +114,146 @@ export default function NotificationTemplatesPage() {
     return out;
   };
 
-  if (loading) return <div><h1 style={styles.h1}>Notification Templates</h1><p style={styles.empty}>Loading…</p></div>;
+  const truncate = (b: string) => (b.length > 80 ? b.slice(0, 80) + '…' : b);
 
   return (
     <div>
-      <h1 style={styles.h1}>Notification Templates</h1>
-      <p style={styles.sub}>Messages sent to users when key actions occur. Edits apply immediately in production.</p>
+      <PageHeader
+        title="Notification Templates"
+        subtitle="Messages sent to users when key actions occur. Edits apply immediately in production."
+      />
 
-      <div style={styles.tableWrap}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Key</th>
-              <th style={styles.th}>Title</th>
-              <th style={styles.th}>Body</th>
-              <th style={styles.th}>Active</th>
-              <th style={styles.th}></th>
-            </tr>
-          </thead>
-          <tbody>
+      {loading ? (
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+          </CardBody>
+        </Card>
+      ) : isMobile ? (
+        templates.length === 0 ? (
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+            No templates
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {templates.map((t) => (
-              <tr key={t.key} style={styles.tr}>
-                <td style={styles.td}><code style={styles.code}>{t.key}</code></td>
-                <td style={styles.td}>{t.title}</td>
-                <td style={{ ...styles.td, color: 'var(--fg-secondary)', maxWidth: 420 }}>
-                  <span title={t.body}>{t.body.length > 80 ? t.body.slice(0, 80) + '…' : t.body}</span>
-                </td>
-                <td style={styles.td}>
-                  <span style={{ ...styles.pill, backgroundColor: t.is_active ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)', color: t.is_active ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
-                    {t.is_active ? 'ON' : 'OFF'}
-                  </span>
-                </td>
-                <td style={styles.td}>
-                  <button style={styles.editBtn} onClick={() => openEditor(t)}>Edit</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {selected && (
-        <>
-          <div style={styles.dim} onClick={closeEditor} />
-          <div style={styles.drawer}>
-            <div style={styles.drawerHeader}>
-              <div>
-                <p style={styles.drawerTitle}>Edit template</p>
-                <code style={styles.code}>{selected.key}</code>
+              <div key={t.key} onClick={() => openEditor(t)} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14, cursor: 'pointer' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)', minWidth: 0 }}>{t.title}</div>
+                  <StatusDot status={t.is_active ? 'ON' : 'OFF'} tone={t.is_active ? 'success' : 'danger'} />
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 4 }}>{t.key}</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', marginTop: 8, lineHeight: 1.5 }}>{truncate(t.body)}</div>
               </div>
-              <button style={styles.closeBtn} onClick={closeEditor}>×</button>
-            </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Key</Th>
+                  <Th>Title</Th>
+                  <Th>Body</Th>
+                  <Th>Active</Th>
+                  <Th align="right">Actions</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {templates.length === 0 ? (
+                  <TableEmpty colSpan={5}>No templates</TableEmpty>
+                ) : templates.map((t) => (
+                  <Tr key={t.key}>
+                    <Td mono emphasis="secondary">{t.key}</Td>
+                    <Td emphasis="primary">{t.title}</Td>
+                    <Td emphasis="secondary">
+                      <span title={t.body} style={{ display: 'inline-block', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>{truncate(t.body)}</span>
+                    </Td>
+                    <Td><StatusDot status={t.is_active ? 'ON' : 'OFF'} tone={t.is_active ? 'success' : 'danger'} /></Td>
+                    <Td align="right">
+                      <Button variant="ghost" size="sm" onClick={() => openEditor(t)}>Edit</Button>
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
 
+      <SidePanel
+        open={!!selected}
+        onClose={closeEditor}
+        wide
+        title="Edit template"
+        subtitle={selected ? selected.key : undefined}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <Button variant="secondary" size="sm" onClick={closeEditor}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={save} disabled={!dirty || saving} loading={saving}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        }
+      >
+        {selected && (
+          <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
             {selected.description && (
-              <p style={styles.desc}>{selected.description}</p>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', lineHeight: 1.5, margin: 0, padding: '10px 12px', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
+                {selected.description}
+              </p>
             )}
 
-            <label style={styles.label}>Title</label>
-            <input
-              style={styles.input}
-              value={draftTitle}
-              onChange={(e) => setDraftTitle(e.target.value)}
-            />
+            <FieldShell label="Title">
+              <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} />
+            </FieldShell>
 
-            <label style={styles.label}>Body</label>
-            <textarea
-              style={{ ...styles.input, height: 100, resize: 'vertical', fontFamily: 'inherit' } as any}
-              value={draftBody}
-              onChange={(e) => setDraftBody(e.target.value)}
-            />
+            <FieldShell label="Body">
+              <Textarea style={{ minHeight: 100 }} value={draftBody} onChange={(e) => setDraftBody(e.target.value)} />
+            </FieldShell>
 
             {selected.variables.length > 0 && (
-              <>
-                <label style={styles.label}>Available variables (click to insert)</label>
-                <div style={styles.chipRow}>
+              <FieldShell label="Available variables (click to insert)">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {selected.variables.map((v) => (
-                    <button key={v} style={styles.chip} onClick={() => insertVar(v)}>
+                    <button
+                      key={v}
+                      onClick={() => insertVar(v)}
+                      style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '5px 10px', background: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 100, cursor: 'pointer' }}
+                    >
                       {`{${v}}`}
                     </button>
                   ))}
                 </div>
-              </>
+              </FieldShell>
             )}
 
-            <label style={styles.label}>Preview (with sample data)</label>
-            <div style={styles.preview}>
-              <p style={styles.previewTitle}>{renderPreview(draftTitle, selected.variables)}</p>
-              <p style={styles.previewBody}>{renderPreview(draftBody, selected.variables)}</p>
-            </div>
+            <FieldShell label="Preview (with sample data)">
+              <div style={{ padding: 14, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-default)' }}>
+                <p style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 6px' }}>{renderPreview(draftTitle, selected.variables)}</p>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', margin: 0, lineHeight: 1.5 }}>{renderPreview(draftBody, selected.variables)}</p>
+              </div>
+            </FieldShell>
 
-            <label style={styles.checkboxRow}>
-              <input
-                type="checkbox"
-                checked={draftActive}
-                onChange={(e) => setDraftActive(e.target.checked)}
-              />
-              <span style={{ marginLeft: 8 }}>Active — disable to stop sending this notification entirely.</span>
-            </label>
-
-            <div style={styles.footer}>
-              <button style={styles.cancelBtn} onClick={closeEditor}>Cancel</button>
-              <button
-                style={{ ...styles.saveBtn, opacity: dirty && !saving ? 1 : 0.4 }}
-                onClick={save}
-                disabled={!dirty || saving}
-              >
-                {saving ? 'Saving…' : 'Save Changes'}
-              </button>
-            </div>
+            <FieldShell label="Active" help="Disable to stop sending this notification entirely.">
+              <Toggle checked={draftActive} onChange={(next) => setDraftActive(next)} />
+            </FieldShell>
           </div>
-        </>
-      )}
+        )}
+      </SidePanel>
 
-      {toast && <div style={styles.toast}>{toast}</div>}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 20, right: 20, background: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)', color: 'var(--fg-primary)',
+          padding: '10px 16px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-xs)',
+          fontWeight: 600, boxShadow: 'var(--shadow-md)', zIndex: 100,
+        }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 6px' },
-  sub: { fontSize: 12, color: 'var(--fg-secondary)', margin: '0 0 16px' },
-  tableWrap: { backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden' },
-  table: { width: '100%', borderCollapse: 'collapse' as any, fontSize: 13 },
-  th: { textAlign: 'left', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-default)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
-  tr: { borderBottom: '1px solid var(--border-subtle)' },
-  td: { padding: '12px', color: 'var(--fg-primary)', verticalAlign: 'middle' },
-  code: { fontFamily: 'monospace', fontSize: 11, backgroundColor: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: 4, color: 'var(--fg-secondary)' },
-  pill: { fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 100 },
-  editBtn: { padding: '6px 12px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  dim: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 50 },
-  drawer: { position: 'fixed', top: 0, right: 0, width: 520, height: '100%', backgroundColor: 'var(--bg-surface)', padding: 24, boxSizing: 'border-box', overflowY: 'auto', zIndex: 51, boxShadow: '-4px 0 12px rgba(0,0,0,0.08)' },
-  drawerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-  drawerTitle: { fontSize: 16, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 4px' },
-  closeBtn: { background: 'none', border: 'none', fontSize: 28, lineHeight: 1, color: 'var(--fg-tertiary)', cursor: 'pointer' },
-  desc: { fontSize: 12, color: 'var(--fg-secondary)', lineHeight: 1.5, margin: '8px 0 16px', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', borderRadius: 6, border: '1px solid var(--border-default)' },
-  label: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-secondary)', marginTop: 14, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
-  input: { width: '100%', padding: '10px 12px', fontSize: 14, border: '1px solid var(--border-default)', borderRadius: 6, boxSizing: 'border-box' },
-  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  chip: { fontSize: 11, fontFamily: 'monospace', padding: '5px 10px', backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', border: '1px solid var(--border-default)', borderRadius: 100, cursor: 'pointer' },
-  preview: { padding: 14, backgroundColor: 'var(--bg-subtle)', borderRadius: 8, border: '1px solid var(--border-default)' },
-  previewTitle: { fontSize: 13, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 6px' },
-  previewBody: { fontSize: 13, color: 'var(--fg-secondary)', margin: 0, lineHeight: 1.5 },
-  checkboxRow: { display: 'flex', alignItems: 'center', marginTop: 20, fontSize: 12, color: 'var(--fg-secondary)' },
-  footer: { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 },
-  cancelBtn: { padding: '10px 18px', fontSize: 13, fontWeight: 600, backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer' },
-  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)' },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
-};

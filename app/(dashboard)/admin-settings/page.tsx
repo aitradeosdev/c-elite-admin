@@ -1,6 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  PageHeader, Card, CardHeader, CardBody, CardFooter,
+  Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  FieldShell, Input, Select, Toggle, Button, Modal,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
 
 type Config = Record<string, string>;
 
@@ -8,6 +14,15 @@ const GATEWAYS = [
   { key: 'paystack', label: 'Paystack' },
   { key: 'monnify', label: 'Monnify' },
 ];
+
+const rowStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  padding: '10px 12px', background: 'var(--bg-subtle)',
+  borderRadius: 'var(--radius-md)', gap: 12,
+};
+const rowLabelStyle: React.CSSProperties = {
+  fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-primary)', flex: 1,
+};
 
 export default function AdminSettingsPage() {
   const [config, setConfig] = useState<Config>({});
@@ -127,78 +142,100 @@ export default function AdminSettingsPage() {
     if (ok) setEmergencyConfirm(null);
   };
 
-  if (forbidden) return <div><h1 style={styles.h1}>Admin Settings</h1><p style={styles.empty}>Super-admin access only.</p></div>;
-  if (loading) return <div><h1 style={styles.h1}>Admin Settings</h1><p style={styles.empty}>Loading…</p></div>;
+  if (forbidden) {
+    return (
+      <div>
+        <PageHeader title="Admin Settings" subtitle="Global platform configuration." />
+        <Card><CardBody><p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: 0 }}>Super-admin access only.</p></CardBody></Card>
+      </div>
+    );
+  }
+  if (loading) {
+    return (
+      <div>
+        <PageHeader title="Admin Settings" subtitle="Global platform configuration." />
+        <Card><CardBody><p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p></CardBody></Card>
+      </div>
+    );
+  }
 
   const emergencyOn = config.emergency_mode === 'true';
   const primary = config.active_payment_gateway;
 
   return (
     <div>
-      <h1 style={styles.h1}>Admin Settings</h1>
+      <PageHeader title="Admin Settings" subtitle="Global platform configuration." />
 
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Payment Gateways</p>
-        <p style={styles.cardHint}>
-          Credentials live in Supabase function secrets. Toggle which gateways are live; choose one as Primary.
-        </p>
-        <div style={styles.gwList}>
-          {GATEWAYS.map((g) => {
-            const enabled = config[`gateway_${g.key}_enabled`] === 'true';
-            const isPrimary = primary === g.key;
-            return (
-              <div key={g.key} style={styles.gwRow}>
-                <span style={styles.gwLabel}>{g.label}</span>
-                <label style={styles.primaryLabel}>
-                  <input
-                    type="radio"
-                    name="primary_gateway"
-                    checked={isPrimary}
-                    onChange={() => setPrimary(g.key)}
-                    disabled={savingKey === 'gateways' || !enabled}
-                  />
-                  Primary
-                </label>
-                <Toggle value={enabled} onChange={(v) => toggleGateway(g.key, v)} disabled={savingKey === 'gateways'} />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Risk Limits</p>
-        <p style={styles.cardHint}>
-          Maximum gift-card approval amount (NGN) any non-super admin can authorise. Approvals above this threshold are
-          rejected by the server with an "escalate to super admin" error. Default 5,000,000.
-        </p>
-        <label style={styles.label}>Max card approval (NGN)</label>
-        <input
-          style={styles.input}
-          type="number"
-          inputMode="numeric"
-          min={1000}
-          step={1000}
-          value={maxApproval}
-          onChange={(e) => setMaxApproval(e.target.value)}
-          placeholder="5000000"
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader
+          title="Payment Gateways"
+          subtitle="Credentials live in Supabase function secrets. Toggle which gateways are live; choose one as Primary."
         />
-        <button style={styles.saveBtn} onClick={saveMaxApproval} disabled={savingKey === 'maxApproval'}>
-          {savingKey === 'maxApproval' ? 'Saving…' : 'Save'}
-        </button>
-      </div>
+        <CardBody>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {GATEWAYS.map((g) => {
+              const enabled = config[`gateway_${g.key}_enabled`] === 'true';
+              const isPrimary = primary === g.key;
+              return (
+                <div key={g.key} style={rowStyle}>
+                  <span style={rowLabelStyle}>{g.label}</span>
+                  <label style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="primary_gateway"
+                      checked={isPrimary}
+                      onChange={() => setPrimary(g.key)}
+                      disabled={savingKey === 'gateways' || !enabled}
+                    />
+                    Primary
+                  </label>
+                  <Toggle checked={enabled} onChange={(v) => toggleGateway(g.key, v)} disabled={savingKey === 'gateways'} />
+                </div>
+              );
+            })}
+          </div>
+        </CardBody>
+      </Card>
 
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Bill Payment API</p>
-        <div style={styles.gwRow}>
-          <span style={styles.gwLabel}>VTpass</span>
-          <Toggle
-            value={config.bill_vtpass_enabled === 'true'}
-            onChange={toggleVtpass}
-            disabled={savingKey === 'vtpass'}
-          />
-        </div>
-      </div>
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader
+          title="Risk Limits"
+          subtitle='Maximum gift-card approval amount (NGN) any non-super admin can authorise. Approvals above this threshold are rejected by the server with an "escalate to super admin" error. Default 5,000,000.'
+        />
+        <CardBody>
+          <FieldShell label="Max card approval (NGN)">
+            <Input
+              type="number"
+              mono
+              inputMode="numeric"
+              min={1000}
+              step={1000}
+              value={maxApproval}
+              onChange={(e) => setMaxApproval(e.target.value)}
+              placeholder="5000000"
+            />
+          </FieldShell>
+        </CardBody>
+        <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="primary" size="sm" onClick={saveMaxApproval} disabled={savingKey === 'maxApproval'} loading={savingKey === 'maxApproval'}>
+            {savingKey === 'maxApproval' ? 'Saving…' : 'Save'}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader title="Bill Payment API" />
+        <CardBody>
+          <div style={rowStyle}>
+            <span style={rowLabelStyle}>VTpass</span>
+            <Toggle
+              checked={config.bill_vtpass_enabled === 'true'}
+              onChange={toggleVtpass}
+              disabled={savingKey === 'vtpass'}
+            />
+          </div>
+        </CardBody>
+      </Card>
 
       <TagTransferSection
         enabled={config.tag_transfer_enabled !== 'false'}
@@ -207,153 +244,183 @@ export default function AdminSettingsPage() {
         showToast={showToast}
       />
 
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Live Chat URL</p>
-        <p style={styles.cardHint}>Direct chat link from your provider dashboard (e.g. Tawk/LiveChat/Smartsupp "Shareable Chat Link"). Opens full-screen in the Support tab.</p>
-        <input
-          style={styles.input}
-          type="url"
-          value={liveChatUrl}
-          onChange={(e) => setLiveChatUrl(e.target.value)}
-          placeholder="https://direct.lc.chat/..."
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader
+          title="Live Chat URL"
+          subtitle='Direct chat link from your provider dashboard (e.g. Tawk/LiveChat/Smartsupp "Shareable Chat Link"). Opens full-screen in the Support tab.'
         />
-        <button style={styles.saveBtn} onClick={saveLiveChat} disabled={savingKey === 'liveChat'}>
-          {savingKey === 'liveChat' ? 'Saving…' : 'Save'}
-        </button>
-      </div>
+        <CardBody>
+          <FieldShell label="Live Chat URL">
+            <Input
+              type="url"
+              value={liveChatUrl}
+              onChange={(e) => setLiveChatUrl(e.target.value)}
+              placeholder="https://direct.lc.chat/..."
+            />
+          </FieldShell>
+        </CardBody>
+        <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="primary" size="sm" onClick={saveLiveChat} disabled={savingKey === 'liveChat'} loading={savingKey === 'liveChat'}>
+            {savingKey === 'liveChat' ? 'Saving…' : 'Save'}
+          </Button>
+        </CardFooter>
+      </Card>
 
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Legal</p>
-        <p style={styles.cardHint}>
-          Public URLs to your Terms of Use and Privacy Policy. Linked from the
-          user-app registration screen. Must be HTTPS — anything else (or a
-          missing value) is treated as &quot;not configured&quot; and the labels stay
-          non-clickable.
-        </p>
-        <label style={styles.label}>Terms of Use URL</label>
-        <input
-          style={styles.input}
-          type="url"
-          value={termsUrl}
-          onChange={(e) => setTermsUrl(e.target.value)}
-          placeholder="https://your-site.com/terms"
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader
+          title="Legal"
+          subtitle='Public URLs to your Terms of Use and Privacy Policy. Linked from the user-app registration screen. Must be HTTPS — anything else (or a missing value) is treated as "not configured" and the labels stay non-clickable.'
         />
-        <button style={{ ...styles.saveBtn, marginBottom: 12 }} onClick={saveTerms} disabled={savingKey === 'terms'}>
-          {savingKey === 'terms' ? 'Saving…' : 'Save Terms URL'}
-        </button>
-
-        <label style={styles.label}>Privacy Policy URL</label>
-        <input
-          style={styles.input}
-          type="url"
-          value={privacyUrl}
-          onChange={(e) => setPrivacyUrl(e.target.value)}
-          placeholder="https://your-site.com/privacy"
-        />
-        <button style={styles.saveBtn} onClick={savePrivacy} disabled={savingKey === 'privacy'}>
-          {savingKey === 'privacy' ? 'Saving…' : 'Save Privacy URL'}
-        </button>
-      </div>
-
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>App Store Links</p>
-        <p style={styles.cardHint}>
-          Public store listing URLs. Used by the app&apos;s update prompt to send
-          users to the right store. Must be HTTPS — a missing or invalid value is
-          treated as &quot;not configured&quot;.
-        </p>
-        <label style={styles.label}>Google Play Store URL</label>
-        <input
-          style={styles.input}
-          type="url"
-          value={playstoreUrl}
-          onChange={(e) => setPlaystoreUrl(e.target.value)}
-          placeholder="https://play.google.com/store/apps/details?id=com.cardelite.app"
-        />
-        <label style={{ ...styles.label, marginTop: 12 }}>Apple App Store URL</label>
-        <input
-          style={styles.input}
-          type="url"
-          value={appstoreUrl}
-          onChange={(e) => setAppstoreUrl(e.target.value)}
-          placeholder="https://apps.apple.com/app/id000000000"
-        />
-        <button style={styles.saveBtn} onClick={saveStoreLinks} disabled={savingKey === 'storeLinks'}>
-          {savingKey === 'storeLinks' ? 'Saving…' : 'Save Store Links'}
-        </button>
-      </div>
-
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>App Version</p>
-        <div style={styles.grid2}>
-          <div>
-            <label style={styles.label}>Current Version</label>
-            <input style={styles.input} value={curVer} onChange={(e) => setCurVer(e.target.value)} placeholder="1.0.0" />
+        <CardBody>
+          <FieldShell label="Terms of Use URL">
+            <Input
+              type="url"
+              value={termsUrl}
+              onChange={(e) => setTermsUrl(e.target.value)}
+              placeholder="https://your-site.com/terms"
+            />
+          </FieldShell>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '8px 0 16px' }}>
+            <Button variant="primary" size="sm" onClick={saveTerms} disabled={savingKey === 'terms'} loading={savingKey === 'terms'}>
+              {savingKey === 'terms' ? 'Saving…' : 'Save Terms URL'}
+            </Button>
           </div>
-          <div>
-            <label style={styles.label}>Minimum Version</label>
-            <input style={styles.input} value={minVer} onChange={(e) => setMinVer(e.target.value)} placeholder="1.0.0" />
-          </div>
-          <div>
-            <label style={styles.label}>Update Type</label>
-            <select style={styles.input} value={updType} onChange={(e) => setUpdType(e.target.value)}>
-              <option value="soft">Soft</option>
-              <option value="force">Force</option>
-            </select>
-          </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={styles.label}>Update Message</label>
-            <input style={styles.input} value={updMsg} onChange={(e) => setUpdMsg(e.target.value)} />
-          </div>
-        </div>
-        <button style={{ ...styles.saveBtn, marginTop: 12 }} onClick={saveVersion} disabled={savingKey === 'version'}>
-          {savingKey === 'version' ? 'Saving…' : 'Save'}
-        </button>
-      </div>
 
-      <div style={{ ...styles.card, borderColor: emergencyOn ? 'var(--tone-danger-fg)' : 'var(--border-default)' }}>
-        <p style={{ ...styles.cardTitle, color: emergencyOn ? 'var(--tone-danger-fg)' : 'var(--fg-primary)' }}>Emergency Mode</p>
-        <p style={styles.cardHint}>
-          When ON, all mobile clients are force-logged-out and shown a blocking maintenance modal on next resume.
-        </p>
-        <div style={styles.gwRow}>
-          <span style={styles.gwLabel}>{emergencyOn ? 'ACTIVE' : 'Off'}</span>
-          <button
-            style={emergencyOn ? styles.dangerBtn : styles.saveBtn}
-            onClick={() => setEmergencyConfirm(emergencyOn ? 'off' : 'on')}
-            disabled={savingKey === 'emergency'}
-          >
-            {emergencyOn ? 'Disable Emergency Mode' : 'Enable Emergency Mode'}
-          </button>
-        </div>
-      </div>
+          <FieldShell label="Privacy Policy URL">
+            <Input
+              type="url"
+              value={privacyUrl}
+              onChange={(e) => setPrivacyUrl(e.target.value)}
+              placeholder="https://your-site.com/privacy"
+            />
+          </FieldShell>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <Button variant="primary" size="sm" onClick={savePrivacy} disabled={savingKey === 'privacy'} loading={savingKey === 'privacy'}>
+              {savingKey === 'privacy' ? 'Saving…' : 'Save Privacy URL'}
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
 
-      {emergencyConfirm && (
-        <div style={styles.modalBg} onClick={() => setEmergencyConfirm(null)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <p style={styles.modalTitle}>
-              {emergencyConfirm === 'on' ? 'Enable Emergency Mode?' : 'Disable Emergency Mode?'}
-            </p>
-            <p style={styles.modalBody}>
-              {emergencyConfirm === 'on'
-                ? 'This will force-logout every user on the mobile app and block access until you disable it. Continue?'
-                : 'Users will regain access to the app. Continue?'}
-            </p>
-            <div style={styles.modalRow}>
-              <button style={styles.cancelBtn} onClick={() => setEmergencyConfirm(null)} disabled={savingKey === 'emergency'}>Cancel</button>
-              <button
-                style={emergencyConfirm === 'on' ? styles.dangerBtn : styles.saveBtn}
-                onClick={confirmEmergency}
-                disabled={savingKey === 'emergency'}
-              >
-                {savingKey === 'emergency' ? 'Working…' : 'Confirm'}
-              </button>
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader
+          title="App Store Links"
+          subtitle={'Public store listing URLs. Used by the app’s update prompt to send users to the right store. Must be HTTPS — a missing or invalid value is treated as "not configured".'}
+        />
+        <CardBody>
+          <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+            <FieldShell label="Google Play Store URL">
+              <Input
+                type="url"
+                value={playstoreUrl}
+                onChange={(e) => setPlaystoreUrl(e.target.value)}
+                placeholder="https://play.google.com/store/apps/details?id=com.cardelite.app"
+              />
+            </FieldShell>
+            <FieldShell label="Apple App Store URL">
+              <Input
+                type="url"
+                value={appstoreUrl}
+                onChange={(e) => setAppstoreUrl(e.target.value)}
+                placeholder="https://apps.apple.com/app/id000000000"
+              />
+            </FieldShell>
+          </div>
+        </CardBody>
+        <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="primary" size="sm" onClick={saveStoreLinks} disabled={savingKey === 'storeLinks'} loading={savingKey === 'storeLinks'}>
+            {savingKey === 'storeLinks' ? 'Saving…' : 'Save Store Links'}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader title="App Version" />
+        <CardBody>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <FieldShell label="Current Version">
+              <Input value={curVer} onChange={(e) => setCurVer(e.target.value)} placeholder="1.0.0" />
+            </FieldShell>
+            <FieldShell label="Minimum Version">
+              <Input value={minVer} onChange={(e) => setMinVer(e.target.value)} placeholder="1.0.0" />
+            </FieldShell>
+            <FieldShell label="Update Type">
+              <Select value={updType} onChange={(e) => setUpdType(e.target.value)}>
+                <option value="soft">Soft</option>
+                <option value="force">Force</option>
+              </Select>
+            </FieldShell>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FieldShell label="Update Message">
+                <Input value={updMsg} onChange={(e) => setUpdMsg(e.target.value)} />
+              </FieldShell>
             </div>
           </div>
+        </CardBody>
+        <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="primary" size="sm" onClick={saveVersion} disabled={savingKey === 'version'} loading={savingKey === 'version'}>
+            {savingKey === 'version' ? 'Saving…' : 'Save'}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card style={{ marginBottom: 'var(--space-4)', borderColor: emergencyOn ? 'var(--tone-danger-fg)' : undefined }}>
+        <CardHeader
+          title={<span style={{ color: emergencyOn ? 'var(--tone-danger-fg)' : undefined }}>Emergency Mode</span>}
+          subtitle="When ON, all mobile clients are force-logged-out and shown a blocking maintenance modal on next resume."
+        />
+        <CardBody>
+          <div style={rowStyle}>
+            <span style={rowLabelStyle}>{emergencyOn ? 'ACTIVE' : 'Off'}</span>
+            <Button
+              variant={emergencyOn ? 'danger' : 'primary'}
+              size="sm"
+              onClick={() => setEmergencyConfirm(emergencyOn ? 'off' : 'on')}
+              disabled={savingKey === 'emergency'}
+            >
+              {emergencyOn ? 'Disable Emergency Mode' : 'Enable Emergency Mode'}
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Modal
+        open={!!emergencyConfirm}
+        onClose={() => setEmergencyConfirm(null)}
+        size="sm"
+        title={emergencyConfirm === 'on' ? 'Enable Emergency Mode?' : 'Disable Emergency Mode?'}
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setEmergencyConfirm(null)} disabled={savingKey === 'emergency'}>Cancel</Button>
+            <Button
+              variant={emergencyConfirm === 'on' ? 'danger' : 'primary'}
+              size="sm"
+              onClick={confirmEmergency}
+              disabled={savingKey === 'emergency'}
+              loading={savingKey === 'emergency'}
+            >
+              {savingKey === 'emergency' ? 'Working…' : 'Confirm'}
+            </Button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', lineHeight: 1.5, margin: 0 }}>
+          {emergencyConfirm === 'on'
+            ? 'This will force-logout every user on the mobile app and block access until you disable it. Continue?'
+            : 'Users will regain access to the app. Continue?'}
+        </p>
+      </Modal>
+
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 20, right: 20, background: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)', color: 'var(--fg-primary)',
+          padding: '10px 16px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-xs)',
+          fontWeight: 600, boxShadow: 'var(--shadow-md)', zIndex: 100,
+        }}>
+          {toast}
         </div>
       )}
-
-      {toast && <div style={styles.toast}>{toast}</div>}
     </div>
   );
 }
@@ -372,9 +439,17 @@ type Override = {
 
 type UserHit = { id: string; full_name: string; username: string; email: string };
 
+function overrideMeta(o: Override) {
+  return `@${o.username} · ${o.email}`
+    + (o.reason ? ` · "${o.reason}"` : '')
+    + (o.granted_by_username ? ` · by ${o.granted_by_username}` : '')
+    + ` · ${new Date(o.granted_at).toLocaleDateString()}`;
+}
+
 function TagTransferSection({
   enabled, onToggle, saving, showToast,
 }: { enabled: boolean; onToggle: (v: boolean) => void; saving: boolean; showToast: (m: string) => void }) {
+  const isMobile = useIsMobile();
   const [overrides, setOverrides] = useState<Override[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [search, setSearch] = useState('');
@@ -438,142 +513,113 @@ function TagTransferSection({
   };
 
   return (
-    <div style={styles.card}>
-      <p style={styles.cardTitle}>Tag Transfer</p>
-      <p style={styles.cardHint}>
-        Controls peer-to-peer @username transfers globally. When disabled, ONLY users on the allow-list below
-        can still send tag transfers. Hides the Transfer button in the mobile app and blocks the RPC server-side.
-      </p>
-      <div style={styles.gwRow}>
-        <span style={styles.gwLabel}>{enabled ? 'Enabled globally' : 'Disabled globally'}</span>
-        <Toggle value={enabled} onChange={onToggle} disabled={saving} />
-      </div>
-
-      {!enabled && (
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-default)' }}>
-          <p style={{ ...styles.cardTitle, marginBottom: 8 }}>Allow-list ({overrides.length})</p>
-          <p style={styles.cardHint}>These users can transfer even with the global toggle OFF.</p>
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input
-              style={{ ...styles.input, flex: 2 }}
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by username, email, or full name…"
-            />
-            <input
-              style={{ ...styles.input, flex: 1 }}
-              type="text"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Reason (optional)"
-              maxLength={500}
-            />
-          </div>
-
-          {search.trim() ? (
-            <div style={{ border: '1px solid var(--border-default)', borderRadius: 6, marginBottom: 12, maxHeight: 200, overflowY: 'auto' }}>
-              {searching ? (
-                <div style={{ padding: 12, fontSize: 12, color: 'var(--fg-tertiary)' }}>Searching…</div>
-              ) : results.length === 0 ? (
-                <div style={{ padding: 12, fontSize: 12, color: 'var(--fg-tertiary)' }}>No matches.</div>
-              ) : (
-                results.map((u) => (
-                  <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)' }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>{u.full_name || u.username}</div>
-                      <div style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>@{u.username} · {u.email}</div>
-                    </div>
-                    <button
-                      style={styles.saveBtn}
-                      onClick={() => addUser(u)}
-                      disabled={busyId === u.id}
-                    >
-                      {busyId === u.id ? 'Adding…' : 'Add'}
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          ) : null}
-
-          {loadingList ? (
-            <p style={styles.empty}>Loading allow-list…</p>
-          ) : overrides.length === 0 ? (
-            <p style={styles.empty}>No users on the allow-list. Tag transfer is fully blocked.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {overrides.map((o) => (
-                <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', borderRadius: 6 }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>{o.full_name || o.username}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>
-                      @{o.username} · {o.email}
-                      {o.reason ? ` · "${o.reason}"` : ''}
-                      {o.granted_by_username ? ` · by ${o.granted_by_username}` : ''}
-                      {' · '}{new Date(o.granted_at).toLocaleDateString()}
-                    </div>
-                  </div>
-                  <button
-                    style={styles.cancelBtn}
-                    onClick={() => removeOverride(o)}
-                    disabled={busyId === o.id}
-                  >
-                    {busyId === o.id ? 'Removing…' : 'Remove'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+    <Card style={{ marginBottom: 'var(--space-4)' }}>
+      <CardHeader
+        title="Tag Transfer"
+        subtitle="Controls peer-to-peer @username transfers globally. When disabled, ONLY users on the allow-list below can still send tag transfers. Hides the Transfer button in the mobile app and blocks the RPC server-side."
+        actions={<Toggle checked={enabled} onChange={onToggle} disabled={saving} />}
+      />
+      <CardBody>
+        <div style={rowStyle}>
+          <span style={rowLabelStyle}>{enabled ? 'Enabled globally' : 'Disabled globally'}</span>
         </div>
-      )}
-    </div>
+
+        {!enabled && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-default)' }}>
+            <p style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 6px' }}>
+              Allow-list ({overrides.length})
+            </p>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: '0 0 14px' }}>
+              These users can transfer even with the global toggle OFF.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <Input
+                style={{ flex: 2, minWidth: 200 }}
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by username, email, or full name…"
+              />
+              <Input
+                style={{ flex: 1, minWidth: 160 }}
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Reason (optional)"
+                maxLength={500}
+              />
+            </div>
+
+            {search.trim() ? (
+              <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', marginBottom: 12, maxHeight: 200, overflowY: 'auto' }}>
+                {searching ? (
+                  <div style={{ padding: 12, fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>Searching…</div>
+                ) : results.length === 0 ? (
+                  <div style={{ padding: 12, fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>No matches.</div>
+                ) : (
+                  results.map((u) => (
+                    <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)', gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-primary)' }}>{u.full_name || u.username}</div>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>@{u.username} · {u.email}</div>
+                      </div>
+                      <Button variant="primary" size="sm" onClick={() => addUser(u)} disabled={busyId === u.id} loading={busyId === u.id}>
+                        {busyId === u.id ? 'Adding…' : 'Add'}
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+
+            {loadingList ? (
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>Loading allow-list…</p>
+            ) : overrides.length === 0 ? (
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>No users on the allow-list. Tag transfer is fully blocked.</p>
+            ) : isMobile ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {overrides.map((o) => (
+                  <div key={o.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{o.full_name || o.username}</div>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 4 }}>{overrideMeta(o)}</div>
+                      </div>
+                      <Button variant="secondary" size="sm" onClick={() => removeOverride(o)} disabled={busyId === o.id} loading={busyId === o.id}>
+                        {busyId === o.id ? 'Removing…' : 'Remove'}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Table flush>
+                <THead>
+                  <Tr>
+                    <Th>User</Th>
+                    <Th>Details</Th>
+                    <Th align="right">Action</Th>
+                  </Tr>
+                </THead>
+                <TBody>
+                  {overrides.map((o) => (
+                    <Tr key={o.id}>
+                      <Td emphasis="primary">{o.full_name || o.username}</Td>
+                      <Td emphasis="secondary">{overrideMeta(o)}</Td>
+                      <Td align="right">
+                        <Button variant="secondary" size="sm" onClick={() => removeOverride(o)} disabled={busyId === o.id} loading={busyId === o.id}>
+                          {busyId === o.id ? 'Removing…' : 'Remove'}
+                        </Button>
+                      </Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }
-
-function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={() => !disabled && onChange(!value)}
-      disabled={disabled}
-      style={{
-        width: 44, height: 24, borderRadius: 12, border: 'none',
-        backgroundColor: value ? 'var(--accent-base)' : 'var(--bg-muted)',
-        position: 'relative', cursor: disabled ? 'default' : 'pointer',
-        transition: 'background-color 0.15s', flexShrink: 0,
-      }}
-    >
-      <span style={{
-        position: 'absolute', top: 2, left: value ? 22 : 2,
-        width: 20, height: 20, borderRadius: 10, backgroundColor: 'var(--bg-surface)',
-        transition: 'left 0.15s',
-      }} />
-    </button>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
-  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 6px' },
-  cardHint: { fontSize: 11, color: 'var(--fg-tertiary)', margin: '0 0 14px', lineHeight: 1.5 },
-  gwList: { display: 'flex', flexDirection: 'column', gap: 10 },
-  gwRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', backgroundColor: 'var(--bg-subtle)', borderRadius: 6, gap: 12 },
-  gwLabel: { fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)', flex: 1 },
-  primaryLabel: { fontSize: 11, color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' },
-  textarea: { width: '100%', padding: 10, fontSize: 12, border: '1px solid var(--border-default)', borderRadius: 6, fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box' },
-  grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  label: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: 4 },
-  input: { width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--border-default)', borderRadius: 6, boxSizing: 'border-box' },
-  saveBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  dangerBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  cancelBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--bg-surface)', color: 'var(--fg-primary)', border: '1px solid var(--border-default)', borderRadius: 6, cursor: 'pointer' },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)' },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
-  modalBg: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
-  modal: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 24, maxWidth: 420, width: '90%' },
-  modalTitle: { fontSize: 16, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 10px' },
-  modalBody: { fontSize: 13, color: 'var(--fg-secondary)', lineHeight: 1.5, margin: '0 0 20px' },
-  modalRow: { display: 'flex', gap: 10, justifyContent: 'flex-end' },
-};

@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import {
+  PageHeader, Card, CardHeader, CardBody, CardFooter,
+  Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Textarea, Select, FieldShell,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { StatusDot } from '../_shared/statusUi';
 
 const PER_USER_VARS: { token: string; hint: string }[] = [
   { token: 'first_name', hint: 'first word of full name' },
@@ -50,7 +57,44 @@ const TYPES = [
   { value: 'system', label: 'System' },
 ];
 
+function BroadcastsMobile({ history, loading }: { history: Broadcast[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        Loading…
+      </div>
+    );
+  }
+  if (history.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No broadcasts yet.
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {history.map((b) => (
+        <div key={b.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)', minWidth: 0 }}>{b.title}</div>
+            <StatusDot status={b.audience} tone="neutral" />
+          </div>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', marginTop: 4 }}>
+            {b.message.length > 60 ? b.message.slice(0, 60) + '…' : b.message}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginTop: 10 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-md)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{b.delivered_count}/{b.recipient_count}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>{new Date(b.sent_at).toLocaleString()}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function NotificationsBroadcastPage() {
+  const isMobile = useIsMobile();
   const [history, setHistory] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [audience, setAudience] = useState('all');
@@ -147,189 +191,184 @@ export default function NotificationsBroadcastPage() {
     fetchHistory();
   };
 
+  const chipStyle: React.CSSProperties = {
+    fontSize: 'var(--text-xs)', fontWeight: 600, padding: '4px 8px',
+    background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-md)', cursor: 'pointer',
+    fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)',
+  };
+  const microLabel: React.CSSProperties = {
+    fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.11em',
+    textTransform: 'uppercase', color: 'var(--fg-tertiary)', margin: '10px 0 6px',
+  };
+
   return (
     <div>
-      <h1 style={styles.h1}>Notifications Broadcast</h1>
+      <PageHeader
+        title="Notifications Broadcast"
+        subtitle="Compose and send targeted push broadcasts, then review delivery history."
+      />
 
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Compose Broadcast</p>
-
-        <div style={styles.grid2}>
-          <div>
-            <label style={styles.label}>Audience</label>
-            <select style={styles.input} value={audience} onChange={(e) => setAudience(e.target.value)}>
-              {AUDIENCES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-            </select>
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader title="Compose Broadcast" />
+        <CardBody>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <FieldShell label="Audience">
+              <Select value={audience} onChange={(e) => setAudience(e.target.value)}>
+                {AUDIENCES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+              </Select>
+            </FieldShell>
+            <FieldShell label="Type">
+              <Select value={type} onChange={(e) => setType(e.target.value)}>
+                {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </Select>
+            </FieldShell>
           </div>
-          <div>
-            <label style={styles.label}>Type</label>
-            <select style={styles.input} value={type} onChange={(e) => setType(e.target.value)}>
-              {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-          </div>
-        </div>
 
-        {audience === 'specific' && (
-          <div style={{ marginTop: 12, position: 'relative' }}>
-            <label style={styles.label}>Search User</label>
-            {selectedUser ? (
-              <div style={styles.selectedUser}>
-                <span>{selectedUser.full_name || selectedUser.username} — {selectedUser.email}</span>
-                <button style={styles.clearBtn} onClick={() => { setSelectedUser(null); setUserQuery(''); }}>Clear</button>
-              </div>
-            ) : (
-              <>
-                <input
-                  style={styles.input}
-                  placeholder="Username, email, or name"
-                  value={userQuery}
-                  onChange={(e) => setUserQuery(e.target.value)}
-                />
-                {userHits.length > 0 && (
-                  <div style={styles.dropdown}>
-                    {userHits.map((u) => (
-                      <div key={u.id} style={styles.dropdownItem} onClick={() => { setSelectedUser(u); setUserHits([]); }}>
-                        <div style={{ fontWeight: 600, fontSize: 12 }}>{u.full_name || u.username}</div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>{u.email}</div>
-                      </div>
-                    ))}
+          {audience === 'specific' && (
+            <div style={{ marginTop: 12, position: 'relative' }}>
+              <FieldShell label="Search User">
+                {selectedUser ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 'var(--text-sm)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-md)', background: 'var(--bg-subtle)' }}>
+                    <span>{selectedUser.full_name || selectedUser.username} — {selectedUser.email}</span>
+                    <Button variant="ghost" size="sm" onClick={() => { setSelectedUser(null); setUserQuery(''); }}>Clear</Button>
                   </div>
+                ) : (
+                  <>
+                    <Input
+                      placeholder="Username, email, or name"
+                      value={userQuery}
+                      onChange={(e) => setUserQuery(e.target.value)}
+                    />
+                    {userHits.length > 0 && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', marginTop: 2, maxHeight: 200, overflowY: 'auto', zIndex: 10, boxShadow: 'var(--shadow-md)' }}>
+                        {userHits.map((u) => (
+                          <div key={u.id} style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)' }} onClick={() => { setSelectedUser(u); setUserHits([]); }}>
+                            <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{u.full_name || u.username}</div>
+                            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>{u.email}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
-        )}
+              </FieldShell>
+            </div>
+          )}
 
-        <div style={{ marginTop: 12 }}>
-          <label style={styles.label}>Title</label>
-          <input
-            ref={titleRef}
-            style={styles.input}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onFocus={() => { lastFocused.current = 'title'; }}
-            maxLength={80}
-          />
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <label style={styles.label}>Message</label>
-          <textarea
-            ref={messageRef}
-            style={{ ...styles.input, minHeight: 90, resize: 'vertical' }}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onFocus={() => { lastFocused.current = 'message'; }}
-            maxLength={500}
-          />
-        </div>
-
-        <div style={styles.varsBox}>
-          <p style={styles.varsTitle}>Variables — click to insert at cursor</p>
-
-          <p style={styles.varsSection}>Per-user (substituted for each recipient)</p>
-          <div style={styles.chipRow}>
-            {PER_USER_VARS.map((v) => (
-              <button
-                key={v.token}
-                type="button"
-                style={styles.chip}
-                title={v.hint}
-                onClick={() => insertToken(v.token)}
-              >
-                {`{${v.token}}`}
-              </button>
-            ))}
+          <div style={{ marginTop: 12 }}>
+            <FieldShell label="Title">
+              <Input
+                ref={titleRef}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onFocus={() => { lastFocused.current = 'title'; }}
+                maxLength={80}
+              />
+            </FieldShell>
           </div>
 
-          <p style={styles.varsSection}>App config (same for everyone)</p>
-          <div style={styles.chipRow}>
-            {GLOBAL_VARS.map((v) => (
-              <button
-                key={v.token}
-                type="button"
-                style={styles.chip}
-                title={v.hint}
-                onClick={() => insertToken(v.token)}
-              >
-                {`{${v.token}}`}
-              </button>
-            ))}
+          <div style={{ marginTop: 12 }}>
+            <FieldShell label="Message">
+              <Textarea
+                ref={messageRef}
+                style={{ minHeight: 90, resize: 'vertical' }}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onFocus={() => { lastFocused.current = 'message'; }}
+                maxLength={500}
+              />
+            </FieldShell>
           </div>
 
-        </div>
+          <div style={{ marginTop: 14, padding: 12, border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-subtle)' }}>
+            <p style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 8px' }}>Variables — click to insert at cursor</p>
 
-        <div style={styles.sendRow}>
-          <p style={styles.countText}>
-            Recipients: <strong>{count === null ? '…' : count.toLocaleString()}</strong>
-          </p>
-          <button style={styles.sendBtn} onClick={send} disabled={sending}>
-            {sending ? 'Sending…' : 'Send Broadcast'}
-          </button>
-        </div>
-      </div>
-
-      <div style={styles.card}>
-        <p style={styles.cardTitle}>Recent Broadcasts</p>
-        {loading ? (
-          <p style={styles.empty}>Loading…</p>
-        ) : history.length === 0 ? (
-          <p style={styles.empty}>No broadcasts yet.</p>
-        ) : (
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Title</th>
-                <th style={styles.th}>Message</th>
-                <th style={styles.th}>Audience</th>
-                <th style={styles.th}>Delivered</th>
-                <th style={styles.th}>Sent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((b) => (
-                <tr key={b.id}>
-                  <td style={styles.td}>{b.title}</td>
-                  <td style={styles.td}>{b.message.length > 60 ? b.message.slice(0, 60) + '…' : b.message}</td>
-                  <td style={styles.td}><span style={styles.badge}>{b.audience}</span></td>
-                  <td style={styles.td}>{b.delivered_count}/{b.recipient_count}</td>
-                  <td style={styles.td}>{new Date(b.sent_at).toLocaleString()}</td>
-                </tr>
+            <p style={microLabel}>Per-user (substituted for each recipient)</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {PER_USER_VARS.map((v) => (
+                <button
+                  key={v.token}
+                  type="button"
+                  style={chipStyle}
+                  title={v.hint}
+                  onClick={() => insertToken(v.token)}
+                >
+                  {`{${v.token}}`}
+                </button>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+            </div>
 
-      {toast && <div style={styles.toast}>{toast}</div>}
+            <p style={microLabel}>App config (same for everyone)</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {GLOBAL_VARS.map((v) => (
+                <button
+                  key={v.token}
+                  type="button"
+                  style={chipStyle}
+                  title={v.hint}
+                  onClick={() => insertToken(v.token)}
+                >
+                  {`{${v.token}}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardBody>
+        <CardFooter style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>
+            Recipients: <strong style={{ fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', color: 'var(--fg-primary)' }}>{count === null ? '…' : count.toLocaleString()}</strong>
+          </span>
+          <Button variant="primary" size="sm" onClick={send} disabled={sending} loading={sending}>
+            {sending ? 'Sending…' : 'Send Broadcast'}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {isMobile ? (
+        <>
+          <p style={{ ...microLabel, margin: '0 0 8px' }}>Recent Broadcasts</p>
+          <BroadcastsMobile history={history} loading={loading} />
+        </>
+      ) : (
+        <Card>
+          <CardHeader title="Recent Broadcasts" />
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Title</Th>
+                  <Th>Message</Th>
+                  <Th>Audience</Th>
+                  <Th align="right">Delivered</Th>
+                  <Th>Sent</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {loading ? (
+                  <TableEmpty colSpan={5}>Loading…</TableEmpty>
+                ) : history.length === 0 ? (
+                  <TableEmpty colSpan={5}>No broadcasts yet.</TableEmpty>
+                ) : history.map((b) => (
+                  <Tr key={b.id}>
+                    <Td emphasis="primary">{b.title}</Td>
+                    <Td emphasis="secondary">{b.message.length > 60 ? b.message.slice(0, 60) + '…' : b.message}</Td>
+                    <Td><StatusDot status={b.audience} tone="neutral" /></Td>
+                    <Td align="right" mono>{b.delivered_count}/{b.recipient_count}</Td>
+                    <Td emphasis="secondary" mono>{new Date(b.sent_at).toLocaleString()}</Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
+
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, background: 'var(--fg-primary)', color: 'var(--bg-base)', padding: '10px 18px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', fontWeight: 600, zIndex: 51 }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: 20, fontWeight: 800, color: 'var(--fg-primary)', margin: '0 0 16px' },
-  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 20, marginBottom: 16, border: '1px solid var(--border-default)' },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 14px' },
-  grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  label: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: 5, textTransform: 'uppercase' },
-  input: { width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--border-default)', borderRadius: 6, backgroundColor: 'var(--bg-surface)', boxSizing: 'border-box' },
-  selectedUser: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', fontSize: 13, border: '1px solid var(--border-strong)', borderRadius: 6, backgroundColor: 'var(--bg-subtle)' },
-  clearBtn: { background: 'none', border: 'none', color: 'var(--tone-danger-fg)', cursor: 'pointer', fontSize: 11, fontWeight: 600 },
-  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 6, marginTop: 2, maxHeight: 200, overflowY: 'auto', zIndex: 10 },
-  dropdownItem: { padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)' },
-  sendRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border-subtle)' },
-  countText: { fontSize: 13, color: 'var(--fg-secondary)', margin: 0 },
-  sendBtn: { padding: '10px 20px', fontSize: 13, fontWeight: 700, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 6, cursor: 'pointer' },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--fg-secondary)', textTransform: 'uppercase', padding: '8px 10px', borderBottom: '1px solid var(--border-default)' },
-  td: { fontSize: 12, color: 'var(--fg-primary)', padding: '10px', borderBottom: '1px solid var(--border-subtle)' },
-  badge: { fontSize: 10, fontWeight: 600, padding: '2px 8px', backgroundColor: 'var(--tone-neutral-bg)', borderRadius: 10 },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)', margin: 0 },
-  toast: { position: 'fixed', bottom: 20, right: 20, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, zIndex: 100 },
-  varsBox: { marginTop: 14, padding: 12, border: '1px dashed var(--border-default)', borderRadius: 8, backgroundColor: 'var(--bg-subtle)' },
-  varsTitle: { fontSize: 12, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 8px' },
-  varsSection: { fontSize: 10, fontWeight: 700, color: 'var(--fg-secondary)', textTransform: 'uppercase', margin: '8px 0 6px' },
-  varsMuted: { fontSize: 11, color: 'var(--fg-tertiary)' },
-  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
-  chip: { fontSize: 11, fontWeight: 600, padding: '4px 8px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 12, cursor: 'pointer', fontFamily: 'monospace', color: 'var(--fg-primary)' },
-};

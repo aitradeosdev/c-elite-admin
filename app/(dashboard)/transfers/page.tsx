@@ -2,36 +2,79 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Download } from 'lucide-react';
-import { ExportModal } from '../../_ui';
+import {
+  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, Select, ExportModal,
+} from '../../_ui';
 import { printTable, rangeToDates } from '../../lib/printExport';
 import type { RangeKey } from '../../lib/printExport';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
 
-function formatNaira(n: number | string | null | undefined) {
-  const v = Number(n || 0);
-  return '₦' + v.toLocaleString('en-NG', { minimumFractionDigits: 2 });
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; color: string }> = {
-    success: { bg: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' },
-    completed: { bg: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' },
-    pending: { bg: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)' },
-    failed: { bg: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)' },
-  };
-  const s = map[status] || { bg: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)' };
+function TypeTag({ type }: { type: string }) {
+  const isTag = type === 'tag';
   return (
     <span style={{
-      backgroundColor: s.bg,
-      color: s.color,
-      padding: '3px 8px',
-      borderRadius: 100,
-      fontSize: 10,
-      fontWeight: 700,
-    }}>{status || '-'}</span>
+      fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500,
+      color: isTag ? 'var(--tone-info-fg)' : 'var(--tone-purple-fg)',
+      background: isTag ? 'var(--tone-info-bg)' : 'var(--tone-purple-bg)',
+      border: `1px solid ${isTag ? 'var(--tone-info-border)' : 'var(--tone-purple-border)'}`,
+      padding: '2px 7px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
+    }}>{isTag ? 'tag' : 'bank'}</span>
+  );
+}
+
+function senderOf(t: any) { return t.sender?.username || t.sender?.full_name || '-'; }
+function recipientOf(t: any) {
+  return t.type === 'tag'
+    ? (t.recipient?.username || t.recipient?.full_name || '-')
+    : (t.recipient_account_name || '-');
+}
+
+function TransfersMobile({ rows, loading }: { rows: any[]; loading: boolean }) {
+  if (loading && rows.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2, 3].map((k) => (
+          <div key={k} style={{ height: 84, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
+        ))}
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No transfers found
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map((t: any) => (
+        <div key={t.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+              {formatNaira(t.amount)}
+            </div>
+            <StatusDot status={t.status} />
+          </div>
+          <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginTop: 4, color: 'var(--fg-primary)' }}>
+            @{senderOf(t)} <span style={{ color: 'var(--fg-tertiary)' }}>→</span> {recipientOf(t)}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <TypeTag type={t.type} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
+              fee {formatNaira(t.fee || 0)} · {new Date(t.created_at).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
 export default function TransfersPage() {
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -138,103 +181,104 @@ export default function TransfersPage() {
     }
   };
 
+  const sumInView = rows.reduce((a, r) => a + Number(r?.amount || 0), 0);
+
   return (
     <div>
-      <div style={s.header}>
-        <span style={s.title}>Transfers</span>
-        <div style={s.headerActions}>
-          <button style={s.printBtn} onClick={() => setExportOpen(true)}>
-            <Download size={14} />
+      <PageHeader
+        title="Transfers"
+        subtitle="Peer-to-peer tag and bank transfers across the platform."
+        actions={
+          <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
             Export
-          </button>
-        </div>
-      </div>
+          </Button>
+        }
+      />
 
-      <div style={s.filters}>
-        <input
-          placeholder="Search sender or recipient"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={s.filterInput}
-        />
-        <select value={type} onChange={(e) => setType(e.target.value)} style={s.filterSelect}>
-          <option value="">All Types</option>
-          <option value="tag">Tag Transfer</option>
-          <option value="bank">Bank Transfer</option>
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={s.filterSelect}>
-          <option value="">All Statuses</option>
+      <StatStrip items={[
+        { label: 'In view', value: rows.length.toLocaleString() },
+        { label: 'Amount in view', value: formatNaira(sumInView), mono: true },
+        { label: 'Total transfers', value: total.toLocaleString() },
+      ]} />
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <Input placeholder="Search sender or recipient" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 220 }} />
+        <Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 130 }}>
+          <option value="">All types</option>
+          <option value="tag">Tag transfer</option>
+          <option value="bank">Bank transfer</option>
+        </Select>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 130 }}>
+          <option value="">All statuses</option>
           <option value="success">Success</option>
           <option value="completed">Completed</option>
           <option value="pending">Pending</option>
           <option value="failed">Failed</option>
-        </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={s.filterInput} />
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={s.filterInput} />
-        <button style={s.applyBtn} onClick={applyFilters}>Apply</button>
-        <button style={s.clearBtn} onClick={clearFilters}>Clear</button>
+        </Select>
+        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ minWidth: 140 }} />
+        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ minWidth: 140 }} />
+        <Button variant="primary" size="sm" onClick={applyFilters}>Apply</Button>
+        <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>
       </div>
 
-      <div style={s.tableWrap}>
-        <table style={s.table}>
-          <thead>
-            <tr>
-              {['Type', 'Sender', 'Recipient', 'Amount', 'Fee', 'Status', 'Date'].map((col) => (
-                <th key={col} style={s.th}>{col}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>Loading...</td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={7} style={{ ...s.td, textAlign: 'center', color: 'var(--fg-tertiary)' }}>No transfers found</td></tr>
-            ) : rows.map((t: any, i: number) => {
-              const senderName = t.sender?.username || t.sender?.full_name || '-';
-              const recipientName = t.type === 'tag'
-                ? (t.recipient?.username || t.recipient?.full_name || '-')
-                : (t.recipient_account_name || '-');
-              const recipientDetail = t.type === 'bank'
-                ? `${t.recipient_bank_name || ''} - ${t.recipient_account_number || ''}`
-                : '';
-              return (
-                <tr key={t.id} style={{ backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)' }}>
-                  <td style={s.td}>
-                    <span style={t.type === 'tag' ? s.tagBadge : s.bankBadge}>
-                      {t.type === 'tag' ? 'Tag' : 'Bank'}
-                    </span>
-                  </td>
-                  <td style={{ ...s.td, fontWeight: 600 }}>
-                    <a href={`/users/${t.sender_id}`} style={{ color: 'var(--tone-info-fg)', textDecoration: 'none' }}>@{senderName}</a>
-                  </td>
-                  <td style={s.td}>
-                    <div>{recipientName}</div>
-                    {recipientDetail && <div style={{ fontSize: 10, color: 'var(--fg-tertiary)', marginTop: 2 }}>{recipientDetail}</div>}
-                  </td>
-                  <td style={{ ...s.td, fontWeight: 700 }}>{formatNaira(t.amount)}</td>
-                  <td style={s.td}>{formatNaira(t.fee || 0)}</td>
-                  <td style={s.td}><StatusBadge status={t.status} /></td>
-                  <td style={s.td}>{new Date(t.created_at).toLocaleString()}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {isMobile ? (
+        <TransfersMobile rows={rows} loading={loading} />
+      ) : (
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Type</Th>
+                  <Th>Sender</Th>
+                  <Th>Recipient</Th>
+                  <Th align="right">Amount</Th>
+                  <Th align="right">Fee</Th>
+                  <Th>Status</Th>
+                  <Th>Date</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {loading ? (
+                  <TableEmpty colSpan={7}>Loading…</TableEmpty>
+                ) : rows.length === 0 ? (
+                  <TableEmpty colSpan={7}>No transfers found</TableEmpty>
+                ) : rows.map((t: any) => {
+                  const recipientDetail = t.type === 'bank'
+                    ? `${t.recipient_bank_name || ''} · ${t.recipient_account_number || ''}`
+                    : '';
+                  return (
+                    <Tr key={t.id}>
+                      <Td><TypeTag type={t.type} /></Td>
+                      <Td emphasis="primary">
+                        <a href={`/users/${t.sender_id}`} style={{ color: 'var(--fg-link)', textDecoration: 'none' }}>@{senderOf(t)}</a>
+                      </Td>
+                      <Td>
+                        <div>{recipientOf(t)}</div>
+                        {recipientDetail && (
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>{recipientDetail}</div>
+                        )}
+                      </Td>
+                      <Td align="right" mono emphasis="primary">{formatNaira(t.amount)}</Td>
+                      <Td align="right" mono emphasis="secondary">{formatNaira(t.fee || 0)}</Td>
+                      <Td><StatusDot status={t.status} /></Td>
+                      <Td emphasis="secondary" mono>{new Date(t.created_at).toLocaleString()}</Td>
+                    </Tr>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
 
       {totalPages > 1 && (
-        <div style={s.pagination}>
-          <button
-            style={{ ...s.pageBtn, opacity: page <= 1 ? 0.4 : 1 }}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-          >Previous</button>
-          <span style={s.pageInfo}>Page {page} of {totalPages} ({total.toLocaleString()} results)</span>
-          <button
-            style={{ ...s.pageBtn, opacity: page >= totalPages ? 0.4 : 1 }}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-          >Next</button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginTop: 'var(--space-4)' }}>
+          <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Previous</Button>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
+            PAGE {page} / {totalPages} · {total.toLocaleString()} RESULTS
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next</Button>
         </div>
       )}
 
@@ -253,24 +297,3 @@ export default function TransfersPage() {
     </div>
   );
 }
-
-const s: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  title: { fontSize: 15, fontWeight: 800, color: 'var(--fg-primary)' },
-  headerActions: { display: 'flex', gap: 10, alignItems: 'center' },
-  printBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  filters: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
-  filterInput: { border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', minWidth: 140 },
-  filterSelect: { border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, outline: 'none', backgroundColor: 'var(--bg-surface)', minWidth: 120 },
-  applyBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-  clearBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 100, padding: '8px 18px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  tableWrap: { overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', fontSize: 12, fontWeight: 700, padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: '12px 12px', color: 'var(--fg-secondary)', fontSize: 12, verticalAlign: 'middle' },
-  tagBadge: { backgroundColor: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  bankBadge: { backgroundColor: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '3px 8px', borderRadius: 100, fontSize: 10, fontWeight: 700 },
-  pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 },
-  pageBtn: { backgroundColor: 'var(--bg-subtle)', color: 'var(--fg-secondary)', border: '1px solid var(--border-default)', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-  pageInfo: { fontSize: 12, color: 'var(--fg-tertiary)' },
-};

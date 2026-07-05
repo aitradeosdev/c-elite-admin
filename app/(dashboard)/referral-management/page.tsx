@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  PageHeader, Card, CardHeader, CardBody, CardFooter,
+  Table, THead, TBody, Tr, Th, Td, TableEmpty,
+  Button, Input, FieldShell, Toggle,
+} from '../../_ui';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { formatNaira, StatusDot, StatStrip, type Tone } from '../_shared/statusUi';
 
 interface LogRow {
   id: string;
@@ -23,7 +30,51 @@ interface Stats {
 
 const CONFIG_KEYS = ['referral_active', 'referral_referrer_bonus', 'referral_referee_bonus', 'referral_min_trade_usd', 'referral_max_per_day'];
 
+function logStatus(r: LogRow): { text: string; tone: Tone } {
+  if (r.referrer_credited && r.referee_credited) return { text: 'Paid', tone: 'success' };
+  if (r.first_trade_completed) return { text: 'Pending Payout', tone: 'warning' };
+  return { text: 'Awaiting Trade', tone: 'neutral' };
+}
+
+function bonusOf(r: LogRow) {
+  return formatNaira((r.referrer_bonus_amount || 0) + (r.referee_bonus_amount || 0));
+}
+
+function ReferralManagementMobile({ log }: { log: LogRow[] }) {
+  if (log.length === 0) {
+    return (
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
+        No referrals yet
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {log.map((r) => {
+        const st = logStatus(r);
+        return (
+          <div key={r.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                {bonusOf(r)}
+              </div>
+              <StatusDot status={st.text} tone={st.tone} />
+            </div>
+            <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginTop: 4, color: 'var(--fg-primary)' }}>
+              @{r.referrer_username} <span style={{ color: 'var(--fg-tertiary)' }}>→</span> @{r.referee_username}
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 8 }}>
+              referred {new Date(r.created_at).toLocaleDateString()} · first trade {r.first_trade_at ? new Date(r.first_trade_at).toLocaleDateString() : '—'}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ReferralManagementPage() {
+  const isMobile = useIsMobile();
   const [config, setConfig] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Record<string, string>>({});
   const [stats, setStats] = useState<Stats | null>(null);
@@ -68,142 +119,104 @@ export default function ReferralManagementPage() {
     else showToast('Failed to save settings.');
   };
 
-  if (loading) return <p style={styles.empty}>Loading...</p>;
-
-  const statusBadge = (r: LogRow) => {
-    if (r.referrer_credited && r.referee_credited) return { text: 'Paid', style: styles.badgePaid };
-    if (r.first_trade_completed) return { text: 'Pending Payout', style: styles.badgePending };
-    return { text: 'Awaiting Trade', style: styles.badgeAwait };
-  };
+  if (loading) {
+    return (
+      <div>
+        <PageHeader title="Referral Management" subtitle="Configure referral bonuses and review every referral payout." />
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: 20 }}>Loading…</p>
+      </div>
+    );
+  }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.cardHead}>
-          <span style={styles.cardTitle}>Settings</span>
-          <div style={{ ...styles.toggle, backgroundColor: getToggle('referral_active') ? 'var(--accent-base)' : 'var(--bg-muted)' }} onClick={() => toggleKey('referral_active')}>
-            <div style={{ ...styles.toggleThumb, left: getToggle('referral_active') ? 22 : 2 }} />
-          </div>
-        </div>
+    <div>
+      <PageHeader
+        title="Referral Management"
+        subtitle="Configure referral bonuses and review every referral payout."
+      />
 
-        <div style={styles.fieldRow}>
-          <div style={{ flex: 1 }}>
-            <label style={styles.fieldLabel}>REFERRER BONUS (₦)</label>
-            <input style={styles.input} type="number" value={getValue('referral_referrer_bonus')} onChange={(e) => setValue('referral_referrer_bonus', e.target.value)} />
+      <Card style={{ marginBottom: 'var(--space-4)' }}>
+        <CardHeader
+          title="Settings"
+          actions={
+            <Toggle checked={getToggle('referral_active')} onChange={() => toggleKey('referral_active')} />
+          }
+        />
+        <CardBody>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+            <FieldShell label="Referrer bonus (₦)">
+              <Input type="number" value={getValue('referral_referrer_bonus')} onChange={(e) => setValue('referral_referrer_bonus', e.target.value)} />
+            </FieldShell>
+            <FieldShell label="Referee bonus (₦)">
+              <Input type="number" value={getValue('referral_referee_bonus')} onChange={(e) => setValue('referral_referee_bonus', e.target.value)} />
+            </FieldShell>
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={styles.fieldLabel}>REFEREE BONUS (₦)</label>
-            <input style={styles.input} type="number" value={getValue('referral_referee_bonus')} onChange={(e) => setValue('referral_referee_bonus', e.target.value)} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <FieldShell label="Min first-trade (USD)">
+              <Input type="number" value={getValue('referral_min_trade_usd')} onChange={(e) => setValue('referral_min_trade_usd', e.target.value)} />
+            </FieldShell>
+            <FieldShell label="Max referrals / day">
+              <Input type="number" value={getValue('referral_max_per_day')} onChange={(e) => setValue('referral_max_per_day', e.target.value)} />
+            </FieldShell>
           </div>
-        </div>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: '12px 0 0' }}>Trigger: First Trade</p>
+        </CardBody>
+        <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="primary" size="sm" loading={saving} disabled={saving} onClick={handleSave}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </CardFooter>
+      </Card>
 
-        <div style={styles.fieldRow}>
-          <div style={{ flex: 1 }}>
-            <label style={styles.fieldLabel}>MIN FIRST-TRADE (USD)</label>
-            <input style={styles.input} type="number" value={getValue('referral_min_trade_usd')} onChange={(e) => setValue('referral_min_trade_usd', e.target.value)} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={styles.fieldLabel}>MAX REFERRALS / DAY</label>
-            <input style={styles.input} type="number" value={getValue('referral_max_per_day')} onChange={(e) => setValue('referral_max_per_day', e.target.value)} />
-          </div>
-        </div>
-        <p style={styles.readonlyNote}>Trigger: First Trade</p>
+      <StatStrip items={[
+        { label: 'Total referrals', value: (stats?.total_referrals ?? 0).toLocaleString() },
+        { label: 'Pending payout', value: formatNaira(stats?.pending_payout ?? 0), mono: true },
+        { label: 'Total paid out', value: formatNaira(stats?.total_paid_out ?? 0), mono: true },
+      ]} />
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-          <button style={{ ...styles.saveBtn, opacity: saving ? 0.7 : 1 }} disabled={saving} onClick={handleSave}>
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </div>
-
-      <div style={styles.statCard}>
-        <div style={styles.statItem}>
-          <span style={styles.statLabel}>Total Referrals</span>
-          <span style={styles.statValue}>{stats?.total_referrals ?? 0}</span>
-        </div>
-        <div style={styles.statItem}>
-          <span style={styles.statLabel}>Pending Payout</span>
-          <span style={styles.statValue}>₦{Number(stats?.pending_payout ?? 0).toLocaleString()}</span>
-        </div>
-        <div style={styles.statItem}>
-          <span style={styles.statLabel}>Total Paid Out</span>
-          <span style={styles.statValue}>₦{Number(stats?.total_paid_out ?? 0).toLocaleString()}</span>
-        </div>
-      </div>
-
-      <div style={styles.section}>
-        <p style={styles.sectionTitle}>Referral Log</p>
-        {log.length === 0 ? (
-          <p style={styles.empty}>No referrals yet.</p>
-        ) : (
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Referrer</th>
-                  <th style={styles.th}>Referee</th>
-                  <th style={styles.th}>Referred On</th>
-                  <th style={styles.th}>First Trade</th>
-                  <th style={styles.th}>Bonus</th>
-                  <th style={styles.th}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {log.map((r) => {
-                  const b = statusBadge(r);
+      {isMobile ? (
+        <ReferralManagementMobile log={log} />
+      ) : (
+        <Card>
+          <CardBody flush>
+            <Table flush>
+              <THead>
+                <Tr>
+                  <Th>Referrer</Th>
+                  <Th>Referee</Th>
+                  <Th>Referred On</Th>
+                  <Th>First Trade</Th>
+                  <Th align="right">Bonus</Th>
+                  <Th>Status</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {log.length === 0 ? (
+                  <TableEmpty colSpan={6}>No referrals yet</TableEmpty>
+                ) : log.map((r) => {
+                  const st = logStatus(r);
                   return (
-                    <tr key={r.id}>
-                      <td style={styles.td}>@{r.referrer_username}</td>
-                      <td style={styles.td}>@{r.referee_username}</td>
-                      <td style={styles.td}>{new Date(r.created_at).toLocaleDateString()}</td>
-                      <td style={styles.td}>{r.first_trade_at ? new Date(r.first_trade_at).toLocaleDateString() : '—'}</td>
-                      <td style={styles.td}>₦{Number((r.referrer_bonus_amount || 0) + (r.referee_bonus_amount || 0)).toLocaleString()}</td>
-                      <td style={styles.td}><span style={b.style}>{b.text}</span></td>
-                    </tr>
+                    <Tr key={r.id}>
+                      <Td emphasis="primary">@{r.referrer_username}</Td>
+                      <Td emphasis="secondary">@{r.referee_username}</Td>
+                      <Td emphasis="secondary" mono>{new Date(r.created_at).toLocaleDateString()}</Td>
+                      <Td emphasis="secondary" mono>{r.first_trade_at ? new Date(r.first_trade_at).toLocaleDateString() : '—'}</Td>
+                      <Td align="right" mono emphasis="primary">{bonusOf(r)}</Td>
+                      <Td><StatusDot status={st.text} tone={st.tone} /></Td>
+                    </Tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
 
-      {toast && <div style={styles.toast}>{toast}</div>}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, background: 'var(--fg-primary)', color: 'var(--bg-base)', padding: '10px 18px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', fontWeight: 600, zIndex: 51 }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: { paddingBottom: 40 },
-  empty: { fontSize: 12, color: 'var(--fg-tertiary)', padding: 20, textAlign: 'center' },
-
-  card: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16, marginBottom: 12 },
-  cardHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  cardTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' },
-  fieldRow: { display: 'flex', gap: 12 },
-  fieldLabel: { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
-  input: { width: '100%', border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--fg-primary)', outline: 'none', boxSizing: 'border-box', backgroundColor: 'var(--bg-surface)' },
-  readonlyNote: { fontSize: 12, color: 'var(--fg-tertiary)', marginTop: 12, marginBottom: 0 },
-  saveBtn: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', border: 'none', borderRadius: 100, padding: '8px 20px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
-
-  toggle: { width: 44, height: 24, borderRadius: 100, position: 'relative', cursor: 'pointer', transition: 'background-color 0.25s', flexShrink: 0 },
-  toggleThumb: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: 'var(--bg-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s' },
-
-  statCard: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 },
-  statItem: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 6 },
-  statLabel: { fontSize: 11, color: 'var(--fg-tertiary)' },
-  statValue: { fontSize: 18, fontWeight: 800, color: 'var(--fg-primary)' },
-
-  section: { backgroundColor: 'var(--bg-surface)', borderRadius: 10, padding: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 12px' },
-  tableWrap: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-  th: { backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', textAlign: 'left', padding: '8px 10px', fontWeight: 600, fontSize: 11 },
-  td: { padding: '8px 10px', borderBottom: '1px solid var(--border-default)', color: 'var(--fg-secondary)' },
-
-  badgePaid: { backgroundColor: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgePending: { backgroundColor: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-  badgeAwait: { backgroundColor: 'var(--tone-neutral-bg)', color: 'var(--tone-neutral-fg)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 },
-
-  toast: { position: 'fixed', bottom: 24, right: 24, backgroundColor: 'var(--accent-base)', color: 'var(--accent-fg)', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 51 },
-};
