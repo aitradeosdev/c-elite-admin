@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronsLeft, ChevronsRight, LogOut } from 'lucide-react';
+import { ChevronsLeft, ChevronsRight, LogOut, Menu } from 'lucide-react';
 import { ToastProvider } from '../../_ui/Misc';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { findBreadcrumb, filterNavByPermissions, findNavKey } from './nav';
@@ -25,6 +25,7 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const navGroups = useMemo(
     () => filterNavByPermissions(allowedKeys, isSuperAdmin),
     [allowedKeys, isSuperAdmin],
@@ -36,6 +37,8 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
       if (saved === '1') setCollapsed(true);
     } catch {  }
   }, []);
+
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
 
   const toggleCollapse = () => {
     setCollapsed((c) => {
@@ -62,7 +65,7 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
   return (
     <ToastProvider>
       <div className={s.shell}>
-        <aside className={[s.sidebar, collapsed && s.collapsed].filter(Boolean).join(' ')} aria-label="Primary">
+        <aside className={[s.sidebar, collapsed && s.collapsed, mobileOpen && s.mobileOpen].filter(Boolean).join(' ')} aria-label="Primary">
           <div className={s.sidebarHead}>
             <div className={s.brandMark}>CE</div>
             {!collapsed ? (
@@ -125,9 +128,24 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
           </div>
         </aside>
 
+        <div
+          className={[s.scrim, mobileOpen && s.scrimOpen].filter(Boolean).join(' ')}
+          onClick={() => setMobileOpen(false)}
+          aria-hidden
+        />
+
         <main className={s.main}>
           <header className={s.topBar}>
-            <nav className={s.breadcrumb} aria-label="Breadcrumb">
+            <div className={s.topLeft}>
+              <button
+                type="button"
+                className={s.hamburger}
+                onClick={() => setMobileOpen(true)}
+                aria-label="Open menu"
+              >
+                <Menu size={18} />
+              </button>
+              <nav className={s.breadcrumb} aria-label="Breadcrumb">
               {breadcrumb ? (
                 <>
                   <span className={s.crumb}>{breadcrumb.group}</span>
@@ -137,7 +155,8 @@ export function Shell({ allowedKeys, isSuperAdmin, username, roleTitle, children
               ) : (
                 <span className={s.crumbCurrent}>Admin</span>
               )}
-            </nav>
+              </nav>
+            </div>
             <div className={s.topRight}>
               <ThemeSwitcher />
             </div>

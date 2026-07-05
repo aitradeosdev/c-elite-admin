@@ -196,6 +196,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
 }
 
 a { color: var(--fg-link); text-decoration: none; }

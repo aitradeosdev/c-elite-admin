@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { cookies, headers } from 'next/headers';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
@@ -21,6 +21,13 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'CardElite Admin',
   description: 'CardElite Admin Panel',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 async function resolveInitialTheme(): Promise<'light' | 'dark'> {
