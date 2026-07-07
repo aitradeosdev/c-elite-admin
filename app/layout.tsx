@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { cookies, headers } from 'next/headers';
 import { Inter, JetBrains_Mono } from 'next/font/google';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import './globals.css';
 import { ThemeProvider } from './_ui/theme';
 import { NoZoom } from './_ui/NoZoom';
@@ -65,6 +66,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
         <NoZoom />
         <ThemeProvider initialMode={initialMode} initialResolved={initialTheme}>{children}</ThemeProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
