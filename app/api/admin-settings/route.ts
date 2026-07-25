@@ -5,11 +5,13 @@ import { supabaseAdmin } from '../../lib/supabase';
 import { redactAudit } from '../../lib/redact';
 
 const GATEWAYS = ['paystack', 'monnify', 'novac'];
+const BILL_PROVIDERS = ['vtpass', 'novac'];
 
 const KEYS = [
   ...GATEWAYS.map((g) => `gateway_${g}_enabled`),
   'active_payment_gateway',
-  'bill_vtpass_enabled',
+  ...BILL_PROVIDERS.map((p) => `bill_${p}_enabled`),
+  'active_bill_provider',
   'live_chat_url',
   'app_current_version',
   'app_minimum_version',
@@ -70,6 +72,19 @@ export async function PATCH(req: NextRequest) {
       .from('app_config').select('value').eq('key', enabledKey).single()).data?.value;
     if (enabledVal !== 'true') {
       return NextResponse.json({ error: 'Primary gateway must be enabled' }, { status: 400 });
+    }
+  }
+
+  if (changes.active_bill_provider) {
+    const primary = String(changes.active_bill_provider);
+    if (!BILL_PROVIDERS.includes(primary)) {
+      return NextResponse.json({ error: 'Invalid primary bill provider' }, { status: 400 });
+    }
+    const enabledKey = `bill_${primary}_enabled`;
+    const enabledVal = changes[enabledKey] ?? (await supabaseAdmin
+      .from('app_config').select('value').eq('key', enabledKey).single()).data?.value;
+    if (enabledVal !== 'true') {
+      return NextResponse.json({ error: 'Primary bill provider must be enabled' }, { status: 400 });
     }
   }
 

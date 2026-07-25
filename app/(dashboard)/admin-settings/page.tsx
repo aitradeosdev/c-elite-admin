@@ -15,6 +15,11 @@ const GATEWAYS = [
   { key: 'novac', label: 'Novac' },
 ];
 
+const BILL_PROVIDERS = [
+  { key: 'vtpass', label: 'VTPass' },
+  { key: 'novac', label: 'Novac' },
+];
+
 const rowStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   padding: '10px 12px', background: 'var(--bg-subtle)',
@@ -103,7 +108,22 @@ export default function AdminSettingsPage() {
     save({ active_payment_gateway: g }, 'gateways');
   };
 
-  const toggleVtpass = (v: boolean) => save({ bill_vtpass_enabled: v ? 'true' : 'false' }, 'vtpass');
+  const toggleBillProvider = (p: string, enabled: boolean) => {
+    const billPrimary = config.active_bill_provider || 'vtpass';
+    if (!enabled && billPrimary === p) {
+      showToast('Cannot disable the primary bill provider');
+      return;
+    }
+    save({ [`bill_${p}_enabled`]: enabled ? 'true' : 'false' }, 'billProviders');
+  };
+
+  const setBillPrimary = (p: string) => {
+    if (config[`bill_${p}_enabled`] !== 'true') {
+      showToast('Enable the provider first');
+      return;
+    }
+    save({ active_bill_provider: p }, 'billProviders');
+  };
   const saveLiveChat = () => save({ live_chat_url: liveChatUrl }, 'liveChat');
   const saveMaxApproval = () => {
     const n = Number(maxApproval);
@@ -223,15 +243,32 @@ export default function AdminSettingsPage() {
       </Card>
 
       <Card style={{ marginBottom: 'var(--space-4)' }}>
-        <CardHeader title="Bill Payment API" />
+        <CardHeader
+          title="Bill Providers"
+          subtitle="Provider for airtime, data, cable and electricity. Services a provider doesn't offer are hidden in the app automatically."
+        />
         <CardBody>
-          <div style={rowStyle}>
-            <span style={rowLabelStyle}>VTpass</span>
-            <Toggle
-              checked={config.bill_vtpass_enabled === 'true'}
-              onChange={toggleVtpass}
-              disabled={savingKey === 'vtpass'}
-            />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {BILL_PROVIDERS.map((p) => {
+              const enabled = config[`bill_${p.key}_enabled`] === 'true';
+              const isPrimary = (config.active_bill_provider || 'vtpass') === p.key;
+              return (
+                <div key={p.key} style={rowStyle}>
+                  <span style={rowLabelStyle}>{p.label}</span>
+                  <label style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="primary_bill_provider"
+                      checked={isPrimary}
+                      onChange={() => setBillPrimary(p.key)}
+                      disabled={savingKey === 'billProviders' || !enabled}
+                    />
+                    Primary
+                  </label>
+                  <Toggle checked={enabled} onChange={(v) => toggleBillProvider(p.key, v)} disabled={savingKey === 'billProviders'} />
+                </div>
+              );
+            })}
           </div>
         </CardBody>
       </Card>
@@ -359,7 +396,7 @@ export default function AdminSettingsPage() {
       <Card style={{ marginBottom: 'var(--space-4)', borderColor: emergencyOn ? 'var(--tone-danger-fg)' : undefined }}>
         <CardHeader
           title={<span style={{ color: emergencyOn ? 'var(--tone-danger-fg)' : undefined }}>Emergency Mode</span>}
-          subtitle="When ON, all mobile clients are force-logged-out and shown a blocking maintenance modal on next resume."
+          subtitle="When ON, all mobile clients show a blocking maintenance screen (no logout) and withdrawals/bill payments are refused server-side."
         />
         <CardBody>
           <div style={rowStyle}>
@@ -398,7 +435,7 @@ export default function AdminSettingsPage() {
       >
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', lineHeight: 1.5, margin: 0 }}>
           {emergencyConfirm === 'on'
-            ? 'This will force-logout every user on the mobile app and block access until you disable it. Continue?'
+            ? 'This will show every user a blocking maintenance screen and suspend withdrawals and bill payments until you disable it. Continue?'
             : 'Users will regain access to the app. Continue?'}
         </p>
       </Modal>
