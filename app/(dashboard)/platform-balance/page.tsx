@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PageHeader, Card, CardHeader, CardBody, CardFooter, FieldShell, Input, Button, Tabs } from '../../_ui';
+import { PageHeader, Card, CardHeader, CardBody, CardFooter, FieldShell, Input, Button, Tabs, SkeletonLines } from '../../_ui';
 import { StatStrip } from '../_shared/statusUi';
 
 type Config = Record<string, string>;
@@ -60,7 +60,7 @@ export default function PlatformBalancePage() {
         <PageHeader title="Platform Balance" subtitle="Choose how the platform balance is sourced and reported." />
         <Card>
           <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+            <SkeletonLines />
           </CardBody>
         </Card>
       </div>

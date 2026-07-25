@@ -23,15 +23,15 @@ export type { ModalProps, SidePanelProps, ModalSize } from './Overlay';
 
 export { ExportModal } from './ExportModal';
 
-export { Table, THead, TBody, Tr, Th, Td, TableEmpty } from './Table';
-export type { TableProps, TrProps, ThProps, TdProps, TableDensity } from './Table';
+export { Table, THead, TBody, Tr, Th, Td, TableEmpty, TableSkeleton } from './Table';
+export type { TableProps, TrProps, ThProps, TdProps, TableDensity, TableSkeletonProps } from './Table';
 
 export {
-  Skeleton, EmptyState, PageHeader, SectionTitle, Kpi, KpiGrid, Spinner,
+  Skeleton, SkeletonLines, EmptyState, PageHeader, SectionTitle, Kpi, KpiGrid, Spinner,
   ToastProvider, useToast,
 } from './Misc';
 export type {
-  SkeletonProps, EmptyStateProps, PageHeaderProps, KpiProps, ToastTone,
+  SkeletonProps, SkeletonLinesProps, EmptyStateProps, PageHeaderProps, KpiProps, ToastTone,
 } from './Misc';
 
 export { ThemeProvider, useTheme } from './theme';

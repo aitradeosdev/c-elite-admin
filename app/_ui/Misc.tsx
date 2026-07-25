@@ -18,6 +18,23 @@ export function Skeleton({ width, height = 14, rounded, style, className, ...res
   return <div className={[s.skeleton, className].filter(Boolean).join(' ')} style={merged} {...rest} />;
 }
 
+const LINE_WIDTHS = ['82%', '64%', '91%', '55%', '73%', '68%'];
+
+export interface SkeletonLinesProps {
+  rows?: number;
+  gap?: number;
+  height?: number;
+}
+export function SkeletonLines({ rows = 3, gap = 10, height = 13 }: SkeletonLinesProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <Skeleton key={i} height={height} width={LINE_WIDTHS[i % LINE_WIDTHS.length]} />
+      ))}
+    </div>
+  );
+}
+
 export interface EmptyStateProps {
   icon?: ReactNode;
   title?: ReactNode;

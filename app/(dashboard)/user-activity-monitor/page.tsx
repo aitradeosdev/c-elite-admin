@@ -3,8 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Toggle, SidePanel,
-} from '../../_ui';
+  Button, Input, Toggle, SidePanel, TableSkeleton, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
 
@@ -55,7 +54,7 @@ function DetailBody({ detail, detailLoading, terminate, actionBusy, err }: {
   detail: any; detailLoading: boolean; terminate: () => void; actionBusy: boolean; err: string;
 }) {
   if (detailLoading || !detail?.user) {
-    return <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)', padding: '20px 0' }}>Loading…</div>;
+    return <SkeletonLines />;
   }
   const p = presence(detail.user);
   return (
@@ -267,7 +266,7 @@ export default function UserActivityMonitorPage() {
               </THead>
               <TBody>
                 {loading && rows.length === 0 ? (
-                  <TableEmpty colSpan={5}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={5} />
                 ) : rows.length === 0 ? (
                   <TableEmpty colSpan={5}>No users</TableEmpty>
                 ) : rows.map((u: any) => {

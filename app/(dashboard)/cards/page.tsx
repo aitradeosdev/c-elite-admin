@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import {
   PageHeader, Card as UICard, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, FieldShell, Toggle, Modal, SidePanel,
-} from '../../_ui';
+  Button, Input, FieldShell, Toggle, Modal, SidePanel, TableSkeleton, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { StatusDot, StatStrip } from '../_shared/statusUi';
 
@@ -529,7 +528,7 @@ export default function CardsPage() {
               </THead>
               <TBody>
                 {loading ? (
-                  <TableEmpty colSpan={6}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={6} />
                 ) : cards.length === 0 ? (
                   <TableEmpty colSpan={6}>No card brands yet</TableEmpty>
                 ) : cards.map((card) => (

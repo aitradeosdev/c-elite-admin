@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   PageHeader, Card, CardHeader, CardBody, CardFooter,
   Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Select, FieldShell, Toggle,
-} from '../../_ui';
+  Button, Input, Select, FieldShell, Toggle, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { formatNaira, StatusDot, type Tone } from '../_shared/statusUi';
 import { TermsOfUseManager } from './TermsOfUseManager';
@@ -321,7 +320,7 @@ export default function CouponsPage() {
       {loading ? (
         <Card>
           <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+            <SkeletonLines />
           </CardBody>
         </Card>
       ) : isMobile ? (

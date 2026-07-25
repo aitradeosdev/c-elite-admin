@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Share2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Select, Textarea, Tabs, SidePanel, Modal,
-} from '../../_ui';
+  Button, Input, Select, Textarea, Tabs, SidePanel, Modal, TableSkeleton, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { StatusDot } from '../_shared/statusUi';
 
@@ -277,7 +276,7 @@ export default function CardQueuePage() {
             </THead>
             <TBody>
               {loading ? (
-                <TableEmpty colSpan={9}>Loading…</TableEmpty>
+                <TableSkeleton colSpan={9} />
               ) : rows.length === 0 ? (
                 <TableEmpty colSpan={9}>No submissions</TableEmpty>
               ) : rows.map((r: any) => (
@@ -320,7 +319,7 @@ export default function CardQueuePage() {
         subtitle={detail?.users ? `@${detail.users.username}` : undefined}
       >
         {detailLoading || !detail?.users ? (
-          <p style={{ color: 'var(--fg-tertiary)' }}>Loading…</p>
+          <SkeletonLines />
         ) : (
           <>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, position: 'relative' }}>

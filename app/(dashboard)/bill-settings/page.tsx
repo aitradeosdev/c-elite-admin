@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PageHeader, Card, CardHeader, CardBody, CardFooter, FieldShell, Input, Button } from '../../_ui';
+import { PageHeader, Card, CardHeader, CardBody, CardFooter, FieldShell, Input, Button, SkeletonLines } from '../../_ui';
 
 interface Field {
   key: string;
@@ -86,7 +86,7 @@ export default function BillSettingsPage() {
       {loading ? (
         <Card>
           <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+            <SkeletonLines />
           </CardBody>
         </Card>
       ) : (

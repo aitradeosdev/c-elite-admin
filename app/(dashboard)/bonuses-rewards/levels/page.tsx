@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   PageHeader, Card, CardHeader, CardBody, CardFooter,
-  FieldShell, Input, Toggle, Button,
-} from '../../../_ui';
+  FieldShell, Input, Toggle, Button, SkeletonLines, } from '../../../_ui';
 import { StatusDot } from '../../_shared/statusUi';
 
 interface Tier {
@@ -106,7 +105,7 @@ export default function LevelsPage() {
       {loading ? (
         <Card>
           <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+            <SkeletonLines />
           </CardBody>
         </Card>
       ) : (

@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download, Printer } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Badge, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Select, Modal,
-} from '../../_ui';
+  Button, Select, Modal, TableSkeleton, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { StatusDot, StatStrip } from '../_shared/statusUi';
 
@@ -313,7 +312,7 @@ export default function ActivityPage() {
               </THead>
               <TBody>
                 {loading && rows.length === 0 ? (
-                  <TableEmpty colSpan={5}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={5} />
                 ) : grouped.length === 0 ? (
                   <TableEmpty colSpan={5}>No activity in this window.</TableEmpty>
                 ) : grouped.map((g) => (

@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import {
   PageHeader, Card, CardBody,
-  Modal, FieldShell, Input, Toggle, Button,
-} from '../../_ui';
+  Modal, FieldShell, Input, Toggle, Button, SkeletonLines, } from '../../_ui';
 
 interface Denomination {
   id: string;
@@ -157,7 +156,7 @@ export default function RatesPage() {
       {loading ? (
         <Card>
           <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+            <SkeletonLines />
           </CardBody>
         </Card>
       ) : cards.length === 0 ? (

@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   PageHeader, Card, CardHeader, CardBody, CardFooter,
   Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  FieldShell, Input, Select, Toggle, Button, Modal,
-} from '../../_ui';
+  FieldShell, Input, Select, Toggle, Button, Modal, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 
 type Config = Record<string, string>;
@@ -154,7 +153,7 @@ export default function AdminSettingsPage() {
     return (
       <div>
         <PageHeader title="Admin Settings" subtitle="Global platform configuration." />
-        <Card><CardBody><p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p></CardBody></Card>
+        <Card><CardBody><SkeletonLines /></CardBody></Card>
       </div>
     );
   }

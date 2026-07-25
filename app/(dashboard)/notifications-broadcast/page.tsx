@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   PageHeader, Card, CardHeader, CardBody, CardFooter,
   Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Textarea, Select, FieldShell,
-} from '../../_ui';
+  Button, Input, Textarea, Select, FieldShell, TableSkeleton, SkeletonLines } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { StatusDot } from '../_shared/statusUi';
 
@@ -60,8 +59,8 @@ const TYPES = [
 function BroadcastsMobile({ history, loading }: { history: Broadcast[]; loading: boolean }) {
   if (loading) {
     return (
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
-        Loading…
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 20 }}>
+        <SkeletonLines rows={4} />
       </div>
     );
   }
@@ -346,7 +345,7 @@ export default function NotificationsBroadcastPage() {
               </THead>
               <TBody>
                 {loading ? (
-                  <TableEmpty colSpan={5}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={5} />
                 ) : history.length === 0 ? (
                   <TableEmpty colSpan={5}>No broadcasts yet.</TableEmpty>
                 ) : history.map((b) => (

@@ -5,8 +5,7 @@ import Link from 'next/link';
 import {
   PageHeader, Card, CardHeader, CardBody,
   Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Textarea, Select, FieldShell, Toggle, Modal,
-} from '../../_ui';
+  Button, Input, Textarea, Select, FieldShell, Toggle, Modal, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { formatNaira, StatusDot } from '../_shared/statusUi';
 
@@ -221,7 +220,7 @@ export default function BonusesPage() {
     return (
       <div>
         <PageHeader title="Bonuses & Rewards" subtitle="Configure signup bonuses, level tiers, and giftbox rewards." />
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: 20 }}>Loading…</p>
+        <SkeletonLines />
       </div>
     );
   }

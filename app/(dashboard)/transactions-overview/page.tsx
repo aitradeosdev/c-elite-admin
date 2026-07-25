@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { Download, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Select, ExportModal,
-} from '../../_ui';
+  Button, Input, Select, ExportModal, TableSkeleton, } from '../../_ui';
 import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
@@ -244,7 +243,7 @@ export default function TransactionsOverviewPage() {
               </THead>
               <TBody>
                 {loading ? (
-                  <TableEmpty colSpan={6}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={6} />
                 ) : rows.length === 0 ? (
                   <TableEmpty colSpan={6}>No transactions found</TableEmpty>
                 ) : rows.map((t: any) => (

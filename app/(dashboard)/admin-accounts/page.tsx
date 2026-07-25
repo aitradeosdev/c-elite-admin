@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, FieldShell, SidePanel, Modal,
-} from '../../_ui';
+  Button, Input, FieldShell, SidePanel, Modal, TableSkeleton, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { StatusDot, StatStrip } from '../_shared/statusUi';
 
@@ -304,7 +303,7 @@ export default function AdminAccountsPage() {
               </THead>
               <TBody>
                 {loading ? (
-                  <TableEmpty colSpan={7}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={7} />
                 ) : admins.length === 0 ? (
                   <TableEmpty colSpan={7}>No admin accounts yet</TableEmpty>
                 ) : admins.map((admin) => (

@@ -1,5 +1,6 @@
 import { HTMLAttributes, ReactNode, TableHTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react';
 import s from './Table.module.css';
+import { Skeleton } from './Misc';
 
 export type TableDensity = 'default' | 'dense' | 'relaxed';
 
@@ -77,5 +78,25 @@ export function TableEmpty({ colSpan, children }: TableEmptyProps) {
     <tr>
       <td colSpan={colSpan} className={s.empty}>{children ?? 'No data'}</td>
     </tr>
+  );
+}
+
+const ROW_WIDTHS = ['86%', '68%', '93%', '58%', '76%', '64%', '88%', '71%'];
+
+export interface TableSkeletonProps {
+  colSpan: number;
+  rows?: number;
+}
+export function TableSkeleton({ colSpan, rows = 6 }: TableSkeletonProps) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <tr key={i}>
+          <td colSpan={colSpan} style={{ padding: '13px 16px' }}>
+            <Skeleton height={13} width={ROW_WIDTHS[i % ROW_WIDTHS.length]} />
+          </td>
+        </tr>
+      ))}
+    </>
   );
 }

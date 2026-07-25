@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { Download, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, ExportModal,
-} from '../../_ui';
+  Button, Input, ExportModal, TableSkeleton, } from '../../_ui';
 import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
@@ -202,7 +201,7 @@ export default function UsersPage() {
               </THead>
               <TBody>
                 {loading ? (
-                  <TableEmpty colSpan={9}>Loading…</TableEmpty>
+                  <TableSkeleton colSpan={9} />
                 ) : users.length === 0 ? (
                   <TableEmpty colSpan={9}>No users found</TableEmpty>
                 ) : users.map((u: any) => (

@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   PageHeader, Card, CardBody,
   Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Textarea, FieldShell, Toggle, SidePanel,
-} from '../../_ui';
+  Button, Input, Textarea, FieldShell, Toggle, SidePanel, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { StatusDot } from '../_shared/statusUi';
 
@@ -137,7 +136,7 @@ export default function EmailTemplatesPage() {
       {loading ? (
         <Card>
           <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>Loading…</p>
+            <SkeletonLines />
           </CardBody>
         </Card>
       ) : isMobile ? (

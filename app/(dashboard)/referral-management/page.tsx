@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   PageHeader, Card, CardHeader, CardBody, CardFooter,
   Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, FieldShell, Toggle,
-} from '../../_ui';
+  Button, Input, FieldShell, Toggle, SkeletonLines, } from '../../_ui';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { formatNaira, StatusDot, StatStrip, type Tone } from '../_shared/statusUi';
 
@@ -123,7 +122,7 @@ export default function ReferralManagementPage() {
     return (
       <div>
         <PageHeader title="Referral Management" subtitle="Configure referral bonuses and review every referral payout." />
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: 20 }}>Loading…</p>
+        <SkeletonLines />
       </div>
     );
   }

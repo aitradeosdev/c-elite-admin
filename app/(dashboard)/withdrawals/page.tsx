@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Download, AlertTriangle } from 'lucide-react';
 import {
   PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Textarea, Tabs, SidePanel, ExportModal,
-} from '../../_ui';
+  Button, Input, Textarea, Tabs, SidePanel, ExportModal, TableSkeleton, SkeletonLines, } from '../../_ui';
 import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { WithdrawalsMobile } from './WithdrawalsMobile';
@@ -273,7 +272,7 @@ export default function WithdrawalsPage() {
             </THead>
             <TBody>
               {loading ? (
-                <TableEmpty colSpan={8}>Loading…</TableEmpty>
+                <TableSkeleton colSpan={8} />
               ) : rows.length === 0 ? (
                 <TableEmpty colSpan={8}>No withdrawals</TableEmpty>
               ) : rows.map((w: any) => (
@@ -326,7 +325,7 @@ export default function WithdrawalsPage() {
         subtitle={detail?.user ? `@${detail.user.username || ''}` : undefined}
       >
         {detailLoading || !detail?.user ? (
-          <p style={{ color: 'var(--fg-tertiary)' }}>Loading…</p>
+          <SkeletonLines />
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>

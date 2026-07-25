@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Tabs, Modal, Textarea,
-} from '../../../_ui';
+  Button, Tabs, Modal, Textarea, SkeletonLines, } from '../../../_ui';
 import { formatNaira, StatusDot, StatStrip } from '../../_shared/statusUi';
 
 type TabKey = 'transactions' | 'devices' | 'logins';
@@ -72,7 +71,7 @@ export default function UserDetailPage() {
     load();
   };
 
-  if (loading) return <p style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>Loading…</p>;
+  if (loading) return <SkeletonLines />;
   if (!data || !data.user) return <p style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>User not found</p>;
 
   const user = data.user;
