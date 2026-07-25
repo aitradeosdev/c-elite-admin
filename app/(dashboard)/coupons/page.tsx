@@ -91,12 +91,14 @@ function CouponsMobile({
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 8 }}>
               min ${Number(c.min_trade_amount_usd || 0).toLocaleString()} · {c.use_count || 0} uses · expiry {c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : '—'}
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>Edit</Button>
-              <Button variant="secondary" size="sm" onClick={() => toggleActive(c)}>
-                {c.is_active ? 'Disable' : 'Enable'}
-              </Button>
-            </div>
+            {!isExpired(c.expiry_date) && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>Edit</Button>
+                <Button variant="secondary" size="sm" onClick={() => toggleActive(c)}>
+                  {c.is_active ? 'Disable' : 'Enable'}
+                </Button>
+              </div>
+            )}
           </div>
         );
       })}
@@ -355,12 +357,14 @@ export default function CouponsPage() {
                       <Td align="right" mono emphasis="secondary">{c.use_count || 0}</Td>
                       <Td><StatusDot status={st.text} tone={st.tone} /></Td>
                       <Td>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>Edit</Button>
-                          <Button variant="secondary" size="sm" onClick={() => toggleActive(c)}>
-                            {c.is_active ? 'Disable' : 'Enable'}
-                          </Button>
-                        </div>
+                        {!isExpired(c.expiry_date) && (
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>Edit</Button>
+                            <Button variant="secondary" size="sm" onClick={() => toggleActive(c)}>
+                              {c.is_active ? 'Disable' : 'Enable'}
+                            </Button>
+                          </div>
+                        )}
                       </Td>
                     </Tr>
                   );
