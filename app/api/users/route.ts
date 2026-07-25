@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   let query = supabaseAdmin
     .from('users')
     .select(`
-      id, full_name, username, email, phone, country, is_active, is_frozen, freeze_reason, created_at,
+      id, full_name, username, email, phone, country, is_active, is_frozen, freeze_reason, created_at, avatar_path,
       wallets(balance)
     `, { count: 'exact' });
 
@@ -116,10 +116,20 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const avatarPaths = (data || []).map((u: any) => u.avatar_path).filter(Boolean);
+  const avatarUrls: Record<string, string> = {};
+  if (avatarPaths.length > 0) {
+    const { data: signed } = await supabaseAdmin.storage.from('avatars').createSignedUrls(avatarPaths, 3600);
+    (signed || []).forEach((s: any) => {
+      if (s?.path && s?.signedUrl) avatarUrls[s.path] = s.signedUrl;
+    });
+  }
+
   const users = (data || []).map((u: any) => ({
     ...u,
     balance: u.wallets?.[0]?.balance ?? u.wallets?.balance ?? 0,
     trades: tradeCounts[u.id] || 0,
+    avatar_url: u.avatar_path ? avatarUrls[u.avatar_path] || null : null,
   }));
 
   return NextResponse.json({ users, total: count || 0, page, limit });

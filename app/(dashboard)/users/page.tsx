@@ -17,6 +17,18 @@ function UserStatus({ u }: { u: any }) {
   return <StatusDot status="Inactive" tone="neutral" />;
 }
 
+function UserAvatar({ url, name }: { url?: string | null; name?: string | null }) {
+  const initial = ((name || '').trim().charAt(0) || '?').toUpperCase();
+  if (url) {
+    return <img src={url} alt="" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />;
+  }
+  return (
+    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--border-default)', color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+      {initial}
+    </div>
+  );
+}
+
 function UsersMobile({ users, loading }: { users: any[]; loading: boolean }) {
   if (loading && users.length === 0) {
     return (
@@ -40,9 +52,12 @@ function UsersMobile({ users, loading }: { users: any[]; loading: boolean }) {
         <Link key={u.id} href={`/users/${u.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
           <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{u.full_name || '—'}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>@{u.username || '—'}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <UserAvatar url={u.avatar_url} name={u.full_name || u.username} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{u.full_name || '—'}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>@{u.username || '—'}</div>
+                </div>
               </div>
               <UserStatus u={u} />
             </div>
@@ -192,7 +207,12 @@ export default function UsersPage() {
                   <TableEmpty colSpan={9}>No users found</TableEmpty>
                 ) : users.map((u: any) => (
                   <Tr key={u.id}>
-                    <Td emphasis="primary">{u.full_name || '—'}</Td>
+                    <Td emphasis="primary">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <UserAvatar url={u.avatar_url} name={u.full_name || u.username} />
+                        <span>{u.full_name || '—'}</span>
+                      </div>
+                    </Td>
                     <Td emphasis="secondary">@{u.username || '—'}</Td>
                     <Td emphasis="secondary">{u.email || '—'}</Td>
                     <Td emphasis="secondary">{u.phone || '—'}</Td>
