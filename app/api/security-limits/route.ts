@@ -7,10 +7,11 @@ const KEYS = [
   'signup_rate_limit_per_hour',
   'paystack_webhook_ips',
   'monnify_webhook_ips',
+  'novac_webhook_ips',
 ];
 
-const IP_KEYS = new Set(['paystack_webhook_ips', 'monnify_webhook_ips']);
-const TEXT_KEYS = new Set(['paystack_webhook_ips', 'monnify_webhook_ips']);
+const IP_KEYS = new Set(['paystack_webhook_ips', 'monnify_webhook_ips', 'novac_webhook_ips']);
+const TEXT_KEYS = new Set(['paystack_webhook_ips', 'monnify_webhook_ips', 'novac_webhook_ips']);
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$/;
 const ALLOWED = new Set(KEYS);
 

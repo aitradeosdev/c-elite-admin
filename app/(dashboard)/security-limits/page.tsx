@@ -22,6 +22,7 @@ const FIELDS: { section: string; items: Field[] }[] = [
     items: [
       { key: 'paystack_webhook_ips', label: 'Paystack Webhook IPs (CSV)', hint: 'Comma-separated IPv4 addresses authorised to call the Paystack webhook. Update only when Paystack rotates their IPs.', inputType: 'textarea' },
       { key: 'monnify_webhook_ips', label: 'Monnify Webhook IPs (CSV)', hint: "Comma-separated IPv4 addresses authorised to call the Monnify webhook (from Monnify's docs). If left empty, all Monnify webhooks are rejected (403).", inputType: 'textarea' },
+      { key: 'novac_webhook_ips', label: 'Novac Webhook IPs (CSV)', hint: "Comma-separated IPv4 addresses authorised to call the Novac webhook (from Novac's docs; they notify merchants before adding IPs). If left empty, all Novac webhooks are rejected (403).", inputType: 'textarea' },
     ],
   },
 ];
