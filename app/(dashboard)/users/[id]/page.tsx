@@ -137,7 +137,6 @@ export default function UserDetailPage() {
       <StatStrip items={[
         { label: 'Trades', value: String(stats.trades || 0) },
         { label: 'Withdrawals', value: String(stats.withdrawals || 0) },
-        { label: 'Transfers', value: String(stats.transfers || 0) },
       ]} />
 
       <div style={{ marginBottom: 'var(--space-4)' }}>
@@ -217,7 +216,7 @@ export default function UserDetailPage() {
         }
       >
         <p style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)', margin: '0 0 12px' }}>
-          Freezing <strong>@{user.username}</strong> will block all transactions, withdrawals, and transfers.
+          Freezing <strong>@{user.username}</strong> will block all transactions and withdrawals.
         </p>
         <label style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 500, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Reason</label>
         <Textarea

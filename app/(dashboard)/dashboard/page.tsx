@@ -64,14 +64,6 @@ export default async function DashboardPage() {
       <Kpi key="pw" label="Pending withdrawals" icon={<ArrowDownToLine size={14} />}
         value={formatCount(n('pendingWithdrawals'))} hint="In the approval queue" />
     ) },
-    { perm: 'transfers', node: (
-      <Kpi key="tft" label="Transfers today" icon={<ArrowLeftRight size={14} />}
-        value={formatCount(n('transfersToday'))} hint="Tag + bank, last 24h" />
-    ) },
-    { perm: 'transfers', node: (
-      <Kpi key="tfv" label="Transfer volume" icon={<ArrowLeftRight size={14} />}
-        value={formatNaira(n('transferVolumeToday'))} hint="Settled transfers today" />
-    ) },
     { perm: 'transactions_overview', node: (
       <Kpi key="txt" label="Transactions today" icon={<Receipt size={14} />}
         value={formatCount(n('txToday'))} hint="All transaction types" />

@@ -16,7 +16,6 @@ const ASSIGNABLE_PAGES = [
   { key: 'card_type_builder', label: 'Card Type & Field Builder' },
   { key: 'rates_management', label: 'Rates Management' },
   { key: 'withdrawals', label: 'Withdrawals' },
-  { key: 'transfers', label: 'Transfers' },
   { key: 'users', label: 'Users' },
   { key: 'transactions_overview', label: 'Transactions Overview' },
   { key: 'bonuses_rewards', label: 'Bonuses & Rewards' },

@@ -36,10 +36,6 @@ export async function getDashboardStats(can: (k: string) => boolean): Promise<Da
     sum('todayPayouts', supabaseAdmin.from('withdrawals').select('amount').eq('status', 'success').gte('created_at', todayISO), 'amount');
     count('pendingWithdrawals', supabaseAdmin.from('withdrawals').select('id', { count: 'exact', head: true }).eq('status', 'initiated'));
   }
-  if (can('transfers')) {
-    count('transfersToday', supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
-    sum('transferVolumeToday', supabaseAdmin.from('transfers').select('amount').eq('status', 'success').gte('created_at', todayISO), 'amount');
-  }
   if (can('transactions_overview')) {
     count('txToday', supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true }).gte('created_at', todayISO));
     sum('txVolumeToday', supabaseAdmin.from('transactions').select('amount').eq('status', 'success').gte('created_at', todayISO), 'amount');

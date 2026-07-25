@@ -103,11 +103,6 @@ function DetailBody({ detail, detailLoading, terminate, actionBusy, err }: {
         <MoneyRow key={w.id} amount={w.amount} meta={`${w.bank_name || ''} · ${w.account_name || ''}`} status={w.status} when={timeAgo(w.created_at)} />
       ))}
 
-      <div style={microLabel}>Recent transfers</div>
-      {detail.transfers.length === 0 ? emptyLine('None.') : detail.transfers.map((t: any) => (
-        <MoneyRow key={t.id} amount={t.amount} meta={t.type} status={t.status} when={timeAgo(t.created_at)} />
-      ))}
-
       <div style={microLabel}>Recent transactions</div>
       {detail.transactions.length === 0 ? emptyLine('None.') : detail.transactions.map((tx: any) => (
         <MoneyRow key={tx.id} amount={tx.amount} meta={tx.type} status={tx.status} when={timeAgo(tx.created_at)} />

@@ -14,7 +14,6 @@ import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
 const TYPE_GROUPS: { label: string; key: string; values: string[] }[] = [
   { label: 'Giftcards', key: 'giftcards', values: ['giftcard_credit'] },
   { label: 'Withdrawals', key: 'withdrawals', values: ['withdrawal', 'withdrawal_refund'] },
-  { label: 'Transfers', key: 'transfers', values: ['transfer_tag', 'transfer_received', 'transfer_refund', 'transfer_bank'] },
   { label: 'Bills', key: 'bills', values: ['airtime', 'data', 'cable', 'electricity'] },
   { label: 'Bonuses', key: 'bonuses', values: ['signup_bonus', 'giftbox_bonus', 'referral_bonus', 'bonus_redeem', 'level_bonus'] },
 ];

@@ -1,7 +1,7 @@
 
 
 import {
-  LayoutDashboard, ClipboardList, ArrowDownToLine, ArrowLeftRight,
+  LayoutDashboard, ClipboardList, ArrowDownToLine,
   Users, Activity, ShieldCheck,
   CreditCard, Wrench, BadgePercent,
   Gift, Trophy, TicketPercent, Share2,
@@ -31,7 +31,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { key: 'dashboard',              label: 'Dashboard',      href: '/dashboard',              icon: LayoutDashboard },
       { key: 'card_queue',             label: 'Card Queue',     href: '/card-queue',             icon: ClipboardList },
       { key: 'withdrawals',            label: 'Withdrawals',    href: '/withdrawals',            icon: ArrowDownToLine },
-      { key: 'transfers',              label: 'Transfers',      href: '/transfers',              icon: ArrowLeftRight },
       { key: 'transactions_overview',  label: 'Transactions',   href: '/transactions-overview',  icon: ClipboardList },
     ],
   },

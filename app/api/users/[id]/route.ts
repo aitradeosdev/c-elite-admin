@@ -27,10 +27,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (error || !user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const [txRes, wdRes, trRes] = await Promise.all([
+  const [txRes, wdRes] = await Promise.all([
     supabaseAdmin.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', id),
     supabaseAdmin.from('withdrawals').select('id', { count: 'exact', head: true }).eq('user_id', id),
-    supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true }).eq('sender_id', id),
   ]);
 
   const { data: devices } = await supabaseAdmin
@@ -62,7 +61,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     stats: {
       trades: txRes.count || 0,
       withdrawals: wdRes.count || 0,
-      transfers: trRes.count || 0,
     },
     devices: devices || [],
     logins: logins || [],

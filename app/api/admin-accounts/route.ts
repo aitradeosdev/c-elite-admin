@@ -22,7 +22,7 @@ function validatePassword(pw: unknown): string | null {
 
 const ALLOWED_PERMISSIONS = new Set<string>([
   'dashboard', 'card_queue', 'card_management', 'card_type_builder', 'rates_management',
-  'withdrawals', 'transfers', 'manual_wallet_credit', 'users', 'transactions_overview',
+  'withdrawals', 'manual_wallet_credit', 'users', 'transactions_overview',
   'bonuses_rewards', 'referral_management', 'coupons', 'notifications_broadcast',
   'notification_templates', 'email_templates', 'platform_balance', 'admin_accounts',
   'user_activity_monitor', 'limits_fees', 'admin_settings', 'bill_settings',

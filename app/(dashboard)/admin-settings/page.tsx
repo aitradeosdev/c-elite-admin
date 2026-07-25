@@ -13,6 +13,7 @@ type Config = Record<string, string>;
 const GATEWAYS = [
   { key: 'paystack', label: 'Paystack' },
   { key: 'monnify', label: 'Monnify' },
+  { key: 'novac', label: 'Novac' },
 ];
 
 const rowStyle: React.CSSProperties = {
@@ -104,7 +105,6 @@ export default function AdminSettingsPage() {
   };
 
   const toggleVtpass = (v: boolean) => save({ bill_vtpass_enabled: v ? 'true' : 'false' }, 'vtpass');
-  const toggleTagTransfer = (v: boolean) => save({ tag_transfer_enabled: v ? 'true' : 'false' }, 'tagTransfer');
   const saveLiveChat = () => save({ live_chat_url: liveChatUrl }, 'liveChat');
   const saveMaxApproval = () => {
     const n = Number(maxApproval);
@@ -236,13 +236,6 @@ export default function AdminSettingsPage() {
           </div>
         </CardBody>
       </Card>
-
-      <TagTransferSection
-        enabled={config.tag_transfer_enabled !== 'false'}
-        onToggle={toggleTagTransfer}
-        saving={savingKey === 'tagTransfer'}
-        showToast={showToast}
-      />
 
       <Card style={{ marginBottom: 'var(--space-4)' }}>
         <CardHeader
@@ -425,201 +418,5 @@ export default function AdminSettingsPage() {
   );
 }
 
-type Override = {
-  id: string;
-  user_id: string;
-  enabled: boolean;
-  granted_at: string;
-  reason: string | null;
-  username: string;
-  email: string;
-  full_name: string;
-  granted_by_username: string;
-};
-
 type UserHit = { id: string; full_name: string; username: string; email: string };
 
-function overrideMeta(o: Override) {
-  return `@${o.username} · ${o.email}`
-    + (o.reason ? ` · "${o.reason}"` : '')
-    + (o.granted_by_username ? ` · by ${o.granted_by_username}` : '')
-    + ` · ${new Date(o.granted_at).toLocaleDateString()}`;
-}
-
-function TagTransferSection({
-  enabled, onToggle, saving, showToast,
-}: { enabled: boolean; onToggle: (v: boolean) => void; saving: boolean; showToast: (m: string) => void }) {
-  const isMobile = useIsMobile();
-  const [overrides, setOverrides] = useState<Override[]>([]);
-  const [loadingList, setLoadingList] = useState(true);
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<UserHit[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [busyId, setBusyId] = useState<string>('');
-  const [reason, setReason] = useState('');
-
-  const fetchOverrides = async () => {
-    setLoadingList(true);
-    const res = await fetch('/api/feature-overrides?feature=tag_transfer');
-    const data = await res.json().catch(() => ({}));
-    setOverrides(data.overrides || []);
-    setLoadingList(false);
-  };
-
-  useEffect(() => { fetchOverrides(); }, []);
-
-  useEffect(() => {
-    if (!search.trim()) { setResults([]); return; }
-    setSearching(true);
-    const t = setTimeout(async () => {
-      const res = await fetch(`/api/feature-overrides/user-search?q=${encodeURIComponent(search.trim())}`);
-      const data = await res.json().catch(() => ({}));
-      setResults((data.users || []).filter((u: UserHit) => !overrides.some((o) => o.user_id === u.id)));
-      setSearching(false);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [search, overrides]);
-
-  const addUser = async (u: UserHit) => {
-    setBusyId(u.id);
-    const res = await fetch('/api/feature-overrides', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: u.id, feature_key: 'tag_transfer', reason: reason.trim() || null }),
-    });
-    setBusyId('');
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      showToast(body.error || 'Could not add');
-      return;
-    }
-    setSearch(''); setResults([]); setReason('');
-    showToast(`Added ${u.username || u.email}`);
-    await fetchOverrides();
-  };
-
-  const removeOverride = async (o: Override) => {
-    if (!confirm(`Remove ${o.username || o.email} from the tag-transfer allow-list?`)) return;
-    setBusyId(o.id);
-    const res = await fetch(`/api/feature-overrides/${o.id}`, { method: 'DELETE' });
-    setBusyId('');
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      showToast(body.error || 'Could not remove');
-      return;
-    }
-    showToast(`Removed ${o.username || o.email}`);
-    await fetchOverrides();
-  };
-
-  return (
-    <Card style={{ marginBottom: 'var(--space-4)' }}>
-      <CardHeader
-        title="Tag Transfer"
-        subtitle="Controls peer-to-peer @username transfers globally. When disabled, ONLY users on the allow-list below can still send tag transfers. Hides the Transfer button in the mobile app and blocks the RPC server-side."
-        actions={<Toggle checked={enabled} onChange={onToggle} disabled={saving} />}
-      />
-      <CardBody>
-        <div style={rowStyle}>
-          <span style={rowLabelStyle}>{enabled ? 'Enabled globally' : 'Disabled globally'}</span>
-        </div>
-
-        {!enabled && (
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-default)' }}>
-            <p style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--fg-primary)', margin: '0 0 6px' }}>
-              Allow-list ({overrides.length})
-            </p>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: '0 0 14px' }}>
-              These users can transfer even with the global toggle OFF.
-            </p>
-
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <Input
-                style={{ flex: 2, minWidth: 200 }}
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by username, email, or full name…"
-              />
-              <Input
-                style={{ flex: 1, minWidth: 160 }}
-                type="text"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Reason (optional)"
-                maxLength={500}
-              />
-            </div>
-
-            {search.trim() ? (
-              <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', marginBottom: 12, maxHeight: 200, overflowY: 'auto' }}>
-                {searching ? (
-                  <div style={{ padding: 12, fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>Searching…</div>
-                ) : results.length === 0 ? (
-                  <div style={{ padding: 12, fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>No matches.</div>
-                ) : (
-                  results.map((u) => (
-                    <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)', gap: 10 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-primary)' }}>{u.full_name || u.username}</div>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>@{u.username} · {u.email}</div>
-                      </div>
-                      <Button variant="primary" size="sm" onClick={() => addUser(u)} disabled={busyId === u.id} loading={busyId === u.id}>
-                        {busyId === u.id ? 'Adding…' : 'Add'}
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : null}
-
-            {loadingList ? (
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>Loading allow-list…</p>
-            ) : overrides.length === 0 ? (
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>No users on the allow-list. Tag transfer is fully blocked.</p>
-            ) : isMobile ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {overrides.map((o) => (
-                  <div key={o.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{o.full_name || o.username}</div>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 4 }}>{overrideMeta(o)}</div>
-                      </div>
-                      <Button variant="secondary" size="sm" onClick={() => removeOverride(o)} disabled={busyId === o.id} loading={busyId === o.id}>
-                        {busyId === o.id ? 'Removing…' : 'Remove'}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Table flush>
-                <THead>
-                  <Tr>
-                    <Th>User</Th>
-                    <Th>Details</Th>
-                    <Th align="right">Action</Th>
-                  </Tr>
-                </THead>
-                <TBody>
-                  {overrides.map((o) => (
-                    <Tr key={o.id}>
-                      <Td emphasis="primary">{o.full_name || o.username}</Td>
-                      <Td emphasis="secondary">{overrideMeta(o)}</Td>
-                      <Td align="right">
-                        <Button variant="secondary" size="sm" onClick={() => removeOverride(o)} disabled={busyId === o.id} loading={busyId === o.id}>
-                          {busyId === o.id ? 'Removing…' : 'Remove'}
-                        </Button>
-                      </Td>
-                    </Tr>
-                  ))}
-                </TBody>
-              </Table>
-            )}
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  );
-}

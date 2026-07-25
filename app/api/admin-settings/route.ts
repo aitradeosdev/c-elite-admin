@@ -4,13 +4,12 @@ import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
 import { redactAudit } from '../../lib/redact';
 
-const GATEWAYS = ['paystack', 'monnify'];
+const GATEWAYS = ['paystack', 'monnify', 'novac'];
 
 const KEYS = [
   ...GATEWAYS.map((g) => `gateway_${g}_enabled`),
   'active_payment_gateway',
   'bill_vtpass_enabled',
-  'tag_transfer_enabled',
   'live_chat_url',
   'app_current_version',
   'app_minimum_version',

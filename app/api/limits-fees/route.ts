@@ -10,13 +10,10 @@ const KEYS = [
   'max_daily_withdrawal',
   'pin_reset_freeze_hours',
   'withdraw_fee',
-  'transfer_tag_fee',
-  'transfer_bank_fee',
-  'transfer_quick_amounts',
   'large_withdrawal_flag_threshold',
 ];
 
-const CSV_KEYS = new Set(['transfer_quick_amounts']);
+const CSV_KEYS = new Set<string>([]);
 const ALLOWED = new Set(KEYS);
 
 async function getAdmin(_req?: any) {

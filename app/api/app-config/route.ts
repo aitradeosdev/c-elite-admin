@@ -39,10 +39,9 @@ export async function PATCH(req: NextRequest) {
   }
 
   const ALLOWED_KEYS = new Set<string>([
-    'tag_transfer_enabled', 'bill_vtpass_enabled', 'gateway_paystack_enabled', 'gateway_monnify_enabled',
+    'bill_vtpass_enabled', 'gateway_paystack_enabled', 'gateway_monnify_enabled', 'gateway_novac_enabled',
     'min_withdrawal_amount', 'max_withdrawal_amount', 'max_daily_withdrawal', 'withdraw_fee',
     'min_electricity_amount', 'electricity_quick_amounts',
-    'transfer_bank_fee', 'transfer_bank_min', 'transfer_bank_max',
     'min_airtime_amount', 'max_airtime_amount',
     'min_data_amount', 'max_data_amount',
     'min_cable_amount', 'max_cable_amount',

@@ -69,7 +69,6 @@ const ACTION_LABEL: Record<string, string> = {
   UPHOLD_CARD_DISPUTE: 'Upheld card dispute',
   APPROVE_WITHDRAWAL: 'Approved withdrawal',
   REJECT_WITHDRAWAL: 'Rejected withdrawal',
-  REFUND_TRANSFER: 'Refunded transfer',
   FREEZE_USER: 'Froze user',
   UNFREEZE_USER: 'Unfroze user',
   TERMINATE_USER_SESSIONS: 'Terminated sessions',

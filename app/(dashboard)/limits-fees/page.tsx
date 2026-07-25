@@ -17,13 +17,6 @@ const FIELDS: { section: string; items: Field[] }[] = [
     ],
   },
   {
-    section: 'Transfers',
-    items: [
-      { key: 'transfer_tag_fee', label: 'Tag Transfer Fee (₦)', hint: 'Flat fee charged on sender for @tag transfers. Set 0 for free.' },
-      { key: 'transfer_quick_amounts', label: 'Tag Transfer Quick Amounts (CSV)', hint: 'Comma-separated preset buttons on the tag-transfer screen. Example: 500,1000,2000,5000,10000', type: 'text' },
-    ],
-  },
-  {
     section: 'Anomaly Detection',
     items: [
       { key: 'large_withdrawal_flag_threshold', label: 'Large Withdrawal Flag (₦)', hint: 'Withdrawals >= this amount get auto-flagged for admin review in flagged_transactions. Set 0 to disable.' },
@@ -79,7 +72,7 @@ export default function LimitsFeesPage() {
     <div>
       <PageHeader
         title="Limits & Fees"
-        subtitle="Set withdrawal limits, transfer fees, and the auto-flag threshold that gate money movement across the app."
+        subtitle="Set withdrawal limits and the auto-flag threshold that gate money movement across the app."
         actions={
           <Button variant="primary" size="sm" onClick={save} disabled={!hasChanges || saving} loading={saving}>
             {saving ? 'Saving…' : 'Save Changes'}

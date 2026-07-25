@@ -16,12 +16,11 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
   }
 
-  const [user, sessions, txns, withdrawals, transfers] = await Promise.all([
+  const [user, sessions, txns, withdrawals] = await Promise.all([
     supabaseAdmin.from('users').select('id, username, full_name, email, phone, country, last_active_at, is_frozen, is_active, created_at').eq('id', id).maybeSingle(),
     supabaseAdmin.from('login_history').select('id, session_id, ip_address, device_model, os_version, app_version, device_fingerprint, created_at, ended_at').eq('user_id', id).order('created_at', { ascending: false }).limit(30),
     supabaseAdmin.from('transactions').select('id, type, amount, status, session_id, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(30),
     supabaseAdmin.from('withdrawals').select('id, amount, bank_name, account_name, status, session_id, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(20),
-    supabaseAdmin.from('transfers').select('id, type, amount, status, session_id, created_at').eq('sender_id', id).order('created_at', { ascending: false }).limit(20),
   ]);
 
   if (user.error) return NextResponse.json({ error: user.error.message }, { status: 500 });
@@ -31,6 +30,5 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     sessions: sessions.data || [],
     transactions: txns.data || [],
     withdrawals: withdrawals.data || [],
-    transfers: transfers.data || [],
   });
 }
