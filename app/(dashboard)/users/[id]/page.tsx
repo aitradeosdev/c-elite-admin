@@ -101,7 +101,9 @@ export default function UserDetailPage() {
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: '2px 0 0' }}>@{user.username || '—'}</p>
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-              {user.is_frozen ? (
+              {user.deleted_at ? (
+                <StatusDot status="Deletion in progress" tone="danger" />
+              ) : user.is_frozen ? (
                 <>
                   <StatusDot status="Frozen" tone="danger" />
                   <Button variant="success" size="sm" onClick={handleUnfreeze} disabled={freezing}>

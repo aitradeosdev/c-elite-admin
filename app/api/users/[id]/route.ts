@@ -21,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { data: user, error } = await supabaseAdmin
     .from('users')
-    .select('id, full_name, username, email, phone, country, is_active, is_frozen, freeze_reason, referral_code, created_at, wallets(balance)')
+    .select('id, full_name, username, email, phone, country, is_active, is_frozen, freeze_reason, referral_code, created_at, deleted_at, wallets(balance)')
     .eq('id', id)
     .single();
 
@@ -80,6 +80,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   const body = await req.json();
   const { action, reason } = body;
+
+  const { data: target } = await supabaseAdmin
+    .from('users')
+    .select('deleted_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  if (target.deleted_at) {
+    return NextResponse.json({ error: 'Account is in deletion — admin actions are disabled' }, { status: 409 });
+  }
 
   if (action === 'freeze') {
     if (typeof reason !== 'string' || !reason.trim()) {
