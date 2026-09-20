@@ -41,6 +41,17 @@
 .tr.interactive { cursor: pointer; }
 .tr.selected { background: var(--accent-soft); }
 
+.sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-surface);
+  box-shadow: 1px 0 0 var(--border-subtle);
+}
+.thead .sticky { background: var(--bg-subtle); z-index: 2; }
+.tr:hover .sticky { background: var(--bg-subtle); }
+.tr.selected .sticky { background: var(--accent-soft); }
+
 .td {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border-subtle);

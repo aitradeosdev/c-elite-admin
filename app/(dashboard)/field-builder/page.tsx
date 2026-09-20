@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Pencil, Trash2, Plus, ChevronDown, ChevronUp } from 'lucide-react';
-import { PageHeader, Card, CardHeader, CardBody, Button, Input, Toggle, Badge, Modal } from '../../_ui';
+import { PageHeader, Card, CardHeader, CardBody, Button, Input, Toggle, Badge, Modal, SkeletonLines } from '../../_ui';
 
 interface CardBrand {
   id: string;
@@ -297,7 +297,13 @@ export default function FieldBuilderPage() {
                 )}
               </Card>
 
-              {loading && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: '4px 2px', margin: 0 }}>Loading...</p>}
+              {loading && (
+                <Card style={{ marginBottom: 'var(--space-3)' }}>
+                  <CardBody>
+                    <SkeletonLines rows={4} />
+                  </CardBody>
+                </Card>
+              )}
 
               {templates.map((tpl) => {
                 const installedCodes = new Set(tpl.countries.map((c) => c.country_code));

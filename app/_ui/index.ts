@@ -27,7 +27,7 @@ export { Table, THead, TBody, Tr, Th, Td, TableEmpty, TableSkeleton } from './Ta
 export type { TableProps, TrProps, ThProps, TdProps, TableDensity, TableSkeletonProps } from './Table';
 
 export {
-  Skeleton, SkeletonLines, EmptyState, PageHeader, SectionTitle, Kpi, KpiGrid, Spinner,
+  Skeleton, SkeletonLines, EmptyState, PageHeader, SectionTitle, Kpi, KpiGrid, KpiSkeleton, Spinner,
   ToastProvider, useToast,
 } from './Misc';
 export type {

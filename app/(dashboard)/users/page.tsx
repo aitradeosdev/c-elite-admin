@@ -188,8 +188,7 @@ export default function UsersPage() {
             <Table flush>
               <THead>
                 <Tr>
-                  <Th>Name</Th>
-                  <Th>Username</Th>
+                  <Th sticky>User</Th>
                   <Th>Email</Th>
                   <Th>Phone</Th>
                   <Th align="right">Balance</Th>
@@ -201,18 +200,20 @@ export default function UsersPage() {
               </THead>
               <TBody>
                 {loading ? (
-                  <TableSkeleton colSpan={9} />
+                  <TableSkeleton colSpan={8} />
                 ) : users.length === 0 ? (
-                  <TableEmpty colSpan={9}>No users found</TableEmpty>
+                  <TableEmpty colSpan={8}>No users found</TableEmpty>
                 ) : users.map((u: any) => (
                   <Tr key={u.id}>
-                    <Td emphasis="primary">
+                    <Td emphasis="primary" sticky>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <UserAvatar url={u.avatar_url} name={u.full_name || u.username} />
-                        <span>{u.full_name || '—'}</span>
+                        <div style={{ minWidth: 0, maxWidth: 220 }}>
+                          <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.full_name || '—'}</div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 400, color: 'var(--fg-tertiary)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{u.username || '—'}</div>
+                        </div>
                       </div>
                     </Td>
-                    <Td emphasis="secondary">@{u.username || '—'}</Td>
                     <Td emphasis="secondary">{u.email || '—'}</Td>
                     <Td emphasis="secondary">{u.phone || '—'}</Td>
                     <Td align="right" mono emphasis="primary">{formatNaira(u.balance)}</Td>

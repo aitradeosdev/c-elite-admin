@@ -122,7 +122,11 @@ export default function ReferralManagementPage() {
     return (
       <div>
         <PageHeader title="Referral Management" subtitle="Configure referral bonuses and review every referral payout." />
-        <SkeletonLines />
+        <Card>
+          <CardBody>
+            <SkeletonLines />
+          </CardBody>
+        </Card>
       </div>
     );
   }

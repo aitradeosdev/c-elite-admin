@@ -104,6 +104,14 @@ export function Kpi({ label, value, icon, hint, delta, className }: KpiProps) {
 export function KpiGrid({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return <div className={[s.kpiGrid, className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }
+export function KpiSkeleton() {
+  return (
+    <div className={s.kpi}>
+      <Skeleton width="52%" height={11} />
+      <Skeleton width="68%" height={24} />
+    </div>
+  );
+}
 
 export function Spinner({ size = 16, className }: { size?: number; className?: string }) {
   return <span className={[s.spinner, className].filter(Boolean).join(' ')} style={{ width: size, height: size }} aria-label="Loading" />;

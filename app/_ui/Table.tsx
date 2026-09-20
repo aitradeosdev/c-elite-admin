@@ -32,9 +32,10 @@ type Align = 'left' | 'right' | 'center';
 
 export interface ThProps extends ThHTMLAttributes<HTMLTableCellElement> {
   align?: Align;
+  sticky?: boolean;
 }
-export function Th({ align, className, ...rest }: ThProps) {
-  const cls = [s.th, align === 'right' && s.numeric, align === 'center' && s.center, className].filter(Boolean).join(' ');
+export function Th({ align, sticky, className, ...rest }: ThProps) {
+  const cls = [s.th, align === 'right' && s.numeric, align === 'center' && s.center, sticky && s.sticky, className].filter(Boolean).join(' ');
   return <th className={cls} {...rest} />;
 }
 
@@ -44,8 +45,9 @@ export interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
   emphasis?: 'primary' | 'secondary' | 'muted';
   
   mono?: boolean;
+  sticky?: boolean;
 }
-export function Td({ align, emphasis, mono, className, ...rest }: TdProps) {
+export function Td({ align, emphasis, mono, sticky, className, ...rest }: TdProps) {
   const cls = [
     s.td,
     align === 'right' && s.numeric,
@@ -54,6 +56,7 @@ export function Td({ align, emphasis, mono, className, ...rest }: TdProps) {
     emphasis === 'secondary' && s.secondary,
     emphasis === 'muted' && s.muted,
     mono && s.mono,
+    sticky && s.sticky,
     className,
   ].filter(Boolean).join(' ');
   return <td className={cls} {...rest} />;

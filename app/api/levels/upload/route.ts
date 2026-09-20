@@ -4,6 +4,22 @@ import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES, magicMatchesExt } from '../../../lib/uploadTypes';
 
+const BADGE_MAX_PX = 320;
+const BADGE_WEBP_QUALITY = 92;
+
+async function shrinkBadge(buffer: Buffer): Promise<{ buffer: Buffer; ext: string; contentType: string } | null> {
+  try {
+    const sharp = (await import('sharp')).default;
+    const out = await sharp(buffer)
+      .resize(BADGE_MAX_PX, BADGE_MAX_PX, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: BADGE_WEBP_QUALITY })
+      .toBuffer();
+    return { buffer: out, ext: 'webp', contentType: 'image/webp' };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   const token = cookieStore.get('admin_token')?.value;
@@ -31,15 +47,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'File too large (max 5 MB)' }, { status: 400 });
   }
 
-  const fileName = `tier-${tierOrder}-${crypto.randomUUID()}.${ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (!magicMatchesExt(buffer, ext)) {
+  const original = Buffer.from(await file.arrayBuffer());
+  if (!magicMatchesExt(original, ext)) {
     return NextResponse.json({ error: 'File content does not match its extension' }, { status: 400 });
   }
 
+  const shrunk = await shrinkBadge(original);
+  const upload = shrunk ?? { buffer: original, ext, contentType };
+  const fileName = `tier-${tierOrder}-${crypto.randomUUID()}.${upload.ext}`;
+
   const { error } = await supabaseAdmin.storage
     .from('level-badges')
-    .upload(fileName, buffer, { contentType, upsert: false });
+    .upload(fileName, upload.buffer, { contentType: upload.contentType, upsert: false });
   if (error) return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
 
   const { data: { publicUrl } } = supabaseAdmin.storage

@@ -220,7 +220,11 @@ export default function BonusesPage() {
     return (
       <div>
         <PageHeader title="Bonuses & Rewards" subtitle="Configure signup bonuses, level tiers, and giftbox rewards." />
-        <SkeletonLines />
+        <Card>
+          <CardBody>
+            <SkeletonLines />
+          </CardBody>
+        </Card>
       </div>
     );
   }

@@ -71,7 +71,25 @@ export default function UserDetailPage() {
     load();
   };
 
-  if (loading) return <SkeletonLines />;
+  if (loading) {
+    return (
+      <div>
+        <a href="/users" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', letterSpacing: '0.04em', color: 'var(--fg-tertiary)', textDecoration: 'none', display: 'inline-block', marginBottom: 'var(--space-4)' }}>
+          ← BACK TO USERS
+        </a>
+        <Card style={{ marginBottom: 'var(--space-4)' }}>
+          <CardBody>
+            <SkeletonLines rows={2} />
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <SkeletonLines rows={6} />
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
   if (!data || !data.user) return <p style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>User not found</p>;
 
   const user = data.user;
@@ -183,12 +201,14 @@ export default function UserDetailPage() {
                   <Th>OS</Th>
                   <Th>App version</Th>
                   <Th>IP address</Th>
-                  <Th>Date</Th>
+                  <Th>{activeTab === 'devices' ? 'First seen' : 'Date'}</Th>
+                  {activeTab === 'devices' && <Th>Last seen</Th>}
+                  {activeTab === 'devices' && <Th>Logins</Th>}
                 </Tr>
               </THead>
               <TBody>
                 {(data[activeTab] || []).length === 0 ? (
-                  <TableEmpty colSpan={5}>{activeTab === 'devices' ? 'No device logs' : 'No login history'}</TableEmpty>
+                  <TableEmpty colSpan={activeTab === 'devices' ? 7 : 5}>{activeTab === 'devices' ? 'No device logs' : 'No login history'}</TableEmpty>
                 ) : (data[activeTab] || []).map((d: any, i: number) => (
                   <Tr key={i}>
                     <Td emphasis="primary">{d.device_model || '—'}</Td>
@@ -196,6 +216,8 @@ export default function UserDetailPage() {
                     <Td emphasis="secondary">{d.app_version || '—'}</Td>
                     <Td mono emphasis="muted">{d.ip_address || '—'}</Td>
                     <Td emphasis="secondary" mono>{new Date(d.created_at).toLocaleString()}</Td>
+                    {activeTab === 'devices' && <Td emphasis="secondary" mono>{d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : '—'}</Td>}
+                    {activeTab === 'devices' && <Td emphasis="secondary">{d.login_count ?? 1}</Td>}
                   </Tr>
                 ))}
               </TBody>

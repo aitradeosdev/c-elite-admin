@@ -34,7 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { data: devices } = await supabaseAdmin
     .from('device_logs')
-    .select('device_model, os_version, app_version, ip_address, created_at')
+    .select('device_model, os_version, app_version, ip_address, created_at, last_seen_at, login_count')
     .eq('user_id', id)
     .order('created_at', { ascending: false })
     .limit(20);
