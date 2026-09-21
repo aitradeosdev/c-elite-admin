@@ -133,6 +133,10 @@ export async function PATCH(req: NextRequest) {
   }));
   const { error } = await supabaseAdmin.from('app_config').upsert(rows, { onConflict: 'key' });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const secretKeys = keys.filter((k) => SECRET_KEYS.has(k));
+  if (secretKeys.length > 0) {
+    await supabaseAdmin.from('app_config').update({ is_public: false }).in('key', secretKeys);
+  }
 
   try {
     await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' });
