@@ -57,7 +57,7 @@ export async function PATCH(req: NextRequest) {
     'anomaly_failures_window_mins', 'anomaly_failures_threshold',
     'critical_alert_amount', 'alert_email_batch',
     'paystack_webhook_ips', 'monnify_webhook_ips', 'novac_webhook_ips',
-    'terms_url', 'privacy_url', 'live_chat_url',
+    'terms_url', 'privacy_url', 'chatwoot_base_url', 'chatwoot_website_token', 'chatwoot_identity_key',
     'store_url_android', 'store_url_ios',
     'app_current_version', 'app_update_type', 'app_update_message',
     'emergency_mode', 'withdrawal_narrations',

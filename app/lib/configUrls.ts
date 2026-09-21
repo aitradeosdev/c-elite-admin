@@ -1,5 +1,5 @@
 export const URL_CONFIG_KEYS = new Set<string>([
-  'live_chat_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios',
+  'chatwoot_base_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios',
 ]);
 
 const URL_MAX_LEN = 2048;

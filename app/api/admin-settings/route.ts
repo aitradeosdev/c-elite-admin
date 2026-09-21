@@ -12,7 +12,9 @@ const KEYS = [
   'active_payment_gateway',
   ...BILL_PROVIDERS.map((p) => `bill_${p}_enabled`),
   'active_bill_provider',
-  'live_chat_url',
+  'chatwoot_base_url',
+  'chatwoot_website_token',
+  'chatwoot_identity_key',
   'app_current_version',
   'app_minimum_version',
   'app_update_type',
@@ -27,7 +29,10 @@ const KEYS = [
   'store_url_ios',
 ];
 
-const URL_KEYS = new Set(['live_chat_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios']);
+const URL_KEYS = new Set(['chatwoot_base_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios']);
+const TOKEN_KEYS = new Set(['chatwoot_website_token', 'chatwoot_identity_key']);
+const TOKEN_MAX_LEN = 256;
+const SECRET_KEYS = new Set(['chatwoot_identity_key']);
 const URL_MAX_LEN = 2048;
 const URL_RE = /^https:\/\/[^\s<>"']{3,}$/i;
 const CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
@@ -114,6 +119,15 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  for (const k of keys) {
+    if (!TOKEN_KEYS.has(k)) continue;
+    const raw = String(changes[k] ?? '');
+    if (raw.length === 0) continue;
+    if (raw.length > TOKEN_MAX_LEN || CONTROL_RE.test(raw) || /\s/.test(raw)) {
+      return NextResponse.json({ error: `${k} must be a single token of at most ${TOKEN_MAX_LEN} characters` }, { status: 400 });
+    }
+  }
+
   const rows = keys.map((k) => ({
     key: k, value: String(changes[k]), updated_at: new Date().toISOString(),
   }));
@@ -126,7 +140,7 @@ export async function PATCH(req: NextRequest) {
 
   await supabaseAdmin.from('audit_log').insert({
     admin_id: admin.admin_id, action: 'UPDATE_ADMIN_SETTINGS', entity: 'app_config',
-    entity_id: 'batch', after_value: redactAudit(changes),
+    entity_id: 'batch', after_value: redactAudit(Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, SECRET_KEYS.has(k) && String(v ?? '').length > 0 ? '[set]' : v]))),
     ip_address: req.headers.get('x-forwarded-for') || 'unknown',
   });
   return NextResponse.json({ success: true });

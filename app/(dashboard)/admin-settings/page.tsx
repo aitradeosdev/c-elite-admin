@@ -36,7 +36,9 @@ export default function AdminSettingsPage() {
   const [toast, setToast] = useState('');
   const [forbidden, setForbidden] = useState(false);
 
-  const [liveChatUrl, setLiveChatUrl] = useState('');
+  const [chatwootBaseUrl, setChatwootBaseUrl] = useState('');
+  const [chatwootToken, setChatwootToken] = useState('');
+  const [chatwootIdentityKey, setChatwootIdentityKey] = useState('');
   const [curVer, setCurVer] = useState('');
   const [minVer, setMinVer] = useState('');
   const [updType, setUpdType] = useState('soft');
@@ -58,7 +60,9 @@ export default function AdminSettingsPage() {
     const data = await res.json().catch(() => ({}));
     const cfg: Config = data.config || {};
     setConfig(cfg);
-    setLiveChatUrl(cfg.live_chat_url || '');
+    setChatwootBaseUrl(cfg.chatwoot_base_url || '');
+    setChatwootToken(cfg.chatwoot_website_token || '');
+    setChatwootIdentityKey(cfg.chatwoot_identity_key || '');
     setCurVer(cfg.app_current_version || '');
     setMinVer(cfg.app_minimum_version || '');
     setUpdType(cfg.app_update_type || 'soft');
@@ -124,7 +128,11 @@ export default function AdminSettingsPage() {
     }
     save({ active_bill_provider: p }, 'billProviders');
   };
-  const saveLiveChat = () => save({ live_chat_url: liveChatUrl }, 'liveChat');
+  const saveLiveChat = () => save({
+    chatwoot_base_url: chatwootBaseUrl.trim(),
+    chatwoot_website_token: chatwootToken.trim(),
+    chatwoot_identity_key: chatwootIdentityKey.trim(),
+  }, 'liveChat');
   const saveMaxApproval = () => {
     const n = Number(maxApproval);
     if (!Number.isFinite(n) || n < 1000) {
@@ -275,18 +283,37 @@ export default function AdminSettingsPage() {
 
       <Card style={{ marginBottom: 'var(--space-4)' }}>
         <CardHeader
-          title="Live Chat URL"
-          subtitle='Direct chat link from your provider dashboard (e.g. Tawk/LiveChat/Smartsupp "Shareable Chat Link"). Opens full-screen in the Support tab.'
+          title="Live Chat (Chatwoot)"
+          subtitle="The Support screen in the user app opens your Chatwoot website inbox with the signed-in user already identified. Base URL and website token come from the inbox settings; the identity validation key is optional and is never sent to the app."
         />
         <CardBody>
-          <FieldShell label="Live Chat URL">
-            <Input
-              type="url"
-              value={liveChatUrl}
-              onChange={(e) => setLiveChatUrl(e.target.value)}
-              placeholder="https://direct.lc.chat/..."
-            />
-          </FieldShell>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <FieldShell label="Chatwoot base URL">
+              <Input
+                type="url"
+                value={chatwootBaseUrl}
+                onChange={(e) => setChatwootBaseUrl(e.target.value)}
+                placeholder="https://app.chatwoot.com"
+              />
+            </FieldShell>
+            <FieldShell label="Website inbox token">
+              <Input
+                value={chatwootToken}
+                onChange={(e) => setChatwootToken(e.target.value)}
+                placeholder="e.g. AbC123xyz"
+                autoComplete="off"
+              />
+            </FieldShell>
+            <FieldShell label="Identity validation key (optional)">
+              <Input
+                type="password"
+                value={chatwootIdentityKey}
+                onChange={(e) => setChatwootIdentityKey(e.target.value)}
+                placeholder="From the inbox's Configuration tab"
+                autoComplete="new-password"
+              />
+            </FieldShell>
+          </div>
         </CardBody>
         <CardFooter style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button variant="primary" size="sm" onClick={saveLiveChat} disabled={savingKey === 'liveChat'} loading={savingKey === 'liveChat'}>
