@@ -1,19 +1,30 @@
-import { NextResponse } from 'next/server';
-import { verifyAdminFromRequest } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { requireAdmin } from '../../../lib/guard';
+import { fail, ok } from '../../../lib/api';
+
+interface ProfileRow {
+  id: string;
+  username: string;
+  email: string;
+  role_title: string;
+  is_super_admin: boolean;
+  is_active: boolean;
+  page_permissions: string[] | null;
+}
 
 export async function GET() {
-  const admin = await verifyAdminFromRequest();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard.response;
 
-  const { data: row } = await supabaseAdmin
+  const { data: row, error } = await supabaseAdmin
     .from('admin_users')
     .select('id, username, email, role_title, is_super_admin, is_active, page_permissions')
-    .eq('id', admin.admin_id)
-    .maybeSingle();
-  if (!row || !row.is_active) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    .eq('id', guard.admin.admin_id)
+    .maybeSingle<ProfileRow>();
+  if (error) console.error('admin profile read failed:', error.message);
+  if (!row || !row.is_active) return fail('AUTH_REQUIRED');
 
-  return NextResponse.json({
+  return ok({
     admin: {
       id: row.id,
       username: row.username,

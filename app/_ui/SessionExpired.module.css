@@ -1,0 +1,6 @@
+.message {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--fg-secondary);
+  line-height: var(--leading-relaxed);
+}

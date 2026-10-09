@@ -18,6 +18,7 @@ const SENSITIVE_KEYS = new Set<string>([
   'monnify_secret_key',
   'vtpass_api_key',
   'smtp_password',
+  'chatwoot_identity_key',
 ]);
 
 const PLACEHOLDER = '[redacted]';

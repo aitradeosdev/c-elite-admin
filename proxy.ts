@@ -54,12 +54,16 @@ export function proxy(req: NextRequest) {
   const isDev = process.env.NODE_ENV === 'development';
   const csp = buildCsp(nonce, isDev);
 
+  const reqId = 'req_' + crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('x-request-id', reqId);
   requestHeaders.set('Content-Security-Policy', csp);
 
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.headers.set('Content-Security-Policy', csp);
+  res.headers.set('x-request-id', reqId);
   return res;
 }
 

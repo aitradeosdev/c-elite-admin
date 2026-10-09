@@ -1,9 +1,8 @@
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(15, 15, 18, 0.50);
+  background: var(--overlay-scrim);
   backdrop-filter: blur(2px);
-  
   z-index: var(--z-modal);
   display: flex;
   align-items: center;
@@ -62,7 +61,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: none;
   border: 0;
   color: var(--fg-tertiary);
   cursor: pointer;
@@ -88,7 +87,7 @@
 .panelScrim {
   position: fixed;
   inset: 0;
-  background: rgba(15, 15, 18, 0.32);
+  background: var(--overlay-scrim-light);
   z-index: var(--z-overlay);
   animation: fade var(--dur-base) var(--ease-out);
 }
@@ -104,10 +103,17 @@
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  z-index: calc(var(--z-overlay) + 1);
+  z-index: var(--z-drawer);
   animation: slide var(--dur-slow) var(--ease-out);
 }
 .panelWide { width: 720px; }
 @keyframes slide {
   from { transform: translateX(16px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .modal,
+  .panelScrim,
+  .panel { animation: none; }
 }

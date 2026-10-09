@@ -1,11 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { requireAdmin } from '../../../lib/guard';
+import { writeAudit, type AuditInput } from '../../../lib/audit';
+import { fail, ok } from '../../../lib/api';
 import { ALLOWED_IMAGE_TYPES, MAX_UPLOAD_BYTES, magicMatchesExt } from '../../../lib/uploadTypes';
 
+const BUCKET = 'level-badges';
 const BADGE_MAX_PX = 320;
 const BADGE_WEBP_QUALITY = 92;
+const CACHE_SECONDS = '31536000';
+const AUDIT_WARNING = 'The badge was uploaded, but the upload could not be written to the audit log.';
 
 async function shrinkBadge(buffer: Buffer): Promise<{ buffer: Buffer; ext: string; contentType: string } | null> {
   try {
@@ -21,49 +25,66 @@ async function shrinkBadge(buffer: Buffer): Promise<{ buffer: Buffer; ext: strin
 }
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const admin = await verifyAdminJWT(token);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin('rewards.write');
+  if (!guard.ok) return guard.response;
 
-  const formData = await req.formData();
-  const file = formData.get('file') as File;
-  const tierOrderRaw = formData.get('tier_order');
-  if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return fail('VALIDATION_ERROR', 'Send the badge as a file upload.');
+  }
+  const file = form.get('file');
+  if (!file || typeof file === 'string') return fail('VALIDATION_ERROR', 'No file provided');
 
-  const tierOrder = Number(tierOrderRaw);
+  const tierOrder = Number(form.get('tier_order'));
   if (!Number.isInteger(tierOrder) || tierOrder < 0 || tierOrder > 99) {
-    return NextResponse.json({ error: 'Invalid tier_order' }, { status: 400 });
+    return fail('VALIDATION_ERROR', 'Invalid tier_order');
   }
 
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   const contentType = ALLOWED_IMAGE_TYPES[ext];
   if (!contentType) {
-    return NextResponse.json({ error: `File type not allowed. Accepted: ${Object.keys(ALLOWED_IMAGE_TYPES).join(', ')}` }, { status: 400 });
+    return fail('VALIDATION_ERROR', `File type not allowed. Accepted: ${Object.keys(ALLOWED_IMAGE_TYPES).join(', ')}`);
   }
-  if (file.size > MAX_UPLOAD_BYTES) {
-    return NextResponse.json({ error: 'File too large (max 5 MB)' }, { status: 400 });
-  }
+  if (file.size > MAX_UPLOAD_BYTES) return fail('VALIDATION_ERROR', 'File too large (max 5 MB)');
 
   const original = Buffer.from(await file.arrayBuffer());
   if (!magicMatchesExt(original, ext)) {
-    return NextResponse.json({ error: 'File content does not match its extension' }, { status: 400 });
+    return fail('VALIDATION_ERROR', 'File content does not match its extension');
   }
 
   const shrunk = await shrinkBadge(original);
   const upload = shrunk ?? { buffer: original, ext, contentType };
   const fileName = `tier-${tierOrder}-${crypto.randomUUID()}.${upload.ext}`;
 
+  const audit: AuditInput = {
+    admin: guard.admin,
+    action: 'UPLOAD_LEVEL_BADGE',
+    entity: 'level_badges',
+    entity_id: fileName,
+    sensitivity: 'normal',
+    after: { path: fileName, tier_order: tierOrder, content_type: upload.contentType, size: upload.buffer.length },
+  };
+
   const { error } = await supabaseAdmin.storage
-    .from('level-badges')
-    .upload(fileName, upload.buffer, { contentType: upload.contentType, upsert: false });
-  if (error) return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
+    .from(BUCKET)
+    .upload(fileName, upload.buffer, { contentType: upload.contentType, cacheControl: CACHE_SECONDS, upsert: false });
+  if (error) {
+    console.error('level badge upload:', error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', 'The badge could not be stored. Try again.');
+  }
 
-  const { data: { publicUrl } } = supabaseAdmin.storage
-    .from('level-badges')
-    .getPublicUrl(fileName);
+  const { data: { publicUrl } } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(fileName);
 
-  return NextResponse.json({ url: publicUrl });
+  const recorded = await writeAudit({
+    ...audit,
+    after: { path: fileName, tier_order: tierOrder, content_type: upload.contentType, size: upload.buffer.length, url: publicUrl },
+    result: 'success',
+  });
+  return ok({
+    url: publicUrl,
+    ...(recorded.ok ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING }),
+  });
 }

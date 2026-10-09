@@ -1,0 +1,110 @@
+.value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sizeXs { font-size: var(--text-xs); }
+.sizeSm { font-size: var(--text-sm); }
+.sizeBase { font-size: var(--text-base); }
+.sizeMd { font-size: var(--text-md); }
+.sizeLg { font-size: var(--text-lg); }
+.sizeXl { font-size: var(--text-xl); letter-spacing: -0.01em; }
+.size2xl { font-size: var(--text-2xl); letter-spacing: -0.02em; }
+
+.strong {
+  font-weight: var(--weight-bold);
+  color: var(--fg-primary);
+}
+.primary {
+  font-weight: var(--weight-semibold);
+  color: var(--fg-primary);
+}
+.secondary { color: var(--fg-secondary); }
+.muted { color: var(--fg-tertiary); }
+
+.positive { color: var(--tone-success-fg); }
+.negative { color: var(--tone-danger-fg); }
+.missing { color: var(--fg-tertiary); }
+
+.ref {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.refText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.copy {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-tertiary);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.copy::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--space-1) * -1);
+}
+
+@media (hover: hover) {
+  .copy:hover {
+    background: var(--bg-muted);
+    color: var(--fg-primary);
+  }
+}
+
+.copy:active { background: var(--bg-muted); }
+
+.copy:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+.copy.copied { color: var(--tone-success-fg); }
+
+.copyIcon {
+  display: block;
+  flex: none;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copy { transition: none; }
+}

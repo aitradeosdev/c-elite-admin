@@ -1,42 +1,46 @@
+import { RotateCw } from 'lucide-react';
+import { businessToday } from '../../lib/time';
+import { Button, PageHeader, Skeleton, StatStrip } from '../../_ui';
+import { ActionTiles, Band, OpenQueueLink } from './DashboardBands';
+import { RecentSubmissions } from './RecentSubmissions';
 import {
-  PageHeader, KpiGrid, KpiSkeleton, SectionTitle, Card, CardHeader, CardBody,
-  Table, THead, TBody, Tr, Th, TableSkeleton,
-} from '../../_ui';
+  STRIP_BANDS, overviewSubtitle, placeholderActionTiles, placeholderStripCells,
+} from './metrics';
+import s from './page.module.css';
 
 export default function DashboardLoading() {
   return (
-    <div>
+    <div className={s.page}>
+      <span className={s.srOnly} role="status">Loading the overview</span>
+
       <PageHeader
         title="Overview"
-        subtitle="Today's activity across the CardElite platform."
+        subtitle={overviewSubtitle(businessToday().from)}
+        actions={
+          <>
+            <Skeleton width={112} height={12} />
+            <Button variant="secondary" size="sm" leftIcon={<RotateCw size={14} />} disabled>
+              Refresh
+            </Button>
+          </>
+        }
       />
 
-      <KpiGrid>
-        {Array.from({ length: 8 }).map((_, i) => <KpiSkeleton key={i} />)}
-      </KpiGrid>
+      <div className={s.bands}>
+        <Band id="overview-loading-action" label="Needs action">
+          <ActionTiles tiles={placeholderActionTiles()} />
+        </Band>
 
-      <SectionTitle>Recent card submissions</SectionTitle>
-      <Card>
-        <CardHeader title="Latest 10" subtitle="Real-time feed — auto-refreshes every 30 seconds." />
-        <CardBody flush>
-          <Table flush>
-            <THead>
-              <Tr>
-                <Th>User</Th>
-                <Th>Card</Th>
-                <Th>Country</Th>
-                <Th align="right">Payout</Th>
-                <Th>Submitted</Th>
-                <Th>Status</Th>
-                <Th align="right">Actions</Th>
-              </Tr>
-            </THead>
-            <TBody>
-              <TableSkeleton colSpan={7} />
-            </TBody>
-          </Table>
-        </CardBody>
-      </Card>
+        {STRIP_BANDS.map((band) => (
+          <Band key={band.id} id={`overview-loading-${band.id}`} label={band.label}>
+            <StatStrip fill flush items={placeholderStripCells(band.metrics)} />
+          </Band>
+        ))}
+
+        <Band id="overview-loading-recent" label="Recent submissions" aside={<OpenQueueLink />}>
+          <RecentSubmissions rows={[]} error={null} loading />
+        </Band>
+      </div>
     </div>
   );
 }

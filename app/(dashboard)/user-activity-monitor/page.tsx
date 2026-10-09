@@ -1,314 +1,617 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { LogOut, Pause, Play, RotateCw } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Toggle, SidePanel, TableSkeleton, SkeletonLines, } from '../../_ui';
-import { useIsMobile } from '../../lib/useIsMobile';
-import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
+  AccessDenied, Avatar, Button, Card, CardBody, EmptyState, ErrorState, FilterBar, MobileDataList, Notice, PageHeader,
+  Pagination, ResponsiveView, RowOpen, SearchInput, SidePanel, StatStrip, TBody, THead, Table, TableEmpty,
+  TableSkeleton, TableState, Tabs, Td, Th, Tr, nextSort, useConfirm, usePermissions, useResource, useToast,
+  useUrlState,
+  type MobileDataListSortOption, type SortState, type TableSkeletonColumn,
+} from '../../_ui';
+import { apiRequest } from '../../lib/apiClient';
+import { isUuid } from '../../lib/http';
+import { BUSINESS_TZ_LABEL, formatBusinessTime } from '../../lib/time';
+import {
+  DEFAULT_FILTER, ONLINE_LABEL, ONLINE_WINDOW_MINUTES, PAGE_SIZE, RECENT_LABEL, type ActivityFilter,
+} from './rules';
+import {
+  ACTIVITY_URL, FILTER_TABS, POLL_SECONDS, accountState, classifyTerminate, cleanSearch, contactLine, countText,
+  describeView, displayName, emptyCopy, handleOf, isFiltered, isLoaded, listQuery, liveState, pauseReason, sameFilter,
+  seenText, toDetailResult, toListResult, toTerminateResult,
+  type ActivityUser, type SettledTerminate, type UserDetail,
+} from './model';
+import { DetailBody, DetailSkeleton, DetailToolbar, JoinedCell, LiveStatus, SeenCell, StatusCell } from './ActivityParts';
+import { terminateConfirm, terminateSuccess } from './confirmOptions';
+import s from './page.module.css';
 
-function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const diff = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+const POLL_MS = POLL_SECONDS * 1000;
+const SETTLE_WAIT_MS = 3000;
+const COLUMN_COUNT = 5;
+const TITLE = 'User activity monitor';
+const SUBTITLE =
+  `Who is online (active in the last ${ONLINE_WINDOW_MINUTES} minutes), which devices are signed in and recent sign-ins for every customer. Super admins only; times are WAT.`;
+const BAD_LINK = 'That user link is not valid, so nothing was opened.';
+const DENIED_MESSAGE =
+  'User activity shows live sessions, devices and sign-in history for every customer, so only super administrators can open it.';
+const GONE = 'This account no longer exists, so there is nothing to sign out.';
+const NOT_CONFIRMED =
+  'Signing out was not confirmed. The panel is reloading so you can check which sessions are still open.';
+
+const MOBILE_SORT_OPTIONS: ReadonlyArray<MobileDataListSortOption> = [
+  { key: 'last_active_at', label: 'Last seen' },
+  { key: 'created_at', label: 'Joined' },
+];
+
+const SKELETON_COLUMNS: ReadonlyArray<TableSkeletonColumn> = [
+  { width: 140, avatar: true, lines: 2 },
+  { width: 168, lines: 2 },
+  { width: 96 },
+  { width: 120, lines: 2 },
+  { width: 92, lines: 2 },
+];
+
+function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(resolve, ms);
+    const done = () => {
+      window.clearTimeout(timer);
+      resolve();
+    };
+    work.then(done, done);
+  });
 }
 
-function presence(u: any): { label: string; tone: 'success' | 'danger' | 'neutral' } {
-  if (u.is_frozen) return { label: 'Frozen', tone: 'danger' };
-  if (u.is_online) return { label: 'Online', tone: 'success' };
-  return { label: 'Offline', tone: 'neutral' };
-}
-
-function OnlineDot() {
-  return <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--tone-success-fg)', boxShadow: '0 0 0 3px var(--tone-success-bg)', flex: 'none' }} />;
-}
-
-const microLabel: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.12em',
-  textTransform: 'uppercase', color: 'var(--fg-tertiary)',
-  margin: '20px 0 10px', display: 'flex', alignItems: 'center', gap: 8,
-};
-
-function MoneyRow({ amount, meta, status, when }: { amount: number | string; meta: string; status: string; when: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontVariantNumeric: 'tabular-nums', minWidth: 96 }}>{formatNaira(amount)}</span>
-      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</span>
-      <StatusDot status={status} />
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap', minWidth: 64, textAlign: 'right' }}>{when}</span>
-    </div>
+function takesFocus(element: HTMLElement | null | undefined): element is HTMLElement {
+  return Boolean(
+    element && element.isConnected && !element.matches(':disabled') && element.getClientRects().length > 0,
   );
 }
 
-function emptyLine(msg: string) {
-  return <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: '6px 0' }}>{msg}</div>;
-}
-
-function DetailBody({ detail, detailLoading, terminate, actionBusy, err }: {
-  detail: any; detailLoading: boolean; terminate: () => void; actionBusy: boolean; err: string;
-}) {
-  if (detailLoading || !detail?.user) {
-    return <SkeletonLines />;
-  }
-  const p = presence(detail.user);
-  return (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
-        <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-lg)', background: 'var(--accent-base)', color: 'var(--accent-fg)', display: 'grid', placeItems: 'center', fontSize: 18, fontWeight: 700, flex: 'none' }}>
-          {(detail.user.full_name || detail.user.username || '?').charAt(0).toUpperCase()}
-        </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--fg-primary)' }}>@{detail.user.username || detail.user.full_name}</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 3 }}>
-            {detail.user.email}{detail.user.phone ? ' · ' + detail.user.phone : ''}
-          </div>
-        </div>
-        <StatusDot status={p.label} tone={p.tone} />
-      </div>
-
-      <div style={{ marginTop: 14 }}>
-        <Button variant="danger" size="sm" loading={actionBusy} onClick={terminate} style={{ width: '100%', justifyContent: 'center' }}>
-          {actionBusy ? 'Terminating…' : 'Terminate all sessions'}
-        </Button>
-      </div>
-
-      {err && (
-        <div style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: '1px solid var(--tone-danger-border)', padding: '10px 12px', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', marginTop: 12 }}>{err}</div>
-      )}
-
-      <div style={microLabel}>Sessions <span style={{ color: 'var(--fg-disabled)' }}>· {detail.sessions.length}</span></div>
-      {detail.sessions.length === 0 ? emptyLine('No sessions.') : detail.sessions.map((se: any) => (
-        <div key={se.id} style={{ padding: '11px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-secondary)' }}>{new Date(se.created_at).toLocaleString()}</span>
-            {se.ended_at
-              ? <StatusDot status={`Ended ${timeAgo(se.ended_at)}`} tone="neutral" />
-              : <StatusDot status="Active" tone="success" />}
-          </div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-            {[se.device_model, se.os_version, se.app_version].filter(Boolean).join(' · ') || '—'} · IP {se.ip_address || '—'}
-          </div>
-        </div>
-      ))}
-
-      <div style={microLabel}>Recent withdrawals</div>
-      {detail.withdrawals.length === 0 ? emptyLine('None.') : detail.withdrawals.map((w: any) => (
-        <MoneyRow key={w.id} amount={w.amount} meta={`${w.bank_name || ''} · ${w.account_name || ''}`} status={w.status} when={timeAgo(w.created_at)} />
-      ))}
-
-      <div style={microLabel}>Recent transactions</div>
-      {detail.transactions.length === 0 ? emptyLine('None.') : detail.transactions.map((tx: any) => (
-        <MoneyRow key={tx.id} amount={tx.amount} meta={tx.type} status={tx.status} when={timeAgo(tx.created_at)} />
-      ))}
-    </>
-  );
-}
-
-function ActivityMobile({ rows, loading, onOpen }: { rows: any[]; loading: boolean; onOpen: (id: string) => void }) {
-  if (loading && rows.length === 0) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {[0, 1, 2, 3].map((k) => (
-          <div key={k} style={{ height: 70, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
-        ))}
-      </div>
-    );
-  }
-  if (rows.length === 0) {
-    return <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>No users</div>;
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {rows.map((u: any) => {
-        const p = presence(u);
-        return (
-          <div key={u.id} onClick={() => onOpen(u.id)} style={{ background: 'var(--bg-surface)', cursor: 'pointer', padding: 14, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-              <div style={{ minWidth: 0, fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)', display: 'flex', alignItems: 'center', gap: 7 }}>
-                {u.is_online && <OnlineDot />}@{u.username || u.full_name || '—'}
-              </div>
-              <StatusDot status={p.label} tone={p.tone} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginTop: 8 }}>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email || '—'}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap' }}>{timeAgo(u.last_active_at)}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+function rowFocusTarget(region: HTMLElement | null, id: string | null): HTMLElement | null {
+  if (!region) return null;
+  const opens = Array.from(region.querySelectorAll<HTMLElement>('[data-row-open]')).filter(takesFocus);
+  return opens.find((element) => element.dataset.rowOpen === id) ?? region;
 }
 
 export default function UserActivityMonitorPage() {
-  const isMobile = useIsMobile();
-  const [rows, setRows] = useState<any[]>([]);
-  const [onlineCount, setOnlineCount] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [onlyOnline, setOnlyOnline] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<any>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const limit = 25;
+  return (
+    <Suspense fallback={<MonitorFallback />}>
+      <ActivityMonitor />
+    </Suspense>
+  );
+}
 
-  const buildParams = useCallback(() => {
-    const p = new URLSearchParams();
-    if (search) p.set('search', search);
-    if (onlyOnline) p.set('online', '1');
-    p.set('page', String(page));
-    p.set('limit', String(limit));
-    return p;
-  }, [search, onlyOnline, page]);
+function MonitorFallback() {
+  return (
+    <div>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <ResponsiveView
+        desktop={
+          <Card>
+            <CardBody flush>
+              <Table flush aria-label="Users by activity">
+                <TBody>
+                  <TableSkeleton columns={SKELETON_COLUMNS} rows={10} />
+                </TBody>
+              </Table>
+            </CardBody>
+          </Card>
+        }
+        mobile={
+          <MobileDataList<ActivityUser>
+            ariaLabel="Users by activity"
+            items={[]}
+            getKey={(user) => user.id}
+            renderRow={(user) => ({ primary: user.id })}
+            loading
+            initialLoading
+            skeletonRows={8}
+          />
+        }
+      />
+    </div>
+  );
+}
 
-  const load = async () => {
-    setLoading(true);
-    const res = await fetch('/api/user-activity-monitor?' + buildParams().toString());
-    if (res.status === 403) { setErr('Forbidden (super-admin only)'); setLoading(false); return; }
-    const json = await res.json();
-    setRows(json.users || []);
-    setTotal(json.total || 0);
-    setOnlineCount(json.online_count || 0);
-    setLoading(false);
-  };
+function ActivityMonitor() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { isSuperAdmin } = usePermissions();
+  const rawId = searchParams.get('id');
+  const [view, setView] = useUrlState(ACTIVITY_URL);
+  const openId = view.id;
 
-  useEffect(() => { load(); }, [page, onlyOnline]);
+  const [searchText, setSearchText] = useState(view.search);
+  const [livePaused, setLivePaused] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [terminating, setTerminating] = useState(false);
+
+  const terminatingRef = useRef(false);
+  const appliedSearch = useRef(view.search);
+  const listRegionRef = useRef<HTMLDivElement>(null);
+  const drawerBodyRef = useRef<HTMLDivElement>(null);
+  const terminateRef = useRef<HTMLButtonElement>(null);
+  const lastOpenRef = useRef<string | null>(openId);
+  const currentOpenRef = useRef<string | null>(openId);
+
+  const paused = pauseReason({ manual: livePaused, dialog: confirming, drawer: openId !== null });
+  const listKey = useMemo(() => listQuery(view), [view]);
+
+  const list = useResource(
+    listKey,
+    (signal) => apiRequest('/api/user-activity-monitor', {
+      query: new URLSearchParams(listKey),
+      signal,
+      select: toListResult,
+    }),
+    { pollMs: paused ? 0 : POLL_MS, keepPreviousData: sameFilter },
+  );
+
+  const detail = useResource(
+    openId ? `user-activity:${openId}` : null,
+    (signal) => apiRequest(`/api/user-activity-monitor/${encodeURIComponent(openId ?? '')}`, {
+      signal,
+      select: toDetailResult,
+    }),
+    { keepPreviousData: false },
+  );
+
+  const { refresh: refreshList } = list;
+  const { refresh: refreshDetail } = detail;
+
+  const badLink = rawId !== null && !isUuid(rawId.trim());
+  const settled = list.isPreviousData ? undefined : list.data;
+  const denied = list.error?.status === 403 && list.data === undefined;
+
   useEffect(() => {
-    const t = setInterval(() => { load(); }, 30000);
-    return () => clearInterval(t);
-  }, [page, onlyOnline, search]);
+    if (!badLink) return;
+    toast.show(BAD_LINK, 'warning');
+    setView((current) => current);
+  }, [badLink, setView, toast]);
 
-  const openDetail = async (id: string) => {
-    setSelected(id); setDetail(null); setDetailLoading(true); setErr('');
-    const res = await fetch(`/api/user-activity-monitor/${id}`);
-    const json = await res.json();
-    if (!res.ok) { setErr(json?.error || 'Load failed'); setDetailLoading(false); return; }
-    setDetail(json);
-    setDetailLoading(false);
+  useEffect(() => {
+    currentOpenRef.current = openId;
+    if (openId) lastOpenRef.current = openId;
+  }, [openId]);
+
+  useEffect(() => {
+    if (view.search === appliedSearch.current) return;
+    appliedSearch.current = view.search;
+    setSearchText(view.search);
+  }, [view.search]);
+
+  useEffect(() => {
+    if (!settled || settled.users.length > 0) return;
+    const lastPage = Math.max(1, Math.ceil(settled.total / PAGE_SIZE));
+    setView((current) => (current.page > lastPage ? { ...current, page: lastPage } : current));
+  }, [settled, setView]);
+
+  const openRow = useCallback((id: string) => setView((current) => ({ ...current, id })), [setView]);
+
+  const closeDrawer = useCallback(() => setView((current) => ({ ...current, id: null })), [setView]);
+
+  const changeFilter = useCallback(
+    (filter: ActivityFilter) => setView((current) => ({ ...current, filter, page: 1 })),
+    [setView],
+  );
+
+  const applySearch = useCallback((value: string) => {
+    const search = cleanSearch(value);
+    appliedSearch.current = search;
+    setView((current) => (current.search === search ? current : { ...current, search, page: 1 }));
+  }, [setView]);
+
+  const clearFilters = useCallback(() => {
+    setSearchText('');
+    appliedSearch.current = '';
+    setView((current) => ({ ...current, filter: DEFAULT_FILTER, search: '', page: 1 }));
+  }, [setView]);
+
+  const onSort = useCallback((key: string) => {
+    setView((current) => ({ ...current, sort: nextSort(current.sort, key), page: 1 }));
+  }, [setView]);
+
+  const onMobileSort = useCallback((next: SortState) => {
+    setView((current) => ({ ...current, sort: next, page: 1 }));
+  }, [setView]);
+
+  const goToPage = useCallback((page: number) => setView((current) => ({ ...current, page })), [setView]);
+
+  const retryList = useCallback(() => {
+    void refreshList();
+  }, [refreshList]);
+
+  const retryDetail = useCallback(() => {
+    void refreshDetail();
+  }, [refreshDetail]);
+
+  const drawerReturn = useCallback(() => rowFocusTarget(listRegionRef.current, lastOpenRef.current), []);
+
+  const terminateReturn = useCallback((): HTMLElement | null => {
+    if (takesFocus(terminateRef.current)) return terminateRef.current;
+    if (drawerBodyRef.current?.isConnected) return drawerBodyRef.current;
+    return listRegionRef.current;
+  }, []);
+
+  const reportTerminate = (outcome: SettledTerminate, user: UserDetail) => {
+    switch (outcome.kind) {
+      case 'done':
+        if (outcome.warning) toast.show(`${terminateSuccess(user, outcome.endedSessions)} ${outcome.warning}`, 'warning');
+        else toast.show(terminateSuccess(user, outcome.endedSessions), 'success');
+        return;
+      case 'refused':
+        toast.show(outcome.message, 'error');
+        if (outcome.status === 403) router.refresh();
+        return;
+      case 'expired':
+        return;
+    }
   };
 
   const terminate = async () => {
-    if (!selected || !detail?.user) return;
-    if (!confirm(`Force log out @${detail.user.username || detail.user.full_name}? All active sessions will be revoked.`)) return;
-    setActionBusy(true); setErr('');
-    const res = await fetch(`/api/user-activity-monitor/${selected}/terminate`, { method: 'POST' });
-    const json = await res.json();
-    setActionBusy(false);
-    if (!res.ok) { setErr(json?.error || 'Terminate failed'); return; }
-    await openDetail(selected);
-    load();
+    if (terminatingRef.current || !openId) return;
+    terminatingRef.current = true;
+    setTerminating(true);
+    let sent = false;
+    let finished = false;
+    try {
+      const read = await refreshDetail();
+      setTerminating(false);
+      if (!read) return;
+      if (!read.ok) {
+        if (read.error.kind === 'aborted') return;
+        if (read.error.status !== 401) toast.show(`${read.error.message} Nothing was changed.`, 'error');
+        if (read.error.status === 403) router.refresh();
+        return;
+      }
+      if (!isLoaded(read.data)) {
+        toast.show(GONE, 'warning');
+        return;
+      }
+      const target = read.data;
+      const user = target.user;
+      if (currentOpenRef.current?.toLowerCase() !== user.id.toLowerCase()) return;
+      setConfirming(true);
+      const decision = await confirm<SettledTerminate>({
+        ...terminateConfirm(target),
+        action: async ({ reason }) => {
+          sent = true;
+          const outcome = classifyTerminate(
+            await apiRequest(`/api/user-activity-monitor/${encodeURIComponent(user.id)}/terminate`, {
+              method: 'POST',
+              body: { reason },
+              select: toTerminateResult,
+            }),
+          );
+          if (outcome.kind === 'retry') throw new Error(outcome.message);
+          finished = true;
+          if (outcome.kind !== 'expired') {
+            await settleWithin(
+              Promise.all([refreshDetail({ background: true }), refreshList({ background: true })]),
+              SETTLE_WAIT_MS,
+            );
+          }
+          return outcome;
+        },
+        returnFocusTo: terminateReturn,
+      });
+      if (decision?.value) reportTerminate(decision.value, user);
+    } finally {
+      terminatingRef.current = false;
+      setTerminating(false);
+      setConfirming(false);
+      if (sent && !finished) {
+        toast.show(NOT_CONFIRMED, 'error');
+        void refreshDetail({ background: true });
+        void refreshList({ background: true });
+      }
+    }
   };
 
-  const closePanel = () => { setSelected(null); setDetail(null); setErr(''); };
-  const totalPages = Math.ceil(total / limit);
+  const listError = list.error;
+  const shown = list.isPreviousData && listError !== null ? undefined : list.data;
+  const rows = shown?.users ?? [];
+  const total = shown?.total ?? 0;
+  const loaded = shown !== undefined;
+  const foreground = list.isInitialLoading || list.isRefreshing;
+  const blocked = rows.length === 0 && listError !== null;
+  const showSkeleton = rows.length === 0 && !blocked && list.isInitialLoading;
+  const tableBusy = list.isRefreshing && !showSkeleton && !blocked;
+  const statsLoading = list.isInitialLoading && !blocked;
+  const filtersActive = isFiltered(view, searchText);
+  const empty = emptyCopy(view);
+  const live = liveState({ paused, failing: listError !== null, updatedAt: shown ? list.lastUpdatedAt : null });
+  const loadedDetail = isLoaded(detail.data) ? detail.data : null;
+  const drawerUser = loadedDetail?.user ?? (openId ? rows.find((row) => row.id === openId) ?? null : null);
+  const clearButton = filtersActive ? (
+    <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>
+  ) : undefined;
+
+  if (denied) {
+    return (
+      <div>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <AccessDenied title="Super administrators only" message={DENIED_MESSAGE} />
+      </div>
+    );
+  }
+
+  const desktopList = (
+    <>
+      {listError && rows.length > 0 ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          meta={
+            list.lastUpdatedAt
+              ? `Showing activity from ${formatBusinessTime(new Date(list.lastUpdatedAt))} ${BUSINESS_TZ_LABEL}.`
+              : undefined
+          }
+          actions={<Button variant="ghost" size="sm" onClick={retryList}>Retry now</Button>}
+        >
+          Live updates are failing. {listError.message}
+        </Notice>
+      ) : null}
+      <Card>
+        <CardBody flush>
+          <Table flush aria-label="Users by activity" busy={tableBusy}>
+            <THead>
+              <Tr>
+                <Th sticky>User</Th>
+                <Th>Contact</Th>
+                <Th>Status</Th>
+                <Th sortKey="last_active_at" sort={view.sort} onSort={onSort}>Last seen</Th>
+                <Th sortKey="created_at" sort={view.sort} onSort={onSort}>Joined</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {blocked && listError ? (
+                <TableState colSpan={COLUMN_COUNT}>
+                  <ErrorState
+                    compact
+                    title="User activity could not be loaded"
+                    message={listError.message}
+                    requestId={listError.requestId}
+                    onRetry={retryList}
+                    retrying={foreground}
+                  />
+                </TableState>
+              ) : showSkeleton ? (
+                <TableSkeleton columns={SKELETON_COLUMNS} rows={10} />
+              ) : rows.length === 0 ? (
+                <TableEmpty colSpan={COLUMN_COUNT} title={empty.title} hint={empty.hint} actions={clearButton} />
+              ) : (
+                rows.map((user) => {
+                  const name = displayName(user);
+                  return (
+                    <Tr key={user.id} selected={user.id === openId} onActivate={() => openRow(user.id)}>
+                      <Td sticky>
+                        <div className={s.userCell}>
+                          <Avatar name={name} decorative />
+                          <div className={s.stack}>
+                            <RowOpen onClick={() => openRow(user.id)} aria-haspopup="dialog" data-row-open={user.id}>
+                              {name}
+                            </RowOpen>
+                            <span className={s.subMono}>
+                              {user.full_name ? handleOf(user) || 'No username' : 'No name on file'}
+                            </span>
+                          </div>
+                        </div>
+                      </Td>
+                      <Td>
+                        <div className={s.stack}>
+                          <span className={user.email ? s.lead : s.muted}>{user.email || 'No email'}</span>
+                          <span className={s.subMono}>{user.phone || 'No phone'}</span>
+                        </div>
+                      </Td>
+                      <Td>
+                        <StatusCell user={user} />
+                      </Td>
+                      <Td>
+                        <SeenCell value={user.last_active_at} />
+                      </Td>
+                      <Td>
+                        <JoinedCell value={user.created_at} />
+                      </Td>
+                    </Tr>
+                  );
+                })
+              )}
+            </TBody>
+          </Table>
+        </CardBody>
+      </Card>
+    </>
+  );
+
+  const mobileList = (
+    <MobileDataList<ActivityUser>
+      ariaLabel="Users by activity"
+      items={rows}
+      getKey={(user) => user.id}
+      loading={foreground}
+      initialLoading={showSkeleton}
+      busy={foreground && !showSkeleton}
+      error={listError ? listError.message : null}
+      errorTitle="User activity could not be loaded"
+      refreshErrorTitle="Live updates are failing"
+      onRetry={retryList}
+      skeletonRows={8}
+      empty={{ title: empty.title, hint: empty.hint, actions: clearButton }}
+      sortOptions={MOBILE_SORT_OPTIONS}
+      sort={view.sort}
+      onSortChange={onMobileSort}
+      renderRow={(user) => {
+        const frozen = accountState(user) === 'frozen';
+        return {
+          leading: <Avatar name={displayName(user)} decorative />,
+          primary: displayName(user),
+          secondary: contactLine(user),
+          status: <StatusCell user={user} />,
+          meta: user.last_active_at ? `Last seen ${seenText(user.last_active_at)}` : 'Never active',
+          flag: frozen ? 'danger' : null,
+          flagLabel: frozen ? 'Account frozen' : undefined,
+          onClick: () => openRow(user.id),
+        };
+      }}
+    />
+  );
 
   return (
     <div>
       <PageHeader
-        title="User activity monitor"
-        subtitle={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-            <OnlineDot />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', letterSpacing: '0.04em', color: 'var(--fg-tertiary)' }}>
-              LIVE · {onlineCount.toLocaleString()} ONLINE · AUTO-REFRESH 30s
-            </span>
-          </span>
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={livePaused ? <Play size={14} aria-hidden /> : <Pause size={14} aria-hidden />}
+              onClick={() => setLivePaused((value) => !value)}
+            >
+              {livePaused ? 'Resume updates' : 'Pause updates'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<RotateCw size={14} aria-hidden />}
+              loading={list.isRefreshing && !list.isPreviousData}
+              onClick={retryList}
+            >
+              Refresh
+            </Button>
+          </>
         }
       />
 
-      <StatStrip items={[
-        { label: 'Online now', value: onlineCount.toLocaleString() },
-        { label: 'Total users', value: total.toLocaleString() },
-      ]} />
+      <LiveStatus state={live} />
 
-      {err && !selected && (
-        <div style={{ backgroundColor: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', border: '1px solid var(--tone-danger-border)', padding: '10px 14px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-4)' }}>
-          {err}
-        </div>
-      )}
+      <StatStrip
+        aria-label="Activity summary"
+        items={[
+          {
+            label: ONLINE_LABEL,
+            value: countText(shown?.onlineCount),
+            hint: 'Users online',
+            loading: statsLoading,
+            unavailable: shown !== undefined && shown.onlineCount === null,
+          },
+          {
+            label: RECENT_LABEL,
+            value: countText(shown?.recentCount),
+            hint: 'Rolling, not since midnight',
+            loading: statsLoading,
+            unavailable: shown !== undefined && shown.recentCount === null,
+          },
+          {
+            label: 'Matching',
+            value: loaded ? countText(total) : '—',
+            hint: describeView(view),
+            loading: statsLoading,
+          },
+        ]}
+      />
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
-        <Input
-          placeholder="Search username, name, email"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && (setPage(1), load())}
-          style={{ minWidth: 260 }}
+      <div className={s.tabsRow}>
+        <Tabs<ActivityFilter>
+          aria-label="Filter by activity"
+          value={view.filter}
+          onChange={changeFilter}
+          items={FILTER_TABS}
         />
-        <Toggle label="Online only" checked={onlyOnline} onChange={(next) => { setOnlyOnline(next); setPage(1); }} />
-        <Button variant="primary" size="sm" onClick={() => { setPage(1); load(); }}>Apply</Button>
       </div>
 
-      {isMobile ? (
-        <ActivityMobile rows={rows} loading={loading} onOpen={openDetail} />
-      ) : (
-        <Card>
-          <CardBody flush>
-            <Table flush>
-              <THead>
-                <Tr>
-                  <Th>User</Th>
-                  <Th>Email</Th>
-                  <Th>Last active</Th>
-                  <Th>Status</Th>
-                  <Th align="right"></Th>
-                </Tr>
-              </THead>
-              <TBody>
-                {loading && rows.length === 0 ? (
-                  <TableSkeleton colSpan={5} />
-                ) : rows.length === 0 ? (
-                  <TableEmpty colSpan={5}>No users</TableEmpty>
-                ) : rows.map((u: any) => {
-                  const p = presence(u);
-                  return (
-                    <Tr key={u.id} interactive selected={selected === u.id} onClick={() => openDetail(u.id)}>
-                      <Td emphasis="primary">
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                          {u.is_online ? <OnlineDot /> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--border-strong)', flex: 'none' }} />}
-                          @{u.username || u.full_name || '—'}
-                        </span>
-                      </Td>
-                      <Td emphasis="secondary">{u.email || '—'}</Td>
-                      <Td emphasis="secondary" mono>{timeAgo(u.last_active_at)}</Td>
-                      <Td><StatusDot status={p.label} tone={p.tone} /></Td>
-                      <Td align="right"><span style={{ color: 'var(--fg-disabled)' }}>›</span></Td>
-                    </Tr>
-                  );
-                })}
-              </TBody>
-            </Table>
-          </CardBody>
-        </Card>
-      )}
+      <FilterBar
+        aria-label="Search user activity"
+        search={
+          <SearchInput
+            aria-label="Search users"
+            placeholder="Name, username, email, phone or user ID"
+            value={searchText}
+            onChange={setSearchText}
+            onDebouncedChange={applySearch}
+            loading={list.isRefreshing}
+          />
+        }
+        onClear={clearFilters}
+        active={filtersActive}
+      />
 
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 'var(--space-4)' }}>
-          <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Previous</Button>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
-            PAGE {page} / {totalPages}
-          </span>
-          <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next</Button>
-        </div>
-      )}
+      <div ref={listRegionRef} className={s.listRegion} tabIndex={-1} role="region" aria-label="User activity results">
+        <ResponsiveView desktop={desktopList} mobile={mobileList} />
+      </div>
+
+      {loaded && !blocked ? (
+        <Pagination
+          page={view.page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPageChange={goToPage}
+          noun="users"
+          disabled={foreground}
+          label="User activity pages"
+          scrollTargetRef={listRegionRef}
+        />
+      ) : null}
 
       <SidePanel
-        open={!!selected}
-        onClose={closePanel}
-        title="Activity detail"
-        subtitle={detail?.user ? `@${detail.user.username || detail.user.full_name}` : undefined}
+        open={openId !== null}
+        onClose={closeDrawer}
+        title={drawerUser ? displayName(drawerUser) : 'User activity'}
+        subtitle={drawerUser ? contactLine(drawerUser) : undefined}
+        returnFocusTo={drawerReturn}
+        footer={
+          isSuperAdmin && loadedDetail ? (
+            <div className={s.drawerActions}>
+              <Button
+                ref={terminateRef}
+                variant="dangerSubtle"
+                leftIcon={<LogOut size={14} aria-hidden />}
+                loading={terminating}
+                onClick={() => void terminate()}
+              >
+                Sign out everywhere
+              </Button>
+            </div>
+          ) : undefined
+        }
       >
-        <DetailBody detail={detail} detailLoading={detailLoading} terminate={terminate} actionBusy={actionBusy} err={err} />
+        {detail.data ? (
+          loadedDetail ? (
+            <div ref={drawerBodyRef} className={s.drawerBody} tabIndex={-1}>
+              <DetailToolbar loadedAt={detail.lastUpdatedAt} refreshing={detail.isRefreshing} onRefresh={retryDetail} />
+              {detail.error ? (
+                <Notice tone="warning" compact announce="polite">
+                  This user could not be refreshed. {detail.error.message}
+                </Notice>
+              ) : null}
+              <DetailBody detail={loadedDetail} />
+            </div>
+          ) : (
+            <EmptyState
+              variant="plain"
+              title="User not found"
+              hint="This account no longer exists. It may have been removed after the list loaded."
+            />
+          )
+        ) : detail.error ? (
+          <ErrorState
+            compact
+            title="This user’s activity could not be loaded"
+            message={detail.error.message}
+            requestId={detail.error.requestId}
+            onRetry={retryDetail}
+            retrying={detail.isInitialLoading}
+          />
+        ) : (
+          <DetailSkeleton />
+        )}
       </SidePanel>
     </div>
   );

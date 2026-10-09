@@ -1,478 +1,648 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Pencil, Trash2, Plus, ChevronDown, ChevronUp } from 'lucide-react';
-import { PageHeader, Card, CardHeader, CardBody, Button, Input, Toggle, Badge, Modal, SkeletonLines } from '../../_ui';
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Plus, RotateCw } from 'lucide-react';
+import {
+  AccessDenied, Button, Combobox, EmptyState, ErrorState, FieldShell, Notice, PageHeader, Skeleton, useCan,
+  useConfirm, useResource, useToast, useUrlState, uuidParam,
+  type ComboboxOption, type ConfirmOptions,
+} from '../../_ui';
+import { apiRequest, type ApiBody, type ApiResult } from '../../lib/apiClient';
+import { moveId, type MoveDirection } from './rules';
+import {
+  addCountryConfirm, addedCountryText, brandDescription, classifyMutation, countryLabel, createdTemplateText,
+  deleteFieldConfirm, deleteTemplateConfirm, deletedFieldText, deletedTemplateText, movedText, renamedTemplateText,
+  savedFieldText, switchedCountryText, toBrandList, toBuilderData, toggleCountryConfirm, withFieldOrder,
+  withTemplateOrder,
+  type BrandCountry, type BrandSummary, type BuilderData, type Install, type MutationAttempt, type MutationOutcome,
+  type Template, type TemplateField,
+} from './model';
+import { BuilderSkeleton, TemplateCard, focusKey, type FocusKind } from './BuilderParts';
+import { FieldEditor, TemplateEditor, type EditorResult, type FieldDraft } from './Editors';
+import s from './page.module.css';
 
-interface CardBrand {
-  id: string;
-  name: string;
-  logo_url: string | null;
-  countries: { country_code: string; country_name: string; is_active: boolean }[];
+const ENDPOINT = '/api/field-builder';
+const CARD_URL = uuidParam('card');
+const TITLE = 'Field builder';
+const SUBTITLE =
+  'Card types and the details users fill in when they sell a card. A card type goes live in a country when you add it there.';
+const NOT_SENT = 'The request could not be started, so nothing was changed. Try again.';
+const UNKNOWN_OUTCOME =
+  'No response came back, so this may or may not have been saved. The list has been reloaded; check it before trying again.';
+const BAD_LINK = 'That link does not point to a card, so nothing was opened.';
+
+type TemplateEditorState =
+  | { kind: 'template'; mode: 'create' }
+  | { kind: 'template'; mode: 'rename'; template: Template };
+
+type FieldEditorState =
+  | { kind: 'field'; mode: 'create'; template: Template }
+  | { kind: 'field'; mode: 'edit'; template: Template; field: TemplateField };
+
+type EditorState = TemplateEditorState | FieldEditorState;
+
+interface ConfirmedRequest {
+  options: ConfirmOptions;
+  pendingLabel: string;
+  request: () => Promise<ApiResult<ApiBody>>;
+  success: (body: ApiBody) => string;
+  after?: (body: ApiBody) => void;
+  returnFocusTo?: () => HTMLElement | null;
+  retryInDialog?: boolean;
 }
 
-interface Field {
-  id: string;
-  label: string;
-  input_type: 'text' | 'image' | 'image_text';
-  is_required: boolean;
-  sort_order: number;
+function focusable(key: string | null): HTMLElement | null {
+  if (!key) return null;
+  const element = document.querySelector<HTMLElement>(`[data-focus="${key}"]`);
+  if (!element || !element.isConnected || element.matches(':disabled')) return null;
+  return element.getClientRects().length > 0 ? element : null;
 }
 
-interface InstalledCountry {
-  id: string;
-  country_code: string;
-  is_active: boolean;
+function firstFocusable(keys: ReadonlyArray<string | null>): HTMLElement | null {
+  for (const key of keys) {
+    const element = focusable(key);
+    if (element) return element;
+  }
+  return null;
 }
 
-interface AvailableCountry {
-  country_code: string;
-  country_name: string;
-  is_active: boolean;
+function opposite(direction: MoveDirection): MoveDirection {
+  return direction === 'up' ? 'down' : 'up';
 }
 
-interface Template {
-  id: string;
-  name: string;
-  is_active: boolean;
-  sort_order: number;
-  fields: Field[];
-  countries: InstalledCountry[];
-  expanded?: boolean;
+function moveFocusKeys(kind: FocusKind, id: string, direction: MoveDirection, fallback: string): string[] {
+  return [focusKey(kind, id, direction), focusKey(kind, id, opposite(direction)), fallback];
 }
-
-const INPUT_TYPE_OPTIONS = [
-  { value: 'text', label: 'Text' },
-  { value: 'image', label: 'Image Upload' },
-  { value: 'image_text', label: 'Image + Text' },
-];
-
-const sectionLabel: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600, color: 'var(--fg-tertiary)',
-  textTransform: 'uppercase', letterSpacing: '0.11em', margin: '0 0 8px',
-};
 
 export default function FieldBuilderPage() {
-  const [cards, setCards] = useState<CardBrand[]>([]);
-  const [selectedCard, setSelectedCard] = useState<CardBrand | null>(null);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [countries, setCountries] = useState<AvailableCountry[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const [showAddType, setShowAddType] = useState(false);
-  const [newTypeName, setNewTypeName] = useState('');
-  const [savingType, setSavingType] = useState(false);
-
-  const [editTypeId, setEditTypeId] = useState<string | null>(null);
-  const [editTypeName, setEditTypeName] = useState('');
-  const [deleteTypeId, setDeleteTypeId] = useState<string | null>(null);
-
-  const [fieldFormTypeId, setFieldFormTypeId] = useState<string | null>(null);
-  const [fieldFormMode, setFieldFormMode] = useState<'add' | 'edit'>('add');
-  const [editFieldId, setEditFieldId] = useState<string | null>(null);
-  const [fieldLabel, setFieldLabel] = useState('');
-  const [fieldInputType, setFieldInputType] = useState<'text' | 'image' | 'image_text'>('text');
-  const [fieldRequired, setFieldRequired] = useState(true);
-  const [savingField, setSavingField] = useState(false);
-
-  const [busyCountry, setBusyCountry] = useState<string | null>(null);
-
-  useEffect(() => { fetchCards(); }, []);
-
-  const fetchCards = async () => {
-    const res = await fetch('/api/cards');
-    const data = await res.json();
-    setCards(data.cards || []);
-  };
-
-  const fetchTemplates = async (cardId: string, silent = false) => {
-    if (!silent) setLoading(true);
-    const res = await fetch(`/api/field-builder?card_id=${cardId}`);
-    const data = await res.json();
-    setTemplates((prev) => {
-      const wasExpanded = new Map(prev.map((t) => [t.id, t.expanded]));
-      return (data.templates || []).map((t: Template) => ({ ...t, expanded: wasExpanded.get(t.id) ?? false }));
-    });
-    setCountries(data.countries || []);
-    if (!silent) setLoading(false);
-  };
-
-  const selectCard = (card: CardBrand) => {
-    setSelectedCard(card);
-    setTemplates([]);
-    setCountries([]);
-    fetchTemplates(card.id);
-  };
-
-  const refresh = () => { if (selectedCard) fetchTemplates(selectedCard.id, true); };
-
-  const toggleExpand = (id: string) => {
-    setTemplates((prev) => prev.map((t) => t.id === id ? { ...t, expanded: !t.expanded } : t));
-  };
-
-  const countryName = (code: string) => countries.find((c) => c.country_code === code)?.country_name || code;
-
-  const handleAddType = async () => {
-    if (!newTypeName.trim() || !selectedCard) return;
-    setSavingType(true);
-    await fetch('/api/field-builder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'template', card_id: selectedCard.id, name: newTypeName.trim() }),
-    });
-    setSavingType(false);
-    setNewTypeName(''); setShowAddType(false);
-    refresh();
-  };
-
-  const handleToggleType = async (tpl: Template) => {
-    await fetch('/api/field-builder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'template', id: tpl.id, is_active: !tpl.is_active }),
-    });
-    refresh();
-  };
-
-  const handleSaveEditType = async (id: string) => {
-    if (!editTypeName.trim()) return;
-    await fetch('/api/field-builder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'template', id, name: editTypeName.trim() }),
-    });
-    setEditTypeId(null);
-    refresh();
-  };
-
-  const confirmDeleteType = async () => {
-    if (!deleteTypeId) return;
-    await fetch('/api/field-builder', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'template', id: deleteTypeId }),
-    });
-    setDeleteTypeId(null);
-    refresh();
-  };
-
-  const addToCountry = async (templateId: string, countryCode: string) => {
-    setBusyCountry(`${templateId}:${countryCode}`);
-    await fetch('/api/field-builder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'add_country', template_id: templateId, country_code: countryCode }),
-    });
-    setBusyCountry(null);
-    refresh();
-  };
-
-  const toggleCountry = async (cardTypeId: string, isActive: boolean) => {
-    setBusyCountry(cardTypeId);
-    await fetch('/api/field-builder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'country', card_type_id: cardTypeId, is_active: isActive }),
-    });
-    setBusyCountry(null);
-    refresh();
-  };
-
-  const openAddField = (templateId: string) => {
-    setFieldFormTypeId(templateId); setFieldFormMode('add');
-    setEditFieldId(null); setFieldLabel(''); setFieldInputType('text'); setFieldRequired(true);
-  };
-
-  const openEditField = (templateId: string, field: Field) => {
-    setFieldFormTypeId(templateId); setFieldFormMode('edit');
-    setEditFieldId(field.id); setFieldLabel(field.label);
-    setFieldInputType(field.input_type); setFieldRequired(field.is_required);
-  };
-
-  const handleSaveField = async () => {
-    if (!fieldLabel.trim()) return;
-    setSavingField(true);
-    if (fieldFormMode === 'add') {
-      await fetch('/api/field-builder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'field', template_id: fieldFormTypeId, label: fieldLabel.trim(), input_type: fieldInputType, is_required: fieldRequired }),
-      });
-    } else {
-      await fetch('/api/field-builder', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'field', id: editFieldId, label: fieldLabel.trim(), input_type: fieldInputType, is_required: fieldRequired }),
-      });
-    }
-    setSavingField(false);
-    setFieldFormTypeId(null);
-    refresh();
-  };
-
-  const handleDeleteField = async (fieldId: string) => {
-    await fetch('/api/field-builder', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'field', id: fieldId }),
-    });
-    refresh();
-  };
-
-  const inputTypeBadge = (type: string) => {
-    const map: Record<string, string> = { text: 'Text', image: 'Image Upload', image_text: 'Image + Text' };
-    return map[type] || type;
-  };
-
   return (
-    <div>
-      <PageHeader
-        title="Field Builder"
-        subtitle="Define card types and their input fields per brand, then roll them out country by country."
-      />
+    <Suspense fallback={<FieldBuilderFallback />}>
+      <FieldBuilder />
+    </Suspense>
+  );
+}
 
-      <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <Card style={{ width: 220, flexShrink: 0 }}>
-          <CardHeader title="Card Brands" />
-          <CardBody flush>
-            {cards.map((card) => {
-              const active = selectedCard?.id === card.id;
-              return (
-                <button
-                  key={card.id}
-                  onClick={() => selectCard(card)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                    padding: '9px 14px', cursor: 'pointer', border: 'none',
-                    borderLeft: active ? '2.5px solid var(--accent-base)' : '2.5px solid transparent',
-                    background: active ? 'var(--bg-subtle)' : 'transparent',
-                    color: active ? 'var(--fg-primary)' : 'var(--fg-secondary)',
-                    fontSize: 'var(--text-sm)', fontWeight: 600,
-                  }}
-                >
-                  {card.logo_url && <img src={card.logo_url} alt={card.name} style={{ width: 24, height: 24, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />}
-                  <span>{card.name}</span>
-                </button>
-              );
-            })}
-            {cards.length === 0 && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', padding: '12px 14px', margin: 0 }}>No cards yet</p>}
-          </CardBody>
-        </Card>
-
-        <div style={{ flex: 1, minWidth: 320 }}>
-          {!selectedCard ? (
-            <Card>
-              <CardBody>
-                <p style={{ fontSize: 'var(--text-md)', color: 'var(--fg-tertiary)', margin: 0 }}>Select a card brand to manage its card types.</p>
-              </CardBody>
-            </Card>
-          ) : (
-            <>
-              <Card style={{ marginBottom: 'var(--space-4)' }}>
-                <CardHeader
-                  title={`${selectedCard.name} — Card Types`}
-                  subtitle="Create a card type once (with its fields), then add it to each country below."
-                  actions={
-                    <Button variant="primary" size="sm" leftIcon={<Plus size={14} />} onClick={() => setShowAddType(true)}>
-                      Add Card Type
-                    </Button>
-                  }
-                />
-                {showAddType && (
-                  <CardBody>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <Input
-                        placeholder="Card type name (e.g. E-code)"
-                        value={newTypeName}
-                        onChange={(e) => setNewTypeName(e.target.value)}
-                        autoFocus
-                        style={{ flex: 1 }}
-                      />
-                      <Button variant="primary" size="sm" onClick={handleAddType} disabled={savingType} loading={savingType}>
-                        {savingType ? 'Saving...' : 'Save'}
-                      </Button>
-                      <Button variant="secondary" size="sm" onClick={() => { setShowAddType(false); setNewTypeName(''); }}>Cancel</Button>
-                    </div>
-                  </CardBody>
-                )}
-              </Card>
-
-              {loading && (
-                <Card style={{ marginBottom: 'var(--space-3)' }}>
-                  <CardBody>
-                    <SkeletonLines rows={4} />
-                  </CardBody>
-                </Card>
-              )}
-
-              {templates.map((tpl) => {
-                const installedCodes = new Set(tpl.countries.map((c) => c.country_code));
-                const notAdded = countries.filter((c) => !installedCodes.has(c.country_code));
-                const activeCount = tpl.countries.filter((c) => c.is_active).length;
-                return (
-                  <Card key={tpl.id} style={{ marginBottom: 'var(--space-3)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px' }}>
-                      {editTypeId === tpl.id ? (
-                        <>
-                          <Input value={editTypeName} onChange={(e) => setEditTypeName(e.target.value)} autoFocus style={{ flex: 1 }} />
-                          <Button variant="primary" size="sm" onClick={() => handleSaveEditType(tpl.id)}>Save</Button>
-                          <Button variant="secondary" size="sm" onClick={() => setEditTypeId(null)}>Cancel</Button>
-                        </>
-                      ) : (
-                        <>
-                          <span style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--fg-primary)' }}>{tpl.name}</span>
-                          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', flex: 1 }}>{activeCount} {activeCount === 1 ? 'country' : 'countries'}</span>
-                          <Toggle checked={tpl.is_active} onChange={() => handleToggleType(tpl)} />
-                          <Button iconOnly variant="ghost" size="sm" leftIcon={<Pencil size={14} />} onClick={() => { setEditTypeId(tpl.id); setEditTypeName(tpl.name); }} />
-                          <Button iconOnly variant="dangerSubtle" size="sm" leftIcon={<Trash2 size={14} />} onClick={() => setDeleteTypeId(tpl.id)} />
-                          <Button iconOnly variant="ghost" size="sm" leftIcon={tpl.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />} onClick={() => toggleExpand(tpl.id)} />
-                        </>
-                      )}
-                    </div>
-
-                    {tpl.expanded && (
-                      <CardBody style={{ borderTop: '1px solid var(--border-default)' }}>
-                        <p style={sectionLabel}>Countries</p>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                          {tpl.countries.length === 0 && <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)' }}>Not added to any country yet.</span>}
-                          {tpl.countries.map((c) => (
-                            <button
-                              key={c.id}
-                              onClick={() => busyCountry !== c.id && toggleCountry(c.id, !c.is_active)}
-                              title={c.is_active ? 'Active — click to disable' : 'Disabled — click to enable'}
-                              style={{
-                                padding: '4px 10px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--text-xs)', fontWeight: 600,
-                                cursor: 'pointer', userSelect: 'none', border: '1px solid transparent',
-                                background: c.is_active ? 'var(--tone-success-bg)' : 'var(--tone-neutral-bg)',
-                                color: c.is_active ? 'var(--tone-success-fg)' : 'var(--tone-neutral-fg)',
-                              }}
-                            >
-                              {c.is_active ? '● ' : '○ '}{countryName(c.country_code)}
-                            </button>
-                          ))}
-                        </div>
-                        {notAdded.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 8 }}>
-                            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', fontWeight: 600 }}>Add to:</span>
-                            {notAdded.map((c) => (
-                              <Button
-                                key={c.country_code}
-                                variant="secondary"
-                                size="sm"
-                                disabled={busyCountry === `${tpl.id}:${c.country_code}`}
-                                onClick={() => addToCountry(tpl.id, c.country_code)}
-                              >
-                                + {c.country_name}
-                              </Button>
-                            ))}
-                          </div>
-                        )}
-
-                        <p style={{ ...sectionLabel, marginTop: 16 }}>Fields</p>
-                        <div>
-                          {tpl.fields.map((field) => (
-                            <div key={field.id}>
-                              {fieldFormTypeId === tpl.id && fieldFormMode === 'edit' && editFieldId === field.id ? (
-                                <FieldForm
-                                  label={fieldLabel} setLabel={setFieldLabel}
-                                  inputType={fieldInputType} setInputType={setFieldInputType}
-                                  required={fieldRequired} setRequired={setFieldRequired}
-                                  onSave={handleSaveField} onCancel={() => setFieldFormTypeId(null)}
-                                  saving={savingField}
-                                />
-                              ) : (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                                  <span style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)', flex: 1 }}>{field.label}</span>
-                                  <Badge tone="info">{inputTypeBadge(field.input_type)}</Badge>
-                                  <Badge tone={field.is_required ? 'danger' : 'neutral'}>{field.is_required ? 'Required' : 'Optional'}</Badge>
-                                  <Button iconOnly variant="ghost" size="sm" leftIcon={<Pencil size={14} />} onClick={() => openEditField(tpl.id, field)} />
-                                  <Button iconOnly variant="dangerSubtle" size="sm" leftIcon={<Trash2 size={14} />} onClick={() => handleDeleteField(field.id)} />
-                                </div>
-                              )}
-                            </div>
-                          ))}
-
-                          {fieldFormTypeId === tpl.id && fieldFormMode === 'add' ? (
-                            <FieldForm
-                              label={fieldLabel} setLabel={setFieldLabel}
-                              inputType={fieldInputType} setInputType={setFieldInputType}
-                              required={fieldRequired} setRequired={setFieldRequired}
-                              onSave={handleSaveField} onCancel={() => setFieldFormTypeId(null)}
-                              saving={savingField}
-                            />
-                          ) : (
-                            <Button variant="ghost" size="sm" leftIcon={<Plus size={14} />} onClick={() => openAddField(tpl.id)} style={{ marginTop: 6 }}>
-                              Add Field
-                            </Button>
-                          )}
-                        </div>
-                      </CardBody>
-                    )}
-                  </Card>
-                );
-              })}
-
-              {!loading && templates.length === 0 && (
-                <Card>
-                  <CardBody>
-                    <p style={{ fontSize: 'var(--text-md)', color: 'var(--fg-tertiary)', margin: 0 }}>No card types yet. Add one above.</p>
-                  </CardBody>
-                </Card>
-              )}
-            </>
-          )}
+function FieldBuilderFallback() {
+  return (
+    <div className={s.page}>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <div className={s.picker} aria-hidden>
+        <div className={s.pickerSkeleton}>
+          <Skeleton width={40} height={11} />
+          <Skeleton height={34} />
         </div>
       </div>
-
-      <Modal
-        open={!!deleteTypeId}
-        onClose={() => setDeleteTypeId(null)}
-        size="sm"
-        title="Delete Card Type"
-        footer={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => setDeleteTypeId(null)}>Cancel</Button>
-            <Button variant="danger" size="sm" onClick={confirmDeleteType}>Delete</Button>
-          </>
-        }
-      >
-        <p style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)', margin: 0 }}>
-          This deletes the card type and its fields. Countries already added keep working (they just unlink from this template). This cannot be undone.
-        </p>
-      </Modal>
     </div>
   );
 }
 
-function FieldForm({ label, setLabel, inputType, setInputType, required, setRequired, onSave, onCancel, saving }: {
-  label: string; setLabel: (v: string) => void;
-  inputType: 'text' | 'image' | 'image_text'; setInputType: (v: any) => void;
-  required: boolean; setRequired: (v: boolean) => void;
-  onSave: () => void; onCancel: () => void; saving: boolean;
-}) {
+function FieldBuilder() {
+  const { show: notify } = useToast();
+  const searchParams = useSearchParams();
+  const [cardId, setCardId] = useUrlState(CARD_URL);
+  const warnedRef = useRef<string | null>(null);
+  const observed = searchParams.toString();
+
+  const brands = useResource<BrandSummary[]>('field-builder:cards', (signal) => (
+    apiRequest(ENDPOINT, { signal, select: toBrandList })
+  ));
+  const { refresh: refreshBrands } = brands;
+  const brandList = brands.data;
+
+  useEffect(() => {
+    const params = new URLSearchParams(observed);
+    const raw = params.get('card');
+    if (raw !== null && raw.trim() !== '' && CARD_URL.parse(params) === null && warnedRef.current !== raw) {
+      warnedRef.current = raw;
+      notify(BAD_LINK, 'warning');
+    }
+    setCardId((value) => value);
+  }, [observed, notify, setCardId]);
+
+  const brand = useMemo(() => brandList?.find((item) => item.id === cardId) ?? null, [brandList, cardId]);
+  const options = useMemo<ComboboxOption[]>(
+    () => (brandList ?? []).map((item) => ({ value: item.id, label: item.name, description: brandDescription(item) })),
+    [brandList],
+  );
+  const refreshCounts = useCallback(() => {
+    void refreshBrands({ background: true });
+  }, [refreshBrands]);
+
+  if (brands.error?.status === 403 && !brandList) return <AccessDenied required={['card_types.read']} />;
+
   return (
-    <div style={{ background: 'var(--bg-subtle)', borderRadius: 'var(--radius-lg)', padding: 12, margin: '8px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <Input placeholder="Field label" value={label} onChange={(e) => setLabel(e.target.value)} autoFocus />
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {INPUT_TYPE_OPTIONS.map((opt) => (
-          <Button
-            key={opt.value}
-            variant={inputType === opt.value ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setInputType(opt.value)}
-          >
-            {opt.label}
-          </Button>
-        ))}
+    <div className={s.page}>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <div className={s.picker}>
+        <FieldShell label="Card" help="Choose the gift card brand whose card types you want to manage.">
+          <Combobox
+            options={options}
+            value={cardId}
+            onChange={(next) => setCardId(next)}
+            placeholder={brands.isInitialLoading ? 'Loading cards…' : 'Search cards'}
+            emptyText="No cards match"
+            disabled={!brandList}
+          />
+        </FieldShell>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)', fontWeight: 600 }}>Required</span>
-        <Toggle checked={required} onChange={setRequired} />
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Button variant="primary" size="sm" onClick={onSave} disabled={saving} loading={saving}>{saving ? 'Saving...' : 'Save'}</Button>
-        <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
-      </div>
+      {brands.error ? (
+        <Notice
+          className={s.pageNotice}
+          tone={brandList ? 'warning' : 'danger'}
+          compact
+          announce="polite"
+          actions={<Button variant="ghost" size="sm" onClick={() => void refreshBrands()}>Try again</Button>}
+        >
+          {brandList ? 'The card list could not be refreshed.' : 'The card list could not be loaded.'} {brands.error.message}
+        </Notice>
+      ) : null}
+      {cardId ? (
+        <CardBuilder
+          key={cardId}
+          cardId={cardId}
+          brand={brand}
+          onMissing={() => setCardId(null)}
+          onCountsChanged={refreshCounts}
+        />
+      ) : brandList && brandList.length === 0 ? (
+        <EmptyState
+          title="No cards yet"
+          hint="Card types belong to a card. Add a card in Cards first, then come back to give it card types."
+        />
+      ) : (
+        <EmptyState
+          title="Choose a card"
+          hint="Pick a card above to see its card types, the fields users fill in, and the countries each one is live in."
+        />
+      )}
     </div>
+  );
+}
+
+interface CardBuilderProps {
+  cardId: string;
+  brand: BrandSummary | null;
+  onMissing: () => void;
+  onCountsChanged: () => void;
+}
+
+function CardBuilder({ cardId, brand, onMissing, onCountsChanged }: CardBuilderProps) {
+  const { show: notify } = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
+  const canWrite = useCan('card_types.write');
+  const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const busyRef = useRef(false);
+
+  const builder = useResource<BuilderData>(
+    `field-builder:${cardId}`,
+    (signal) => apiRequest(ENDPOINT, { query: { card_id: cardId }, signal, select: toBuilderData }),
+    { keepPreviousData: false },
+  );
+  const { refresh, mutate } = builder;
+  const data = builder.data;
+
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [seeded, setSeeded] = useState(false);
+  if (data && !seeded) {
+    setSeeded(true);
+    if (data.templates.length === 1) setExpanded(new Set([data.templates[0].id]));
+  }
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [focusTarget, setFocusTarget] = useState<ReadonlyArray<string | null> | null>(null);
+
+  const cardName = data?.card?.name ?? brand?.name ?? 'this card';
+  const countries = useMemo(() => data?.countries ?? [], [data]);
+  const templates = useMemo(() => data?.templates ?? [], [data]);
+
+  useEffect(() => {
+    if (!focusTarget || moving) return;
+    const active = document.activeElement;
+    const lost = !active || active === document.body || (active instanceof HTMLElement && active.matches(':disabled'));
+    if (lost) (firstFocusable(focusTarget) ?? headingRef.current)?.focus({ preventScroll: true });
+    setFocusTarget(null);
+  }, [focusTarget, moving]);
+
+  const setOpen = useCallback((id: string, open: boolean) => {
+    setExpanded((current) => {
+      if (current.has(id) === open) return current;
+      const next = new Set(current);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const send = useCallback(
+    (method: 'POST' | 'PATCH' | 'DELETE', body: ApiBody) => apiRequest(ENDPOINT, { method, body }),
+    [],
+  );
+
+  const announceDone = useCallback((message: string, warning: string | null) => {
+    notify(warning ? `${message} ${warning}` : message, warning ? 'warning' : 'success');
+  }, [notify]);
+
+  const announceRefusal = useCallback((status: number | null, message: string) => {
+    if (status === 401) return;
+    notify(message, 'error');
+    if (status === 403) router.refresh();
+  }, [notify, router]);
+
+  const runConfirmed = useCallback(async (spec: ConfirmedRequest) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    let sent = false;
+    let settled = false;
+    try {
+      const decision = await confirm<MutationOutcome>({
+        ...spec.options,
+        pendingLabel: spec.pendingLabel,
+        returnFocusTo: spec.returnFocusTo,
+        action: async () => {
+          sent = true;
+          const attempt = classifyMutation(await spec.request());
+          if (attempt.kind === 'retry' && spec.retryInDialog !== false) throw new Error(attempt.message);
+          settled = true;
+          await refresh({ background: true });
+          return attempt.kind === 'retry'
+            ? { kind: 'refused', status: null, message: attempt.message, field: attempt.field }
+            : attempt;
+        },
+      });
+      const outcome = decision?.value;
+      if (!outcome) return;
+      if (outcome.kind === 'done') {
+        spec.after?.(outcome.body);
+        announceDone(spec.success(outcome.body), outcome.warning);
+      } else if (outcome.kind === 'unknown') {
+        notify(UNKNOWN_OUTCOME, 'error');
+      } else {
+        announceRefusal(outcome.status, outcome.message);
+      }
+    } catch {
+      notify(sent ? UNKNOWN_OUTCOME : NOT_SENT, 'error');
+    } finally {
+      busyRef.current = false;
+      if (sent && !settled) void refresh({ background: true });
+    }
+  }, [announceDone, announceRefusal, confirm, notify, refresh]);
+
+  const settleMove = useCallback((attempt: MutationAttempt, previous: BuilderData, success: string) => {
+    if (attempt.kind === 'done') {
+      announceDone(success, attempt.warning);
+      return;
+    }
+    if (attempt.kind === 'unknown') {
+      notify(UNKNOWN_OUTCOME, 'error');
+      return;
+    }
+    mutate(previous);
+    if (attempt.kind === 'refused') announceRefusal(attempt.status, attempt.message);
+    else notify(attempt.message, 'error');
+  }, [announceDone, announceRefusal, mutate, notify]);
+
+  const runMove = useCallback(async (
+    previous: BuilderData,
+    optimistic: BuilderData,
+    body: ApiBody,
+    success: string,
+    focusKeys: string[],
+  ) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setMoving(true);
+    mutate(optimistic);
+    try {
+      settleMove(classifyMutation(await send('PATCH', body)), previous, success);
+    } finally {
+      busyRef.current = false;
+      setMoving(false);
+      setFocusTarget(focusKeys);
+      void refresh({ background: true });
+    }
+  }, [mutate, refresh, send, settleMove]);
+
+  const moveTemplate = (template: Template, direction: MoveDirection) => {
+    if (!data) return;
+    const order = moveId(data.templates.map((item) => item.id), template.id, direction);
+    if (!order) return;
+    void runMove(
+      data,
+      withTemplateOrder(data, order),
+      { type: 'reorder_templates', card_id: cardId, ids: order },
+      movedText(template.name, order.indexOf(template.id) + 1, order.length),
+      moveFocusKeys('template', template.id, direction, focusKey('template', template.id)),
+    );
+  };
+
+  const moveField = (template: Template, field: TemplateField, direction: MoveDirection) => {
+    if (!data) return;
+    const order = moveId(template.fields.map((item) => item.id), field.id, direction);
+    if (!order) return;
+    void runMove(
+      data,
+      withFieldOrder(data, template.id, order),
+      { type: 'reorder_fields', template_id: template.id, ids: order },
+      movedText(field.label || 'the field', order.indexOf(field.id) + 1, order.length),
+      moveFocusKeys('field', field.id, direction, focusKey('field', field.id, 'edit')),
+    );
+  };
+
+  const deleteTemplate = (template: Template) => {
+    const index = templates.findIndex((item) => item.id === template.id);
+    const neighbours = [templates[index + 1], templates[index - 1]]
+      .filter((item): item is Template => Boolean(item))
+      .map((item) => focusKey('template', item.id));
+    void runConfirmed({
+      options: deleteTemplateConfirm(template, cardName, countries),
+      pendingLabel: `Deleting ${template.name}…`,
+      request: () => send('DELETE', { type: 'template', id: template.id }),
+      success: () => deletedTemplateText(template),
+      after: () => onCountsChanged(),
+      returnFocusTo: () => firstFocusable(neighbours) ?? headingRef.current,
+    });
+  };
+
+  const deleteField = (template: Template, field: TemplateField) => {
+    const index = template.fields.findIndex((item) => item.id === field.id);
+    const neighbours = [template.fields[index + 1], template.fields[index - 1]]
+      .filter((item): item is TemplateField => Boolean(item))
+      .map((item) => focusKey('field', item.id, 'edit'));
+    const label = field.label || 'This field';
+    void runConfirmed({
+      options: deleteFieldConfirm(template, { ...field, label }, countries),
+      pendingLabel: `Deleting ${label}…`,
+      request: () => send('DELETE', { type: 'field', id: field.id }),
+      success: () => deletedFieldText(label, template.name),
+      returnFocusTo: () => firstFocusable([
+        ...neighbours,
+        focusKey('template', template.id, 'add-field'),
+        focusKey('template', template.id),
+      ]),
+    });
+  };
+
+  const switchCountry = (template: Template, install: Install, next: boolean) => {
+    const place = countryLabel(install, countries);
+    void runConfirmed({
+      options: toggleCountryConfirm(template, install, countries, next),
+      pendingLabel: next ? `Switching ${template.name} on in ${place}…` : `Switching ${template.name} off in ${place}…`,
+      request: () => send('PATCH', { type: 'country', card_type_id: install.id, is_active: next }),
+      success: (body) => switchedCountryText(template.name, place, next, body),
+      returnFocusTo: () => firstFocusable([focusKey('install', install.id), focusKey('template', template.id)]),
+    });
+  };
+
+  const addCountry = (template: Template, country: BrandCountry) => {
+    let addedId: string | null = null;
+    void runConfirmed({
+      options: addCountryConfirm(template, country),
+      pendingLabel: `Adding ${template.name} to ${country.country_name}…`,
+      request: async () => {
+        const result = await send('POST', {
+          type: 'add_country',
+          template_id: template.id,
+          country_code: country.country_code,
+        });
+        if (result.ok && typeof result.data.id === 'string') addedId = result.data.id;
+        return result;
+      },
+      success: (body) => addedCountryText(template.name, country.country_name, body),
+      retryInDialog: false,
+      returnFocusTo: () => firstFocusable([
+        addedId ? focusKey('install', addedId) : null,
+        focusKey('template', template.id, 'add-country'),
+        focusKey('template', template.id),
+      ]),
+    });
+  };
+
+  const settleEditor = async (
+    attempt: MutationAttempt,
+    success: (body: ApiBody) => string,
+    after?: (body: ApiBody) => void,
+  ): Promise<EditorResult> => {
+    switch (attempt.kind) {
+      case 'done':
+        after?.(attempt.body);
+        await refresh({ background: true });
+        announceDone(success(attempt.body), attempt.warning);
+        return { close: true };
+      case 'unknown':
+        notify(UNKNOWN_OUTCOME, 'error');
+        void refresh({ background: true });
+        return { close: true };
+      case 'refused':
+        if (attempt.status === 401) return { close: false };
+        announceRefusal(attempt.status, attempt.message);
+        if (attempt.status === 403 || attempt.status === 404) {
+          void refresh({ background: true });
+          return { close: true };
+        }
+        return { close: false, error: attempt.field ? attempt.message : null, field: attempt.field };
+      case 'retry':
+        notify(attempt.message, 'error');
+        return { close: false, error: attempt.field ? attempt.message : null, field: attempt.field };
+    }
+  };
+
+  const saveTemplate = async (state: TemplateEditorState, name: string): Promise<EditorResult> => {
+    if (busyRef.current) return { close: false };
+    busyRef.current = true;
+    try {
+      if (state.mode === 'create') {
+        const attempt = classifyMutation(await send('POST', { type: 'template', card_id: cardId, name }));
+        return await settleEditor(attempt, () => createdTemplateText(name, cardName), (body) => {
+          if (typeof body.id === 'string') setOpen(body.id, true);
+          onCountsChanged();
+        });
+      }
+      const attempt = classifyMutation(await send('PATCH', { type: 'template', id: state.template.id, name }));
+      return await settleEditor(attempt, (body) => (
+        renamedTemplateText(name, typeof body.countries_renamed === 'number' ? body.countries_renamed : 0)
+      ));
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
+  const saveField = async (state: FieldEditorState, draft: FieldDraft): Promise<EditorResult> => {
+    if (busyRef.current) return { close: false };
+    busyRef.current = true;
+    try {
+      if (state.mode === 'create') {
+        const attempt = classifyMutation(await send('POST', { type: 'field', template_id: state.template.id, ...draft }));
+        return await settleEditor(attempt, () => savedFieldText(true, draft.label, state.template));
+      }
+      const attempt = classifyMutation(await send('PATCH', { type: 'field', id: state.field.id, ...draft }));
+      return await settleEditor(attempt, () => savedFieldText(false, draft.label, state.template));
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
+  const openEditor = (next: EditorState) => {
+    if (busyRef.current) return;
+    setEditor(next);
+  };
+
+  if (builder.isInitialLoading) return <BuilderSkeleton />;
+
+  const failure = builder.error;
+  if (!data) {
+    if (failure?.status === 403) {
+      return (
+        <ErrorState
+          compact
+          title="You cannot view these card types"
+          message="Your account does not hold the card_types.read permission. Ask a super administrator to grant it."
+        />
+      );
+    }
+    if (failure?.status === 404) {
+      return (
+        <EmptyState
+          title="This card no longer exists"
+          hint="It may have been deleted in Cards. Choose another card above."
+          actions={<Button variant="secondary" size="sm" onClick={onMissing}>Clear the selection</Button>}
+        />
+      );
+    }
+    if (failure) {
+      return (
+        <ErrorState
+          compact
+          title="The card types could not be loaded"
+          message={failure.message}
+          requestId={failure.requestId}
+          onRetry={() => void refresh()}
+        />
+      );
+    }
+    return <BuilderSkeleton />;
+  }
+
+  const editorTemplate = editor && editor.kind === 'field'
+    ? templates.find((item) => item.id === editor.template.id) ?? editor.template
+    : null;
+
+  return (
+    <section className={s.section} aria-labelledby={headingId}>
+      {failure ? (
+        <Notice
+          className={s.pageNotice}
+          tone="warning"
+          compact
+          announce="polite"
+          actions={<Button variant="ghost" size="sm" onClick={() => void refresh()}>Try again</Button>}
+        >
+          The card types could not be refreshed. {failure.message} Showing what was loaded earlier.
+        </Notice>
+      ) : null}
+      {data.card && !data.card.is_active ? (
+        <Notice className={s.pageNotice} tone="neutral" compact>
+          {cardName} is switched off in Cards, so users cannot sell any of its card types until it is switched back on.
+        </Notice>
+      ) : null}
+      {!canWrite ? (
+        <Notice className={s.pageNotice} tone="neutral" compact>
+          You can view these card types but not change them. Changes need the card_types.write permission.
+        </Notice>
+      ) : null}
+      <div className={s.sectionBar}>
+        <h2 id={headingId} ref={headingRef} tabIndex={-1} className={s.sectionTitle}>
+          Card types <span className={s.sectionCount}>{templates.length}</span>
+        </h2>
+        <div className={s.sectionActions}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            leftIcon={<RotateCw size={14} aria-hidden />}
+            loading={builder.isRefreshing}
+            disabled={moving}
+            onClick={() => void refresh()}
+          >
+            Refresh
+          </Button>
+          {canWrite ? (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              leftIcon={<Plus size={14} aria-hidden />}
+              disabled={moving}
+              onClick={() => openEditor({ kind: 'template', mode: 'create' })}
+            >
+              Add card type
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {templates.length === 0 ? (
+        <EmptyState
+          title="No card types yet"
+          hint={
+            canWrite
+              ? `Add a card type to ${cardName}, give it the fields users fill in, then add it to a country to make it live.`
+              : `Nobody has added a card type to ${cardName} yet.`
+          }
+        />
+      ) : (
+        <ol className={s.typeList} aria-labelledby={headingId}>
+          {templates.map((template, index) => (
+            <li key={template.id}>
+              <TemplateCard
+                template={template}
+                index={index}
+                total={templates.length}
+                countries={countries}
+                expanded={expanded.has(template.id)}
+                canWrite={canWrite}
+                moving={moving}
+                onToggleExpanded={() => setOpen(template.id, !expanded.has(template.id))}
+                onMove={(direction) => moveTemplate(template, direction)}
+                onRename={() => openEditor({ kind: 'template', mode: 'rename', template })}
+                onDelete={() => deleteTemplate(template)}
+                onSwitchCountry={(install, next) => switchCountry(template, install, next)}
+                onAddCountry={(country) => addCountry(template, country)}
+                onAddField={() => openEditor({ kind: 'field', mode: 'create', template })}
+                onEditField={(field) => openEditor({ kind: 'field', mode: 'edit', template, field })}
+                onDeleteField={(field) => deleteField(template, field)}
+                onMoveField={(field, direction) => moveField(template, field, direction)}
+              />
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {editor && editor.kind === 'template' ? (
+        <TemplateEditor
+          key={editor.mode === 'rename' ? `rename:${editor.template.id}` : 'create'}
+          mode={editor.mode}
+          cardName={cardName}
+          template={editor.mode === 'rename' ? editor.template : null}
+          siblings={templates}
+          countries={countries}
+          onSave={(name) => saveTemplate(editor, name)}
+          onClose={() => setEditor(null)}
+        />
+      ) : null}
+      {editor && editor.kind === 'field' && editorTemplate ? (
+        <FieldEditor
+          key={editor.mode === 'edit' ? `edit:${editor.field.id}` : `create:${editor.template.id}`}
+          mode={editor.mode}
+          template={editorTemplate}
+          field={editor.mode === 'edit' ? editor.field : null}
+          countries={countries}
+          onSave={(draft) => saveField(editor, draft)}
+          onClose={() => setEditor(null)}
+        />
+      ) : null}
+    </section>
   );
 }

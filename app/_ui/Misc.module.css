@@ -1,4 +1,3 @@
-
 .skeleton {
   display: block;
   background: linear-gradient(
@@ -15,41 +14,73 @@
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--bg-muted);
+  }
+}
+
+.skeletonInline {
+  display: inline-block;
+  height: 0.75em;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.skeletonLines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--skeleton-lines-gap, 10px);
+}
 
 .empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-10) var(--space-6);
   text-align: center;
-  padding: var(--space-12) var(--space-6);
-  color: var(--fg-tertiary);
-  gap: var(--space-3);
+  color: var(--fg-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+.emptyPlain {
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
 .emptyIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   width: 44px;
   height: 44px;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
   background: var(--bg-subtle);
   color: var(--fg-secondary);
-  margin-bottom: var(--space-2);
 }
 .emptyTitle {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
   color: var(--fg-primary);
 }
 .emptyHint {
-  font-size: var(--text-md);
-  color: var(--fg-tertiary);
   max-width: 360px;
+  font-size: var(--text-md);
   line-height: var(--leading-snug);
+  color: var(--fg-secondary);
 }
 .emptyActions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
@@ -76,6 +107,12 @@
 }
 .pageHeaderActions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
 
+.pageHeaderAvatar { margin-right: var(--space-3); }
+.pageHeaderAction {
+  flex: none;
+  border-radius: var(--radius-md);
+}
+
 @media (max-width: 768px) {
   .pageHeader {
     flex-direction: column;
@@ -83,6 +120,19 @@
     gap: var(--space-3);
   }
   .pageHeaderActions { flex-wrap: wrap; }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .sectionTitle {
@@ -109,8 +159,32 @@
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  
   container-type: inline-size;
+}
+.kpiLink {
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.kpiLink:hover {
+  text-decoration: none;
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.kpiLink:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+.kpiWarning { border-color: var(--tone-warning-border); }
+.kpiDanger { border-color: var(--tone-danger-border); }
+.kpiWarning.kpiLink:hover { border-color: var(--tone-warning-fg); }
+.kpiDanger.kpiLink:hover { border-color: var(--tone-danger-fg); }
+.kpiUnavailable {
+  color: var(--fg-tertiary);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-md);
 }
 .kpiLabel {
   font-family: var(--font-mono);
@@ -124,8 +198,13 @@
   gap: var(--space-2);
   min-width: 0;
 }
+.kpiIcon {
+  display: inline-flex;
+  flex: none;
+}
+.kpiWarning .kpiIcon { color: var(--tone-warning-fg); }
+.kpiDanger .kpiIcon { color: var(--tone-danger-fg); }
 .kpiValue {
-  
   font-size: clamp(var(--text-base), 7cqi, var(--text-2xl));
   font-weight: var(--weight-bold);
   letter-spacing: -0.02em;
@@ -150,6 +229,9 @@
   font-size: var(--text-sm);
   color: var(--fg-tertiary);
 }
+.kpiHintSuccess { color: var(--tone-success-fg); }
+.kpiHintWarning { color: var(--tone-warning-fg); }
+.kpiHintDanger { color: var(--tone-danger-fg); }
 
 .spinner {
   width: 16px;
@@ -164,19 +246,28 @@
 
 .toastWrap {
   position: fixed;
+  right: var(--space-4);
   bottom: var(--space-6);
-  left: 50%;
-  transform: translateX(-50%);
+  left: var(--space-4);
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  align-items: center;
   pointer-events: none;
 }
+.toastStack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+.toastStack + .toastStack:not(:empty) { margin-top: var(--space-2); }
 .toast {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--space-3);
+  max-width: 480px;
   padding: var(--space-3) var(--space-4);
   background: var(--bg-inverse);
   color: var(--fg-inverse);
@@ -186,11 +277,44 @@
   box-shadow: var(--shadow-md);
   animation: rise var(--dur-base) var(--ease-out);
   pointer-events: auto;
-  max-width: 480px;
 }
-.toastSuccess { background: var(--tone-success-fg); color: #FFFFFF; }
-.toastError   { background: var(--tone-danger-fg);  color: #FFFFFF; }
-.toastWarning { background: var(--tone-warning-fg); color: #FFFFFF; }
+.toastSuccess { background: var(--tone-success-fg); color: var(--tone-success-on); }
+.toastError   { background: var(--tone-danger-fg);  color: var(--tone-danger-on); }
+.toastWarning { background: var(--tone-warning-fg); color: var(--tone-warning-on); }
+.toastText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toastClose {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  margin: calc(var(--space-1) * -1) calc(var(--space-2) * -1) calc(var(--space-1) * -1) 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  opacity: 0.72;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.toastClose:hover { opacity: 1; }
+.toastClose:focus-visible {
+  opacity: 1;
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
 @keyframes rise {
   from { transform: translateY(6px); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.6s; }
+  .toast { animation: none; }
+  .toastClose { transition: none; }
+  .kpiLink { transition: none; }
 }

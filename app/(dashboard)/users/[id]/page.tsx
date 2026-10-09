@@ -1,264 +1,287 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { Suspense, useCallback, useRef } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { Lock, LockOpen, RotateCw } from 'lucide-react';
 import {
-  Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Tabs, Modal, Textarea, SkeletonLines, } from '../../../_ui';
-import { formatNaira, StatusDot, StatStrip } from '../../_shared/statusUi';
+  AccessDenied, Button, ErrorState, Money, Notice, PageHeader, TabPanel, Tabs, enumParam, useCan, useConfirm,
+  useResource, useToast, useUrlState,
+  type ConfirmOptions,
+} from '../../../_ui';
+import { apiRequest, type ApiFailure } from '../../../lib/apiClient';
+import { useIsMobile } from '../../../lib/useIsMobile';
+import {
+  DEFAULT_SECTION, FREEZE_REASONS, SECTIONS, SECTION_ORDER, UNKNOWN_ACTION_OUTCOME, accountState, actionNotice,
+  classifyAction, countText, plural, toProfileResource, userHandle, userSummary, validUserId,
+  type ActionAttempt, type ActionKind, type ActionOutcome, type ProfileData, type ProfileResource, type SectionKey,
+} from './model';
+import { useUserSection } from './useUserSection';
+import {
+  AccountNotices, NotFoundState, ProfileCard, ProfileKpis, UserDetailSkeleton, UserSubtitle, UserTitle,
+} from './UserParts';
+import { DevicesPanel, LoginsPanel, TransactionsPanel } from './ActivityPanels';
+import s from './page.module.css';
 
-type TabKey = 'transactions' | 'devices' | 'logins';
+const REASON_MAX = 500;
+const ACTIVITY_TABS = 'user-activity';
+const USER_TAB_URL = enumParam('tab', SECTION_ORDER, DEFAULT_SECTION);
+const INCOMPLETE_PROFILE = 'The server returned an incomplete profile for this user.';
+const NOT_SENT = 'The request could not be started, so nothing was changed. Try again.';
 
-function TypeLabel({ type }: { type: string }) {
-  return (
-    <span style={{
-      fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.04em',
-      color: 'var(--fg-secondary)', background: 'var(--bg-subtle)',
-      border: '1px solid var(--border-default)', padding: '2px 7px',
-      borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
-    }}>{(type || '-').replace(/_/g, ' ')}</span>
-  );
+const PENDING_LABELS: Readonly<Record<ActionKind, string>> = {
+  freeze: 'Freezing the account…',
+  unfreeze: 'Unfreezing the account…',
+};
+
+function failureText(failure: ApiFailure): string {
+  return failure.kind === 'parse' ? INCOMPLETE_PROFILE : failure.message;
+}
+
+function awaitingConsequence(count: number | null): string[] {
+  if (count === null) {
+    return ['Withdrawals awaiting review could not be checked. Any that are waiting cannot be approved while the account is frozen.'];
+  }
+  if (count === 0) return [];
+  return [
+    `${plural(count, 'withdrawal is', 'withdrawals are')} awaiting review. ${
+      count === 1 ? 'It stays' : 'They stay'
+    } in the queue but cannot be approved while the account is frozen. Reject in Withdrawals to refund the wallet.`,
+  ];
+}
+
+function freezeOptions({ user, stats }: ProfileData): ConfirmOptions {
+  const bonus = Number(user.bonus_balance ?? 0);
+  return {
+    tone: 'danger',
+    title: `Freeze ${userHandle(user)}?`,
+    message: 'Freezing blocks this account’s financial activity until an admin unfreezes it.',
+    details: [
+      { label: 'User', value: userSummary(user) },
+      { label: 'User ID', value: user.id, mono: true },
+      { label: 'Wallet balance', value: <Money value={user.balance} emphasis="strong" />, emphasis: true },
+      ...(Number.isFinite(bonus) && bonus > 0 ? [{ label: 'Bonus balance', value: <Money value={bonus} /> }] : []),
+    ],
+    consequences: [
+      'Withdrawals and bill payments are refused until the account is unfrozen. The balance stays in the wallet.',
+      'The user’s app shows an Account Suspended notice with the reason you give, so write it for the user.',
+      ...awaitingConsequence(stats.withdrawals_pending),
+    ],
+    reason: {
+      required: true,
+      presets: FREEZE_REASONS,
+      label: 'Reason shown to the user',
+      placeholder: 'Explain why this account is frozen',
+      maxLength: REASON_MAX,
+    },
+    confirmLabel: 'Freeze account',
+  };
+}
+
+function unfreezeOptions({ user }: ProfileData): ConfirmOptions {
+  return {
+    title: `Unfreeze ${userHandle(user)}?`,
+    message: 'The account returns to normal as soon as you confirm.',
+    details: [
+      { label: 'User', value: userSummary(user) },
+      { label: 'User ID', value: user.id, mono: true },
+      { label: 'Frozen because', value: user.freeze_reason || 'No reason was recorded' },
+      { label: 'Wallet balance', value: <Money value={user.balance} emphasis="strong" />, emphasis: true },
+    ],
+    consequences: [
+      'Withdrawals and bill payments are allowed again immediately.',
+      'The freeze reason is cleared from the account.',
+    ],
+    reason: {
+      label: 'Note for the audit log',
+      placeholder: 'Optional: why this account is being restored',
+      maxLength: REASON_MAX,
+    },
+    confirmLabel: 'Unfreeze account',
+  };
+}
+
+async function patchAccount(id: string, kind: ActionKind, reason: string): Promise<ActionAttempt> {
+  return classifyAction(await apiRequest(`/api/users/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: reason ? { action: kind, reason } : { action: kind },
+  }));
 }
 
 export default function UserDetailPage() {
-  const params = useParams();
-  const id = params.id as string;
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [freezing, setFreezing] = useState(false);
-  const [showFreezeModal, setShowFreezeModal] = useState(false);
-  const [freezeReason, setFreezeReason] = useState('');
-  const [freezeError, setFreezeError] = useState('');
-  const [activeTab, setActiveTab] = useState<TabKey>('transactions');
-
-  const load = async () => {
-    setLoading(true);
-    const res = await fetch(`/api/users/${id}`);
-    if (res.ok) {
-      const json = await res.json();
-      setData(json);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [id]);
-
-  const handleFreeze = async () => {
-    if (!freezeReason.trim()) { setFreezeError('Reason is required'); return; }
-    setFreezing(true);
-    setFreezeError('');
-    const res = await fetch(`/api/users/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'freeze', reason: freezeReason.trim() }),
-    });
-    const json = await res.json();
-    setFreezing(false);
-    if (!res.ok) { setFreezeError(json.error || 'Failed'); return; }
-    setShowFreezeModal(false);
-    setFreezeReason('');
-    load();
-  };
-
-  const handleUnfreeze = async () => {
-    setFreezing(true);
-    await fetch(`/api/users/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unfreeze' }),
-    });
-    setFreezing(false);
-    load();
-  };
-
-  if (loading) {
-    return (
-      <div>
-        <a href="/users" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', letterSpacing: '0.04em', color: 'var(--fg-tertiary)', textDecoration: 'none', display: 'inline-block', marginBottom: 'var(--space-4)' }}>
-          ← BACK TO USERS
-        </a>
-        <Card style={{ marginBottom: 'var(--space-4)' }}>
-          <CardBody>
-            <SkeletonLines rows={2} />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <SkeletonLines rows={6} />
-          </CardBody>
-        </Card>
-      </div>
-    );
-  }
-  if (!data || !data.user) return <p style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>User not found</p>;
-
-  const user = data.user;
-  const stats = data.stats || {};
-
-  const TAB_ITEMS: ReadonlyArray<{ value: TabKey; label: string }> = [
-    { value: 'transactions', label: 'Recent transactions' },
-    { value: 'devices', label: 'Device logs' },
-    { value: 'logins', label: 'Login history' },
-  ];
-
   return (
-    <div>
-      <a href="/users" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', letterSpacing: '0.04em', color: 'var(--fg-tertiary)', textDecoration: 'none', display: 'inline-block', marginBottom: 'var(--space-4)' }}>
-        ← BACK TO USERS
-      </a>
-
-      <Card style={{ marginBottom: 'var(--space-4)' }}>
-        <CardBody>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-            <div style={{ width: 48, height: 48, borderRadius: 'var(--radius-lg)', background: 'var(--accent-base)', color: 'var(--accent-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, flexShrink: 0 }}>
-              {(user.full_name || '?').charAt(0).toUpperCase()}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--fg-primary)', margin: 0 }}>{user.full_name || '—'}</p>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--fg-tertiary)', margin: '2px 0 0' }}>@{user.username || '—'}</p>
-            </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-              {user.deleted_at ? (
-                <StatusDot status="Deletion in progress" tone="danger" />
-              ) : user.is_frozen ? (
-                <>
-                  <StatusDot status="Frozen" tone="danger" />
-                  <Button variant="success" size="sm" onClick={handleUnfreeze} disabled={freezing}>
-                    {freezing ? 'Unfreezing…' : 'Unfreeze'}
-                  </Button>
-                </>
-              ) : (
-                <Button variant="dangerSubtle" size="sm" onClick={() => setShowFreezeModal(true)} disabled={freezing}>
-                  Freeze account
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {user.is_frozen && user.freeze_reason && (
-            <div style={{ background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', borderRadius: 'var(--radius-lg)', padding: 12, marginTop: 14 }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--tone-danger-fg)', textTransform: 'uppercase' }}>Freeze reason</span>{' '}
-              <span style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)' }}>{user.freeze_reason}</span>
-            </div>
-          )}
-
-          <div style={{ marginTop: 14 }}>
-            <InfoRow label="Email" value={user.email} />
-            <InfoRow label="Phone" value={user.phone} />
-            <InfoRow label="Country" value={user.country} />
-            <InfoRow label="Balance" value={formatNaira(user.balance)} bold mono />
-            <InfoRow label="Referral code" value={user.referral_code} mono />
-            <InfoRow label="Joined" value={new Date(user.created_at).toLocaleDateString()} />
-          </div>
-        </CardBody>
-      </Card>
-
-      <StatStrip items={[
-        { label: 'Trades', value: String(stats.trades || 0) },
-        { label: 'Withdrawals', value: String(stats.withdrawals || 0) },
-      ]} />
-
-      <div style={{ marginBottom: 'var(--space-4)' }}>
-        <Tabs<TabKey> value={activeTab} onChange={setActiveTab} items={TAB_ITEMS} variant="underline" />
-      </div>
-
-      {activeTab === 'transactions' && (
-        <Card>
-          <CardBody flush>
-            <Table flush>
-              <THead>
-                <Tr>
-                  <Th>Type</Th>
-                  <Th align="right">Amount</Th>
-                  <Th>Status</Th>
-                  <Th>Date</Th>
-                </Tr>
-              </THead>
-              <TBody>
-                {(data.recentTransactions || []).length === 0 ? (
-                  <TableEmpty colSpan={4}>No transactions</TableEmpty>
-                ) : (data.recentTransactions || []).map((t: any) => (
-                  <Tr key={t.id}>
-                    <Td><TypeLabel type={t.type} /></Td>
-                    <Td align="right" mono emphasis="primary">{formatNaira(t.amount)}</Td>
-                    <Td><StatusDot status={t.status} /></Td>
-                    <Td emphasis="secondary" mono>{new Date(t.created_at).toLocaleString()}</Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-          </CardBody>
-        </Card>
-      )}
-
-      {(activeTab === 'devices' || activeTab === 'logins') && (
-        <Card>
-          <CardBody flush>
-            <Table flush>
-              <THead>
-                <Tr>
-                  <Th>Device</Th>
-                  <Th>OS</Th>
-                  <Th>App version</Th>
-                  <Th>IP address</Th>
-                  <Th>{activeTab === 'devices' ? 'First seen' : 'Date'}</Th>
-                  {activeTab === 'devices' && <Th>Last seen</Th>}
-                  {activeTab === 'devices' && <Th>Logins</Th>}
-                </Tr>
-              </THead>
-              <TBody>
-                {(data[activeTab] || []).length === 0 ? (
-                  <TableEmpty colSpan={activeTab === 'devices' ? 7 : 5}>{activeTab === 'devices' ? 'No device logs' : 'No login history'}</TableEmpty>
-                ) : (data[activeTab] || []).map((d: any, i: number) => (
-                  <Tr key={i}>
-                    <Td emphasis="primary">{d.device_model || '—'}</Td>
-                    <Td emphasis="secondary">{d.os_version || '—'}</Td>
-                    <Td emphasis="secondary">{d.app_version || '—'}</Td>
-                    <Td mono emphasis="muted">{d.ip_address || '—'}</Td>
-                    <Td emphasis="secondary" mono>{new Date(d.created_at).toLocaleString()}</Td>
-                    {activeTab === 'devices' && <Td emphasis="secondary" mono>{d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : '—'}</Td>}
-                    {activeTab === 'devices' && <Td emphasis="secondary">{d.login_count ?? 1}</Td>}
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-          </CardBody>
-        </Card>
-      )}
-
-      <Modal
-        open={showFreezeModal}
-        onClose={() => setShowFreezeModal(false)}
-        title="Freeze account"
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowFreezeModal(false)}>Cancel</Button>
-            <Button variant="danger" onClick={handleFreeze} loading={freezing}>Freeze account</Button>
-          </>
-        }
-      >
-        <p style={{ fontSize: 'var(--text-md)', color: 'var(--fg-secondary)', margin: '0 0 12px' }}>
-          Freezing <strong>@{user.username}</strong> will block all transactions and withdrawals.
-        </p>
-        <label style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 500, color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Reason</label>
-        <Textarea
-          value={freezeReason}
-          onChange={(e) => setFreezeReason(e.target.value)}
-          placeholder="Why is this account being frozen?"
-          rows={3}
-        />
-        {freezeError && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--tone-danger-fg)', margin: '8px 0 0' }}>{freezeError}</p>}
-      </Modal>
-    </div>
+    <Suspense fallback={<UserDetailSkeleton />}>
+      <UserDetailRoute />
+    </Suspense>
   );
 }
 
-function InfoRow({ label, value, bold, mono }: { label: string; value: any; bold?: boolean; mono?: boolean }) {
+function UserDetailRoute() {
+  const params = useParams<{ id: string }>();
+  const id = validUserId(params?.id);
+  if (!id) return <NotFoundState />;
+  return <UserDetail key={id} id={id} />;
+}
+
+function UserDetail({ id }: { id: string }) {
+  const { show: showToast } = useToast();
+  const confirm = useConfirm();
+  const isMobile = useIsMobile();
+  const router = useRouter();
+  const canFreeze = useCan('users.freeze');
+  const canTransactions = useCan('transactions.read');
+  const [tab, setTab] = useUrlState(USER_TAB_URL);
+
+  const profile = useResource<ProfileResource>(`user:${id}`, (signal) => (
+    apiRequest(`/api/users/${encodeURIComponent(id)}`, { signal, select: toProfileResource })
+  ));
+  const { refresh: refreshProfile } = profile;
+  const current = profile.data?.profile ?? null;
+  const body = profile.data?.body;
+
+  const transactions = useUserSection(id, 'transactions', body, profile.lastUpdatedAt);
+  const devices = useUserSection(id, 'devices', body, profile.lastUpdatedAt);
+  const logins = useUserSection(id, 'logins', body, profile.lastUpdatedAt);
+
+  const actingRef = useRef(false);
+  const refreshButtonRef = useRef<HTMLButtonElement>(null);
+
+  const act = useCallback(async (kind: ActionKind) => {
+    if (!current || actingRef.current) return;
+    actingRef.current = true;
+    let sent = false;
+    let settled = false;
+    try {
+      const decision = await confirm<ActionOutcome>({
+        ...(kind === 'freeze' ? freezeOptions(current) : unfreezeOptions(current)),
+        pendingLabel: PENDING_LABELS[kind],
+        action: async ({ reason }) => {
+          sent = true;
+          const attempt = await patchAccount(id, kind, reason.trim());
+          if (attempt.kind === 'retry') throw new Error(attempt.message);
+          if (attempt.kind !== 'unknown') {
+            settled = true;
+            await refreshProfile();
+          }
+          return attempt;
+        },
+        returnFocusTo: () => refreshButtonRef.current,
+      });
+      const outcome = decision?.value;
+      if (!outcome) return;
+      const notice = actionNotice(kind, current.user, outcome);
+      if (notice) showToast(notice.text, notice.tone);
+      if (outcome.kind === 'refused' && outcome.status === 403) router.refresh();
+    } catch {
+      showToast(sent ? UNKNOWN_ACTION_OUTCOME : NOT_SENT, 'error');
+    } finally {
+      actingRef.current = false;
+      if (sent && !settled) void refreshProfile();
+    }
+  }, [confirm, current, id, refreshProfile, router, showToast]);
+
+  if (profile.isInitialLoading) return <UserDetailSkeleton />;
+
+  const failure = profile.error;
+  if (failure?.status === 403) return <AccessDenied required={['users.read']} />;
+
+  if (!current) {
+    if (!failure) return <UserDetailSkeleton />;
+    if (failure.status === 404 || failure.status === 400) return <NotFoundState />;
+    return (
+      <ErrorState
+        title="This user could not be loaded"
+        message={failureText(failure)}
+        requestId={failure.requestId}
+        onRetry={() => void refreshProfile()}
+      />
+    );
+  }
+
+  const { user, stats, referrer, partial } = current;
+  const state = accountState(user);
+  const canAct = canFreeze && state !== 'deleted';
+  const frozen = state === 'frozen';
+  const sections = { transactions, devices, logins };
+  const tabItems = SECTION_ORDER.map((key) => {
+    const total = sections[key].state.total;
+    return { value: key, label: SECTIONS[key].label, count: total === null ? undefined : countText(total) };
+  });
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--text-md)', gap: 16 }}>
-      <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
-      <span style={{ fontWeight: bold ? 700 : 550, color: 'var(--fg-primary)', maxWidth: '55%', textAlign: 'right', wordBreak: 'break-word', fontFamily: mono ? 'var(--font-mono)' : undefined }}>{value || '—'}</span>
+    <div className={s.page}>
+      <PageHeader
+        title={<UserTitle user={user} />}
+        subtitle={<UserSubtitle user={user} />}
+        actions={
+          <>
+            <Button
+              ref={refreshButtonRef}
+              variant="secondary"
+              size="sm"
+              leftIcon={<RotateCw size={14} />}
+              loading={profile.isRefreshing}
+              onClick={() => void refreshProfile()}
+            >
+              Refresh
+            </Button>
+            {canAct ? (
+              <Button
+                variant={frozen ? 'secondary' : 'dangerSubtle'}
+                size="sm"
+                leftIcon={frozen ? <LockOpen size={14} /> : <Lock size={14} />}
+                onClick={() => void act(frozen ? 'unfreeze' : 'freeze')}
+              >
+                {frozen ? 'Unfreeze account' : 'Freeze account'}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      {failure ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          actions={<Button variant="ghost" size="sm" onClick={() => void refreshProfile()}>Try again</Button>}
+        >
+          The profile could not be refreshed. {failureText(failure)} Showing what was loaded earlier.
+        </Notice>
+      ) : null}
+
+      <AccountNotices user={user} stats={stats} />
+
+      <ProfileKpis user={user} stats={stats} canTransactions={canTransactions} />
+
+      <div className={s.layout}>
+        <ProfileCard user={user} referrer={referrer} referrerError={partial.referrer} />
+        <section className={s.activity} aria-label="Activity">
+          <Tabs<SectionKey>
+            id={ACTIVITY_TABS}
+            aria-label="Activity sections"
+            value={tab}
+            onChange={(next) => setTab(next)}
+            items={tabItems}
+            variant="underline"
+          />
+          {SECTION_ORDER.map((key) => (
+            <TabPanel key={key} tabsId={ACTIVITY_TABS} value={key} active={tab === key}>
+              {key === 'transactions' ? (
+                <TransactionsPanel
+                  section={transactions}
+                  userId={user.id}
+                  canOpen={canTransactions}
+                  isMobile={isMobile}
+                />
+              ) : key === 'devices' ? (
+                <DevicesPanel section={devices} isMobile={isMobile} />
+              ) : (
+                <LoginsPanel section={logins} isMobile={isMobile} />
+              )}
+            </TabPanel>
+          ))}
+        </section>
+      </div>
     </div>
   );
 }

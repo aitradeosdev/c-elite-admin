@@ -1,233 +1,292 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
 import { supabaseAdmin } from '../../lib/supabase';
-import { redactAudit } from '../../lib/redact';
+import { requireSuperAdmin } from '../../lib/guard';
+import { writeAudit, type AuditInput } from '../../lib/audit';
+import { fail, isUuid, ok } from '../../lib/api';
+import {
+  checkCreate,
+  checkReason,
+  diffGrants,
+  grantChangeRecord,
+  planDelete,
+  planEdit,
+  type AdminState,
+  type CreateInput,
+  type EditInput,
+} from '../../(dashboard)/admin-accounts/rules';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
+const ADMIN_COLUMNS =
+  'id, username, email, role_title, page_permissions, last_login_at, is_active, is_super_admin, deleted_at, created_at';
+const STATE_COLUMNS = `${ADMIN_COLUMNS}, token_version`;
+const ENTITY = 'admin_users';
+const BCRYPT_ROUNDS = 12;
+const EDIT_ATTEMPTS = 3;
+const UNIQUE_VIOLATION = '23505';
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+
+type Body = Record<string, unknown>;
+
+interface AdminRecord extends AdminState {
+  last_login_at: string | null;
+  created_at: string | null;
 }
 
-function validatePassword(pw: unknown): string | null {
-  if (typeof pw !== 'string') return 'Password required';
-  if (pw.length < 12) return 'Password must be at least 12 characters';
-  if (pw.length > 128) return 'Password too long';
-  if (!/[a-z]/.test(pw)) return 'Password must include a lowercase letter';
-  if (!/[A-Z]/.test(pw)) return 'Password must include an uppercase letter';
-  if (!/[0-9]/.test(pw)) return 'Password must include a digit';
-  if (!/[^a-zA-Z0-9]/.test(pw)) return 'Password must include a symbol';
-  return null;
+type StateRead = { ok: true; state: AdminRecord | null } | { ok: false };
+
+function publicAdmin(row: AdminRecord) {
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    role_title: row.role_title,
+    page_permissions: row.page_permissions,
+    last_login_at: row.last_login_at,
+    is_active: row.is_active,
+    is_super_admin: row.is_super_admin,
+    deleted_at: row.deleted_at,
+    created_at: row.created_at,
+  };
 }
 
-const ALLOWED_PERMISSIONS = new Set<string>([
-  'dashboard', 'card_queue', 'card_management', 'card_type_builder', 'rates_management',
-  'withdrawals', 'manual_wallet_credit', 'users', 'transactions_overview',
-  'bonuses_rewards', 'referral_management', 'coupons', 'notifications_broadcast',
-  'notification_templates', 'email_templates', 'platform_balance', 'admin_accounts',
-  'user_activity_monitor', 'limits_fees', 'admin_settings', 'bill_settings',
-  'anomaly_alerts', 'security_limits', 'activity', 'field_builder', 'feature_overrides',
-  'flagged_transactions', 'giftbox', 'users_freeze',
-]);
+async function readBody(req: NextRequest): Promise<Body | null> {
+  const raw: unknown = await req.json().catch(() => null);
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Body) : null;
+}
 
-function validatePagePermissions(perms: unknown): string | null {
-  if (perms === undefined || perms === null) return null;
-  if (!Array.isArray(perms)) return 'page_permissions must be an array';
-  if (perms.length > ALLOWED_PERMISSIONS.size) return 'too many permissions';
-  for (const p of perms) {
-    if (typeof p !== 'string' || !ALLOWED_PERMISSIONS.has(p)) {
-      return `Unknown permission key: ${String(p).slice(0, 32)}`;
-    }
+function readId(value: unknown): string | null {
+  const id = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return isUuid(id) ? id : null;
+}
+
+async function readState(id: string): Promise<StateRead> {
+  const { data, error } = await supabaseAdmin
+    .from('admin_users')
+    .select(STATE_COLUMNS)
+    .eq('id', id)
+    .maybeSingle<AdminRecord>();
+  if (error) {
+    console.error('admin account read:', error.message);
+    return { ok: false };
   }
-  return null;
+  return { ok: true, state: data ?? null };
 }
 
-export async function GET(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin || !admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+function auditFields(recorded: boolean) {
+  return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
+}
+
+export async function GET() {
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
 
   const { data, error } = await supabaseAdmin
     .from('admin_users')
-    .select('id, username, email, role_title, page_permissions, last_login_at, is_active, is_super_admin, deleted_at')
+    .select(ADMIN_COLUMNS)
     .order('created_at', { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ admins: data });
+  if (error) {
+    console.error('admin accounts list:', error.message);
+    return fail('INTERNAL_ERROR', 'Admin accounts could not be loaded.');
+  }
+  return ok({ admins: data ?? [], current_admin_id: guard.admin.admin_id });
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin || !admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { username, email, password, role_title, page_permissions } = await req.json();
+  const body = await readBody(req);
+  if (!body) return fail('VALIDATION_ERROR', 'Send the new admin account as a JSON object.');
+  const reason = checkReason(body.reason);
+  if (!reason.ok) return fail('VALIDATION_ERROR', reason.message);
+  const checked = checkCreate(body as CreateInput);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  const account = checked.value;
 
-  if (!username || !password || !role_title || !email) {
-    return NextResponse.json({ error: 'Username, email, password and role title are required' }, { status: 400 });
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return NextResponse.json({ error: 'Invalid email' }, { status: 400 });
-  }
-  const pwErr = validatePassword(password);
-  if (pwErr) return NextResponse.json({ error: pwErr }, { status: 400 });
-  if (typeof username !== 'string' || username.length < 3 || username.length > 32) {
-    return NextResponse.json({ error: 'Invalid username (3–32 chars)' }, { status: 400 });
-  }
-  if (typeof role_title !== 'string' || role_title.length < 2 || role_title.length > 64) {
-    return NextResponse.json({ error: 'Invalid role title' }, { status: 400 });
-  }
-  const permErr = validatePagePermissions(page_permissions);
-  if (permErr) return NextResponse.json({ error: permErr }, { status: 400 });
+  const audit: AuditInput = {
+    admin,
+    action: 'CREATE_ADMIN',
+    entity: ENTITY,
+    reason: reason.reason,
+    sensitivity: 'security',
+    after: {
+      username: account.username,
+      email: account.email,
+      role_title: account.role_title,
+      page_permissions: account.page_permissions,
+      grant_changes: grantChangeRecord(diffGrants([], account.page_permissions)),
+    },
+  };
 
-  const password_hash = await bcrypt.hash(password, 12);
-
+  const passwordHash = await bcrypt.hash(account.password, BCRYPT_ROUNDS);
   const { data, error } = await supabaseAdmin
     .from('admin_users')
-    .insert({ username, email, password_hash, role_title, page_permissions, is_super_admin: false, is_active: true })
-    .select('id')
-    .single();
+    .insert({
+      username: account.username,
+      email: account.email,
+      password_hash: passwordHash,
+      role_title: account.role_title,
+      page_permissions: account.page_permissions,
+      is_super_admin: false,
+      is_active: true,
+    })
+    .select(ADMIN_COLUMNS)
+    .single<AdminRecord>();
 
-  if (error) {
-    if (error.message.includes('unique')) return NextResponse.json({ error: 'Username already taken' }, { status: 400 });
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error || !data) {
+    const message = error?.message ?? 'No row was returned.';
+    if (error?.code === UNIQUE_VIOLATION || /unique|duplicate/i.test(message)) {
+      return fail('VALIDATION_ERROR', 'That username is already taken.');
+    }
+    console.error('admin account create:', message);
+    await writeAudit({ ...audit, result: 'failure', error: message });
+    return fail('INTERNAL_ERROR', 'The admin account could not be created.');
   }
 
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id,
-    action: 'CREATE_ADMIN',
-    entity: 'admin_users',
-    entity_id: data.id,
-    after_value: redactAudit({ username, email, role_title, page_permissions }),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-
-  return NextResponse.json({ success: true });
+  const recorded = await writeAudit({ ...audit, entity_id: data.id, result: 'success' });
+  return ok({ id: data.id, admin: publicAdmin(data), ...auditFields(recorded.ok) });
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin || !admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { id, email, password, role_title, page_permissions, is_active, revoke_sessions } = await req.json();
-  if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
+  const body = await readBody(req);
+  if (!body) return fail('VALIDATION_ERROR', 'Send the changes as a JSON object.');
+  const id = readId(body.id);
+  if (!id) return fail('VALIDATION_ERROR', 'A valid admin account id is required.');
+  const reason = checkReason(body.reason);
+  if (!reason.ok) return fail('VALIDATION_ERROR', reason.message);
 
-  const { data: before } = await supabaseAdmin
-    .from('admin_users')
-    .select('email, role_title, page_permissions, is_active, is_super_admin, deleted_at')
-    .eq('id', id)
-    .single();
+  let passwordHash: string | null = null;
 
-  if (before?.deleted_at) {
-    return NextResponse.json({ error: 'Cannot modify a deleted admin.' }, { status: 400 });
-  }
+  for (let attempt = 0; attempt < EDIT_ATTEMPTS; attempt++) {
+    const read = await readState(id);
+    if (!read.ok) return fail('INTERNAL_ERROR', 'The admin account could not be read.');
+    const state = read.state;
+    if (!state) return fail('RESOURCE_NOT_FOUND', 'Admin account not found.');
 
-  if (is_active === false || revoke_sessions) {
-    if (id === admin.admin_id) {
-      return NextResponse.json({ error: 'You cannot deactivate or revoke your own session here. Sign out from your account instead.' }, { status: 400 });
+    const planned = planEdit(state, body as EditInput, admin.admin_id);
+    if (!planned.ok) return fail(planned.code, planned.message);
+    const plan = planned.plan;
+
+    if (plan.changed.length === 0 && !plan.revokesSessions) {
+      return ok({ changed: false, sessions_revoked: false, admin: publicAdmin(state) });
     }
-  }
-  if (is_active === false && before?.is_super_admin) {
-    const { count } = await supabaseAdmin
-      .from('admin_users')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_super_admin', true)
-      .eq('is_active', true);
-    if ((count ?? 0) <= 1) {
-      return NextResponse.json({ error: 'Cannot deactivate the last active super admin.' }, { status: 400 });
+
+    if (plan.deactivatesSuperAdmin) {
+      const { count, error: countError } = await supabaseAdmin
+        .from('admin_users')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_super_admin', true)
+        .eq('is_active', true)
+        .is('deleted_at', null);
+      if (countError) {
+        console.error('admin account super admin count:', countError.message);
+        return fail('INTERNAL_ERROR', 'The remaining super admins could not be counted, so nothing was changed.');
+      }
+      if ((count ?? 0) <= 1) return fail('STATE_CONFLICT', 'Cannot deactivate the last active super admin.');
     }
-  }
 
-  const updates: Record<string, any> = {};
-  if (role_title !== undefined) {
-    if (typeof role_title !== 'string' || role_title.length < 2 || role_title.length > 64) {
-      return NextResponse.json({ error: 'Invalid role title' }, { status: 400 });
+    if (plan.password !== null && passwordHash === null) {
+      passwordHash = await bcrypt.hash(plan.password, BCRYPT_ROUNDS);
     }
-    updates.role_title = role_title;
-  }
-  if (page_permissions !== undefined) {
-    const permErr = validatePagePermissions(page_permissions);
-    if (permErr) return NextResponse.json({ error: permErr }, { status: 400 });
-    updates.page_permissions = page_permissions;
-  }
-  if (is_active !== undefined) updates.is_active = is_active;
-  if (password) {
-    const pwErr = validatePassword(password);
-    if (pwErr) return NextResponse.json({ error: pwErr }, { status: 400 });
-    updates.password_hash = await bcrypt.hash(password, 12);
-  }
-  if (email !== undefined) {
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: 'Invalid email' }, { status: 400 });
+
+    const changes = {
+      ...plan.updates,
+      ...(plan.password !== null && passwordHash !== null ? { password_hash: passwordHash } : {}),
+    };
+    const guarded = supabaseAdmin.from('admin_users').update(changes).eq('id', id).is('deleted_at', null);
+    const { data, error } = await (state.token_version === null
+      ? guarded.is('token_version', null)
+      : guarded.eq('token_version', state.token_version)
+    ).select(ADMIN_COLUMNS);
+
+    const audit: AuditInput = {
+      admin,
+      action: plan.action,
+      entity: ENTITY,
+      entity_id: id,
+      before: plan.before,
+      after: plan.after,
+      reason: reason.reason,
+      sensitivity: 'security',
+    };
+
+    if (error) {
+      console.error('admin account update:', error.message);
+      await writeAudit({ ...audit, result: 'failure', error: error.message });
+      return fail('INTERNAL_ERROR', 'The admin account could not be updated.');
     }
-    updates.email = email || null;
+
+    const rows = (data ?? []) as unknown as AdminRecord[];
+    if (rows.length === 0) continue;
+
+    const recorded = await writeAudit({ ...audit, result: 'success' });
+    return ok({
+      changed: true,
+      sessions_revoked: plan.revokesSessions,
+      admin: publicAdmin(rows[0]),
+      ...auditFields(recorded.ok),
+    });
   }
 
-  const shouldBumpVersion =
-    !!revoke_sessions ||
-    !!password ||
-    page_permissions !== undefined ||
-    role_title !== undefined;
-
-  if (Object.keys(updates).length > 0) {
-    const { error } = await supabaseAdmin.from('admin_users').update(updates).eq('id', id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  if (shouldBumpVersion) {
-    const { data: current } = await supabaseAdmin
-      .from('admin_users').select('token_version').eq('id', id).single();
-    const next = ((current?.token_version as number) ?? 0) + 1;
-    const { error: bumpErr } = await supabaseAdmin
-      .from('admin_users').update({ token_version: next }).eq('id', id);
-    if (bumpErr) return NextResponse.json({ error: bumpErr.message }, { status: 500 });
-  }
-
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id,
-    action: revoke_sessions
-      ? 'REVOKE_ADMIN_SESSIONS'
-      : is_active !== undefined
-        ? (is_active ? 'REACTIVATE_ADMIN' : 'DEACTIVATE_ADMIN')
-        : 'EDIT_ADMIN',
-    entity: 'admin_users',
-    entity_id: id,
-    before_value: redactAudit(before),
-    after_value: redactAudit({ ...updates, ...(shouldBumpVersion ? { token_version_bumped: true } : {}) }),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-
-  return NextResponse.json({ success: true });
+  return fail('STATE_CONFLICT', 'This admin account kept changing while it was being saved. Reload it and try again.');
 }
 
 export async function DELETE(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin || !admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { id } = await req.json();
-  if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
+  const body = (await readBody(req)) ?? {};
+  const id = readId(body.id ?? new URL(req.url).searchParams.get('id'));
+  if (!id) return fail('VALIDATION_ERROR', 'A valid admin account id is required.');
+  const reason = checkReason(body.reason);
+  if (!reason.ok) return fail('VALIDATION_ERROR', reason.message);
 
-  const { data: target } = await supabaseAdmin
-    .from('admin_users')
-    .select('username, is_active, is_super_admin')
-    .eq('id', id)
-    .single();
+  const read = await readState(id);
+  if (!read.ok) return fail('INTERNAL_ERROR', 'The admin account could not be read.');
+  if (!read.state) return fail('RESOURCE_NOT_FOUND', 'Admin account not found.');
 
-  if (target?.is_super_admin) return NextResponse.json({ error: 'Cannot delete super admin' }, { status: 400 });
-  if (target?.is_active) return NextResponse.json({ error: 'Deactivate before deleting' }, { status: 400 });
+  const planned = planDelete(read.state);
+  if (!planned.ok) return fail(planned.code, planned.message);
 
-  const { error } = await supabaseAdmin
-    .from('admin_users')
-    .update({ deleted_at: new Date().toISOString(), is_active: false })
-    .eq('id', id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id,
+  const next = { deleted_at: new Date().toISOString(), is_active: false };
+  const audit: AuditInput = {
+    admin,
     action: 'DELETE_ADMIN',
-    entity: 'admin_users',
+    entity: ENTITY,
     entity_id: id,
-    before_value: redactAudit(target),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
+    before: planned.before,
+    after: next,
+    reason: reason.reason,
+    sensitivity: 'security',
+  };
 
-  return NextResponse.json({ success: true });
+  const { data, error } = await supabaseAdmin
+    .from('admin_users')
+    .update(next)
+    .eq('id', id)
+    .is('deleted_at', null)
+    .not('is_super_admin', 'is', true)
+    .not('is_active', 'is', true)
+    .select(ADMIN_COLUMNS);
+
+  if (error) {
+    console.error('admin account delete:', error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', 'The admin account could not be deleted.');
+  }
+
+  const rows = (data ?? []) as unknown as AdminRecord[];
+  if (rows.length === 0) {
+    return fail('STATE_CONFLICT', 'This admin account changed while you were working on it. Reload and try again.');
+  }
+
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ admin: publicAdmin(rows[0]), ...auditFields(recorded.ok) });
 }

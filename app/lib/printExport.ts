@@ -1,3 +1,8 @@
+import {
+  BUSINESS_TZ_LABEL, exportRangeDates, formatLagosDateRange, isExportRangeKey,
+  type ExportRangeDates, type ExportRangeKey,
+} from './time';
+
 type Cell = string | number | null | undefined;
 
 export function printTable(opts: {
@@ -42,20 +47,54 @@ export function printTable(opts: {
   return true;
 }
 
-export type RangeKey = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'month';
+export type RangeKey = ExportRangeKey;
 
-export function rangeToDates(key: RangeKey): { from: string | null; to: string | null; label: string } {
-  const now = new Date();
-  const dayMs = 86_400_000;
-  const ymd = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  if (key === 'today') return { from: ymd(now), to: ymd(now), label: 'Today' };
-  if (key === 'yesterday') {
-    const y = new Date(now.getTime() - dayMs);
-    return { from: ymd(y), to: ymd(y), label: 'Yesterday' };
-  }
-  if (key === '7d') return { from: ymd(new Date(now.getTime() - 6 * dayMs)), to: ymd(now), label: 'Last 7 days' };
-  if (key === '30d') return { from: ymd(new Date(now.getTime() - 29 * dayMs)), to: ymd(now), label: 'Last 30 days' };
-  if (key === 'month') return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(now), label: 'This month' };
-  return { from: null, to: null, label: 'All time' };
+export type ExportRangeValue = RangeKey | 'filters';
+
+export interface ExportFilterWindow {
+  from?: string | null;
+  to?: string | null;
+  label?: string;
+}
+
+export const FILTERS_RANGE_LABEL = 'Current filters';
+
+export const NO_DATE_LIMIT = 'No date limit';
+
+export function rangeToDates(key: RangeKey, now?: Date): ExportRangeDates {
+  return exportRangeDates(key, now);
+}
+
+export function parseExportRange(value: unknown, allowFilters = true): ExportRangeValue | null {
+  if (value === 'filters') return allowFilters ? 'filters' : null;
+  return isExportRangeKey(value) ? value : null;
+}
+
+export function nextExportRange(
+  raw: unknown,
+  current: ExportRangeValue,
+  allowFilters = true,
+  busy = false,
+): ExportRangeValue | null {
+  if (busy) return null;
+  const next = parseExportRange(raw, allowFilters);
+  return next === null || next === current ? null : next;
+}
+
+export function resolveExportRange(
+  value: ExportRangeValue,
+  filters?: ExportFilterWindow | null,
+  now?: Date,
+): ExportRangeDates {
+  if (value !== 'filters') return exportRangeDates(value, now);
+  return {
+    from: filters?.from ?? null,
+    to: filters?.to ?? null,
+    label: filters?.label || FILTERS_RANGE_LABEL,
+  };
+}
+
+export function describeExportWindow(range: { from?: string | null; to?: string | null }): string {
+  const dates = formatLagosDateRange(range.from, range.to);
+  return dates ? `${dates} (${BUSINESS_TZ_LABEL})` : NO_DATE_LIMIT;
 }

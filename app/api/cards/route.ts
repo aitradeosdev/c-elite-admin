@@ -1,188 +1,407 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { redactAudit } from '../../lib/redact';
+import { requireAdmin, type AdminContext } from '../../lib/guard';
+import { writeAudit, type AuditInput } from '../../lib/audit';
+import { fail, ok } from '../../lib/api';
+import {
+  checkCardCreate, checkCardPatch, checkCountryCreate, checkCountryPatch, diffFields, findBrandNamed, planReorder,
+  readId, readReorderIds, sameBrandName,
+  type ReorderStep,
+} from '../../(dashboard)/cards/catalogRules';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
+const CARD_COLUMNS = 'id, name, logo_url, is_active, sort_order, created_at';
+const COUNTRY_COLUMNS = 'id, card_id, country_code, country_name, currency_symbol, is_active';
+const PAGE_ROWS = 1000;
+const WRITE_BATCH = 10;
+const UNIQUE_VIOLATION = '23505';
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const COUNTRY_TAKEN = 'This country is already on this card.';
+
+type Body = Record<string, unknown>;
+
+interface CardRow {
+  id: string;
+  name: string | null;
+  logo_url: string | null;
+  is_active: boolean | null;
+  sort_order: number | null;
+  created_at: string | null;
 }
 
-async function logAction(adminId: string, action: string, entityId: string, before: any, after: any, ip: string) {
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: adminId,
-    action,
-    entity: 'cards',
-    entity_id: entityId,
-    before_value: redactAudit(before),
-    after_value: redactAudit(after),
-    ip_address: ip,
-  });
+interface CountryRow {
+  id: string;
+  card_id: string | null;
+  country_code: string | null;
+  country_name: string | null;
+  currency_symbol: string | null;
+  is_active: boolean | null;
 }
 
-export async function GET(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+interface NameRow {
+  id: string;
+  name: string | null;
+}
 
-  const { data: cards, error } = await supabaseAdmin
-    .from('cards')
-    .select('id, name, logo_url, is_active, sort_order, created_at')
-    .order('sort_order', { ascending: true });
+type Rows<T> = { ok: true; rows: T[] } | { ok: false };
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+async function readBody(req: NextRequest): Promise<Body | null> {
+  const raw: unknown = await req.json().catch(() => null);
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Body) : null;
+}
 
-  const cardsWithCountries = await Promise.all((cards || []).map(async (card) => {
-    const { data: countries } = await supabaseAdmin
+function auditFields(recorded: boolean) {
+  return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
+}
+
+function auditBase(admin: AdminContext, action: string, entity: string, entityId: string | null): AuditInput {
+  return { admin, action, entity, entity_id: entityId, sensitivity: 'normal' };
+}
+
+function publicCountry(row: CountryRow) {
+  return {
+    id: row.id,
+    country_code: row.country_code,
+    country_name: row.country_name,
+    currency_symbol: row.currency_symbol,
+    is_active: row.is_active,
+  };
+}
+
+function isUniqueViolation(error: { code?: string; message?: string } | null): boolean {
+  return Boolean(error) && (error?.code === UNIQUE_VIOLATION || /duplicate key|unique/i.test(error?.message ?? ''));
+}
+
+async function readAllCountries(): Promise<Rows<CountryRow>> {
+  const rows: CountryRow[] = [];
+  let total: number | null = null;
+  while (total === null || rows.length < total) {
+    const { data, error, count } = await supabaseAdmin
       .from('card_countries')
-      .select('id, country_code, country_name, currency_symbol, is_active')
-      .eq('card_id', card.id);
-    return { ...card, countries: countries || [] };
+      .select(COUNTRY_COLUMNS, { count: 'exact' })
+      .order('id', { ascending: true })
+      .range(rows.length, rows.length + PAGE_ROWS - 1);
+    if (error) {
+      console.error('card countries list:', error.message);
+      return { ok: false };
+    }
+    const page = (data ?? []) as CountryRow[];
+    if (total === null) total = count ?? page.length;
+    if (page.length === 0) break;
+    rows.push(...page);
+  }
+  return { ok: true, rows };
+}
+
+async function readBrandNames(): Promise<Rows<NameRow>> {
+  const { data, error } = await supabaseAdmin.from('cards').select('id, name');
+  if (error) {
+    console.error('card names read:', error.message);
+    return { ok: false };
+  }
+  return { ok: true, rows: (data ?? []) as NameRow[] };
+}
+
+async function inBatches<T, R>(items: ReadonlyArray<T>, size: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  for (let start = 0; start < items.length; start += size) {
+    results.push(...await Promise.all(items.slice(start, start + size).map(run)));
+  }
+  return results;
+}
+
+export async function GET() {
+  const guard = await requireAdmin('catalog.read');
+  if (!guard.ok) return guard.response;
+
+  const { data, error } = await supabaseAdmin
+    .from('cards')
+    .select(CARD_COLUMNS)
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) {
+    console.error('cards list:', error.message);
+    return fail('INTERNAL_ERROR', 'The card catalog could not be loaded.');
+  }
+
+  const countries = await readAllCountries();
+  if (!countries.ok) return fail('INTERNAL_ERROR', 'The countries for each brand could not be loaded.');
+
+  const byCard = new Map<string, CountryRow[]>();
+  for (const row of countries.rows) {
+    if (!row.card_id) continue;
+    const list = byCard.get(row.card_id);
+    if (list) list.push(row);
+    else byCard.set(row.card_id, [row]);
+  }
+
+  const cards = ((data ?? []) as CardRow[]).map((card) => ({
+    ...card,
+    countries: (byCard.get(card.id) ?? [])
+      .slice()
+      .sort((a, b) => (a.country_name ?? '').localeCompare(b.country_name ?? '', 'en'))
+      .map(publicCountry),
   }));
 
-  return NextResponse.json({ cards: cardsWithCountries });
+  return ok({ cards });
+}
+
+async function createCard(admin: AdminContext, body: Body) {
+  const checked = checkCardCreate(body);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  const card = checked.value;
+
+  const names = await readBrandNames();
+  if (!names.ok) return fail('INTERNAL_ERROR', 'Existing brand names could not be checked, so the brand was not added.');
+  const clash = findBrandNamed(names.rows, card.name);
+  if (clash) {
+    return fail('STATE_CONFLICT', `A brand called “${clash.name}” already exists.`, { details: { id: clash.id } });
+  }
+
+  const audit: AuditInput = { ...auditBase(admin, 'CREATE_CARD', 'cards', null), after: card };
+  const { data, error } = await supabaseAdmin.from('cards').insert(card).select(CARD_COLUMNS).single<CardRow>();
+  if (error || !data) {
+    const message = error?.message ?? 'No row was returned.';
+    console.error('card create:', message);
+    await writeAudit({ ...audit, result: 'failure', error: message });
+    return fail('INTERNAL_ERROR', 'The brand could not be added.');
+  }
+
+  const recorded = await writeAudit({ ...audit, entity_id: data.id, result: 'success' });
+  return ok({ id: data.id, card: { ...data, countries: [] }, ...auditFields(recorded.ok) });
+}
+
+async function addCountry(admin: AdminContext, body: Body) {
+  const checked = checkCountryCreate(body);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  const country = checked.value;
+
+  const { data: brand, error: brandError } = await supabaseAdmin
+    .from('cards')
+    .select('id, name')
+    .eq('id', country.card_id)
+    .maybeSingle<NameRow>();
+  if (brandError) {
+    console.error('card country brand read:', brandError.message);
+    return fail('INTERNAL_ERROR', 'The brand could not be read, so the country was not added.');
+  }
+  if (!brand) return fail('RESOURCE_NOT_FOUND', 'That brand no longer exists.');
+
+  const audit: AuditInput = {
+    ...auditBase(admin, 'ADD_CARD_COUNTRY', 'card_countries', null),
+    after: { ...country, card_name: brand.name },
+  };
+  const { data, error } = await supabaseAdmin
+    .from('card_countries')
+    .insert(country)
+    .select(COUNTRY_COLUMNS)
+    .single<CountryRow>();
+  if (isUniqueViolation(error)) return fail('STATE_CONFLICT', COUNTRY_TAKEN);
+  if (error || !data) {
+    const message = error?.message ?? 'No row was returned.';
+    console.error('card country create:', message);
+    await writeAudit({ ...audit, result: 'failure', error: message });
+    return fail('INTERNAL_ERROR', 'The country could not be added.');
+  }
+
+  const recorded = await writeAudit({ ...audit, entity_id: data.id, result: 'success' });
+  return ok({ id: data.id, country: publicCountry(data), ...auditFields(recorded.ok) });
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin('catalog.write');
+  if (!guard.ok) return guard.response;
 
-  const body = await req.json();
-  const ip = req.headers.get('x-forwarded-for') || 'unknown';
+  const body = await readBody(req);
+  if (!body) return fail('VALIDATION_ERROR', 'Send the brand or country as a JSON object.');
+  if (body.type === 'card') return createCard(guard.admin, body);
+  if (body.type === 'country') return addCountry(guard.admin, body);
+  return fail('VALIDATION_ERROR', 'Invalid type. Use card or country.');
+}
 
-  if (body.type === 'card') {
-    const name = String(body.name || '').trim();
-    if (!name || name.length > 80) return NextResponse.json({ error: 'Invalid name' }, { status: 400 });
-    const logo_url = body.logo_url == null ? null : String(body.logo_url);
-    if (logo_url && (logo_url.length > 500 || !/^https:\/\//.test(logo_url))) {
-      return NextResponse.json({ error: 'logo_url must be https and <=500 chars' }, { status: 400 });
+async function updateCard(admin: AdminContext, body: Body) {
+  const id = readId(body.id);
+  if (!id) return fail('VALIDATION_ERROR', 'A valid brand id is required.');
+  const checked = checkCardPatch(body);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+
+  const { data: before, error: readError } = await supabaseAdmin
+    .from('cards')
+    .select(CARD_COLUMNS)
+    .eq('id', id)
+    .maybeSingle<CardRow>();
+  if (readError) {
+    console.error('card read:', readError.message);
+    return fail('INTERNAL_ERROR', 'The brand could not be read, so nothing was changed.');
+  }
+  if (!before) return fail('RESOURCE_NOT_FOUND', 'That brand no longer exists.');
+
+  const diff = diffFields({ ...before }, checked.value);
+  if (diff.fields.length === 0) return ok({ changed: false, card: before });
+
+  const nextName = diff.after.name;
+  if (nextName !== undefined && !sameBrandName(before.name ?? '', nextName)) {
+    const names = await readBrandNames();
+    if (!names.ok) return fail('INTERNAL_ERROR', 'Existing brand names could not be checked, so nothing was changed.');
+    const clash = findBrandNamed(names.rows, nextName, id);
+    if (clash) {
+      return fail('STATE_CONFLICT', `A brand called “${clash.name}” already exists.`, { details: { id: clash.id } });
     }
-    const sort_order = Math.max(0, Math.min(10000, Number(body.sort_order ?? 0) || 0));
-    const { data, error } = await supabaseAdmin
-      .from('cards')
-      .insert({ name, logo_url, is_active: body.is_active ?? true, sort_order })
-      .select('id')
-      .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    await logAction(admin.admin_id, 'CREATE_CARD', data.id, null, { name, logo_url, is_active: body.is_active }, ip);
-    return NextResponse.json({ success: true, id: data.id });
   }
 
-  if (body.type === 'country') {
-    const card_id = String(body.card_id || '');
-    const country_code = String(body.country_code || '').toUpperCase();
-    const country_name = String(body.country_name || '').trim();
-    const currency_symbol = String(body.currency_symbol || '').trim();
-    if (!/^[A-Z]{2,3}$/.test(country_code)) return NextResponse.json({ error: 'Invalid country_code' }, { status: 400 });
-    if (!country_name || country_name.length > 80) return NextResponse.json({ error: 'Invalid country_name' }, { status: 400 });
-    if (!currency_symbol || currency_symbol.length > 8) return NextResponse.json({ error: 'Invalid currency_symbol' }, { status: 400 });
-    const { data, error } = await supabaseAdmin
-      .from('card_countries')
-      .insert({ card_id, country_code, country_name, currency_symbol, is_active: body.is_active ?? true })
-      .select('id')
-      .single();
-    if (error) {
-      if ((error as any).code === '23505') {
-        return NextResponse.json({ error: 'This country is already on this card.' }, { status: 409 });
-      }
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    await logAction(admin.admin_id, 'ADD_CARD_COUNTRY', data.id, null, { card_id, country_code, country_name, currency_symbol }, ip);
-    return NextResponse.json({ success: true });
+  const audit: AuditInput = { ...auditBase(admin, 'UPDATE_CARD', 'cards', id), before: diff.before, after: diff.after };
+  const { data, error } = await supabaseAdmin
+    .from('cards')
+    .update(diff.after)
+    .eq('id', id)
+    .select(CARD_COLUMNS)
+    .maybeSingle<CardRow>();
+  if (error) {
+    console.error('card update:', error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', 'The brand could not be saved.');
+  }
+  if (!data) return fail('RESOURCE_NOT_FOUND', 'That brand no longer exists.');
+
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ changed: true, card: data, ...auditFields(recorded.ok) });
+}
+
+async function updateCountry(admin: AdminContext, body: Body) {
+  const id = readId(body.id);
+  if (!id) return fail('VALIDATION_ERROR', 'A valid country id is required.');
+  const checked = checkCountryPatch(body);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+
+  const { data: before, error: readError } = await supabaseAdmin
+    .from('card_countries')
+    .select(COUNTRY_COLUMNS)
+    .eq('id', id)
+    .maybeSingle<CountryRow>();
+  if (readError) {
+    console.error('card country read:', readError.message);
+    return fail('INTERNAL_ERROR', 'The country could not be read, so nothing was changed.');
+  }
+  if (!before) return fail('RESOURCE_NOT_FOUND', 'That country is no longer on this brand.');
+
+  const diff = diffFields({ ...before }, checked.value);
+  if (diff.fields.length === 0) return ok({ changed: false, country: publicCountry(before) });
+
+  const audit: AuditInput = {
+    ...auditBase(admin, 'UPDATE_CARD_COUNTRY', 'card_countries', id),
+    before: { ...diff.before, card_id: before.card_id },
+    after: { ...diff.after, card_id: before.card_id },
+  };
+  const { data, error } = await supabaseAdmin
+    .from('card_countries')
+    .update(diff.after)
+    .eq('id', id)
+    .select(COUNTRY_COLUMNS)
+    .maybeSingle<CountryRow>();
+  if (isUniqueViolation(error)) return fail('STATE_CONFLICT', COUNTRY_TAKEN);
+  if (error) {
+    console.error('card country update:', error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', 'The country could not be saved.');
+  }
+  if (!data) return fail('RESOURCE_NOT_FOUND', 'That country is no longer on this brand.');
+
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ changed: true, country: publicCountry(data), ...auditFields(recorded.ok) });
+}
+
+function positionsOf(steps: ReadonlyArray<ReorderStep>, side: 'from' | 'to') {
+  return steps.map((step) => ({ id: step.id, sort_order: step[side] }));
+}
+
+async function reorderCards(admin: AdminContext, body: Body) {
+  const read = readReorderIds(body.ids);
+  if (!read.ok) return fail('VALIDATION_ERROR', read.message);
+
+  const { data, error } = await supabaseAdmin.from('cards').select('id, sort_order');
+  if (error) {
+    console.error('card order read:', error.message);
+    return fail('INTERNAL_ERROR', 'The current order could not be read, so nothing was changed.');
   }
 
-  return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+  const plan = planReorder((data ?? []) as Array<{ id: string; sort_order: number | null }>, read.ids);
+  if (plan.missing.length > 0 || plan.extra.length > 0) {
+    return fail('STATE_CONFLICT', 'The brand list has changed since you loaded it. Reload and try again.', {
+      details: { missing: plan.missing, extra: plan.extra },
+    });
+  }
+  if (plan.steps.length === 0) return ok({ changed: false, positions: [] });
+
+  const movedId = readId(body.moved);
+  const audit: AuditInput = {
+    ...auditBase(admin, 'REORDER_CARDS', 'cards', movedId && read.ids.includes(movedId) ? movedId : null),
+    before: { positions: positionsOf(plan.steps, 'from') },
+    after: { positions: positionsOf(plan.steps, 'to') },
+  };
+
+  const results = await inBatches(plan.steps, WRITE_BATCH, async (step) => {
+    const { error: writeError } = await supabaseAdmin.from('cards').update({ sort_order: step.to }).eq('id', step.id);
+    return writeError ? writeError.message : null;
+  });
+  const failures = results.filter((message): message is string => message !== null);
+  if (failures.length > 0) {
+    const none = failures.length === plan.steps.length;
+    console.error('card reorder:', failures[0]);
+    await writeAudit({ ...audit, result: none ? 'failure' : 'partial', error: failures[0] });
+    return fail(
+      'INTERNAL_ERROR',
+      none ? 'The new order could not be saved.' : 'Only part of the new order was saved. Reload to see the current order.',
+      { details: { saved: plan.steps.length - failures.length, failed: failures.length } },
+    );
+  }
+
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ changed: true, positions: positionsOf(plan.steps, 'to'), ...auditFields(recorded.ok) });
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin('catalog.write');
+  if (!guard.ok) return guard.response;
 
-  const body = await req.json();
-  const ip = req.headers.get('x-forwarded-for') || 'unknown';
-
-  if (body.type === 'card') {
-    const { id } = body;
-    const updates: any = {};
-    if (body.name !== undefined) {
-      const n = String(body.name).trim();
-      if (!n || n.length > 80) return NextResponse.json({ error: 'Invalid name' }, { status: 400 });
-      updates.name = n;
-    }
-    if (body.logo_url !== undefined) {
-      const u = body.logo_url == null ? null : String(body.logo_url);
-      if (u && (u.length > 500 || !/^https:\/\//.test(u))) {
-        return NextResponse.json({ error: 'logo_url must be https and <=500 chars' }, { status: 400 });
-      }
-      updates.logo_url = u;
-    }
-    if (body.is_active !== undefined) updates.is_active = !!body.is_active;
-    if (body.sort_order !== undefined) {
-      updates.sort_order = Math.max(0, Math.min(10000, Number(body.sort_order) || 0));
-    }
-    const { data: before } = await supabaseAdmin.from('cards').select('*').eq('id', id).single();
-    const { error } = await supabaseAdmin.from('cards').update(updates).eq('id', id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    await logAction(admin.admin_id, 'UPDATE_CARD', id, before, updates, ip);
-    return NextResponse.json({ success: true });
-  }
-
-  if (body.type === 'country') {
-    const { id } = body;
-    const updates: any = {};
-    if (body.country_code !== undefined) {
-      const c = String(body.country_code).toUpperCase();
-      if (!/^[A-Z]{2,3}$/.test(c)) return NextResponse.json({ error: 'Invalid country_code' }, { status: 400 });
-      updates.country_code = c;
-    }
-    if (body.country_name !== undefined) {
-      const n = String(body.country_name).trim();
-      if (!n || n.length > 80) return NextResponse.json({ error: 'Invalid country_name' }, { status: 400 });
-      updates.country_name = n;
-    }
-    if (body.currency_symbol !== undefined) {
-      const s = String(body.currency_symbol).trim();
-      if (!s || s.length > 8) return NextResponse.json({ error: 'Invalid currency_symbol' }, { status: 400 });
-      updates.currency_symbol = s;
-    }
-    if (body.is_active !== undefined) updates.is_active = !!body.is_active;
-    const { data: before } = await supabaseAdmin.from('card_countries').select('*').eq('id', id).single();
-    const { error } = await supabaseAdmin.from('card_countries').update(updates).eq('id', id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    await logAction(admin.admin_id, 'UPDATE_CARD_COUNTRY', id, before, updates, ip);
-    return NextResponse.json({ success: true });
-  }
-
-  if (body.type === 'reorder') {
-    const ids = Array.isArray(body.ids) ? body.ids.slice(0, 200) : [];
-    if (ids.length === 0) return NextResponse.json({ error: 'ids required' }, { status: 400 });
-    await Promise.all(ids.map((id: string, index: number) =>
-      supabaseAdmin.from('cards').update({ sort_order: index }).eq('id', id)
-    ));
-    await logAction(admin.admin_id, 'REORDER_CARDS', 'batch', null, { ids }, ip);
-    return NextResponse.json({ success: true });
-  }
-
-  return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+  const body = await readBody(req);
+  if (!body) return fail('VALIDATION_ERROR', 'Send the changes as a JSON object.');
+  if (body.type === 'card') return updateCard(guard.admin, body);
+  if (body.type === 'country') return updateCountry(guard.admin, body);
+  if (body.type === 'reorder') return reorderCards(guard.admin, body);
+  return fail('VALIDATION_ERROR', 'Invalid type. Use card, country or reorder.');
 }
 
 export async function DELETE(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('card_management')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin('catalog.write');
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { id, type } = await req.json();
-  const ip = req.headers.get('x-forwarded-for') || 'unknown';
+  const body = await readBody(req);
+  if (!body) return fail('VALIDATION_ERROR', 'Send the country to remove as a JSON object.');
+  if (body.type !== 'country') {
+    return fail('VALIDATION_ERROR', 'Invalid type. Only countries can be removed; deactivate a brand to hide it.');
+  }
+  const id = readId(body.id);
+  if (!id) return fail('VALIDATION_ERROR', 'A valid country id is required.');
 
-  if (type === 'country') {
-    const { data: before } = await supabaseAdmin.from('card_countries').select('*').eq('id', id).single();
-    const { error } = await supabaseAdmin.from('card_countries').delete().eq('id', id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    await logAction(admin.admin_id, 'REMOVE_CARD_COUNTRY', id, before, null, ip);
-    return NextResponse.json({ success: true });
+  const { data: before, error: readError } = await supabaseAdmin
+    .from('card_countries')
+    .select(COUNTRY_COLUMNS)
+    .eq('id', id)
+    .maybeSingle<CountryRow>();
+  if (readError) {
+    console.error('card country read:', readError.message);
+    return fail('INTERNAL_ERROR', 'The country could not be read, so nothing was removed.');
+  }
+  if (!before) return fail('RESOURCE_NOT_FOUND', 'That country is no longer on this brand.');
+
+  const audit: AuditInput = { ...auditBase(admin, 'REMOVE_CARD_COUNTRY', 'card_countries', id), before };
+  const { error } = await supabaseAdmin.from('card_countries').delete().eq('id', id);
+  if (error) {
+    console.error('card country delete:', error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', 'The country could not be removed.');
   }
 
-  return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ id, ...auditFields(recorded.ok) });
 }

@@ -1,0 +1,207 @@
+.root {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 34px;
+  min-width: 0;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .field:hover { border-color: var(--border-strong); }
+}
+
+.field:focus-within {
+  border-color: var(--accent-base);
+  box-shadow: 0 0 0 3px var(--ring-color);
+}
+
+.field.invalid { border-color: var(--tone-danger-border); }
+
+.field.invalid:focus-within {
+  border-color: var(--tone-danger-fg);
+  box-shadow: 0 0 0 3px var(--ring-color-danger);
+}
+
+.label {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight);
+}
+
+.input:focus,
+.input:focus-visible { outline: none; }
+
+.input[data-empty]:not(:focus) { color: var(--fg-tertiary); }
+
+.input::-webkit-datetime-edit { padding: 0; }
+
+.input::-webkit-date-and-time-value { text-align: left; }
+
+.input::-webkit-calendar-picker-indicator {
+  margin-left: var(--space-1);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+}
+
+.root:disabled .field {
+  background: var(--bg-muted);
+  border-color: var(--border-default);
+  box-shadow: none;
+}
+
+.root:disabled .label,
+.root:disabled .input {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+
+.root:disabled .input::-webkit-calendar-picker-indicator {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .chip:hover:not(:disabled) {
+    background: var(--bg-subtle);
+    border-color: var(--border-strong);
+    color: var(--fg-primary);
+  }
+}
+
+.chip[aria-pressed='true'],
+.chip[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-base);
+  color: var(--accent-base);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+  border-radius: var(--radius-pill);
+}
+
+.chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.error {
+  flex-basis: 100%;
+  contain: inline-size;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--tone-danger-fg);
+}
+
+@media (max-width: 768px) {
+  .root,
+  .fields { width: 100%; }
+  .field { flex: 1 1 12rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field,
+  .chip,
+  .input::-webkit-calendar-picker-indicator { transition: none; }
+}

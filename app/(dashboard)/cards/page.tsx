@@ -1,689 +1,626 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import {
-  PageHeader, Card as UICard, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, FieldShell, Toggle, Modal, SidePanel, TableSkeleton, } from '../../_ui';
-import { useIsMobile } from '../../lib/useIsMobile';
-import { StatusDot, StatStrip } from '../_shared/statusUi';
+  AccessDenied, Button, Card, CardBody, ErrorState, FilterBar, MobileDataList, Notice, PageHeader, ResponsiveView,
+  RowOpen, SearchInput, StatStrip, TBody, THead, Table, TableEmpty, TableSkeleton, TableState, Td, Th, Tr, useCan,
+  useConfirm, useResource, useToast, useUrlState, uuidParam,
+  type StatItem, type TableSkeletonColumn,
+} from '../../_ui';
+import { apiRequest } from '../../lib/apiClient';
+import { isUuid } from '../../lib/http';
+import { BUSINESS_TZ_LABEL, formatBusinessTime } from '../../lib/time';
+import { BrandEditor } from './BrandEditor';
+import { BrandPanel } from './BrandPanel';
+import {
+  BrandMark, BrandMenu, BrandStatus, CountryCell, MoveControls, ValueDiff, countryText, useDeferredFocus, visibleTarget,
+} from './CatalogParts';
+import {
+  appendCard, availableCountries, brandLabel, catalogStats, classifyMutation, hasSharedPositions, matchesSearch,
+  mergeSavedCard, moveId, plural, positionText, renumberCards, statusConsequences, statusText, toCardReceipt,
+  toCatalog, toReceipt,
+  type CardReceipt, type Catalog, type CatalogCard, type MoveTarget, type MutationOutcome, type SavedCard,
+} from './model';
+import s from './page.module.css';
 
-const ISO_COUNTRIES = [
-  { code: 'AF', name: 'Afghanistan', symbol: '؋', currency: 'AFN' },
-  { code: 'AL', name: 'Albania', symbol: 'L', currency: 'ALL' },
-  { code: 'DZ', name: 'Algeria', symbol: 'DA', currency: 'DZD' },
-  { code: 'AS', name: 'American Samoa', symbol: '$', currency: 'USD' },
-  { code: 'AD', name: 'Andorra', symbol: '€', currency: 'EUR' },
-  { code: 'AO', name: 'Angola', symbol: 'Kz', currency: 'AOA' },
-  { code: 'AI', name: 'Anguilla', symbol: 'EC$', currency: 'XCD' },
-  { code: 'AG', name: 'Antigua and Barbuda', symbol: 'EC$', currency: 'XCD' },
-  { code: 'AR', name: 'Argentina', symbol: '$', currency: 'ARS' },
-  { code: 'AM', name: 'Armenia', symbol: '֏', currency: 'AMD' },
-  { code: 'AW', name: 'Aruba', symbol: 'ƒ', currency: 'AWG' },
-  { code: 'AU', name: 'Australia', symbol: 'A$', currency: 'AUD' },
-  { code: 'AT', name: 'Austria', symbol: '€', currency: 'EUR' },
-  { code: 'AZ', name: 'Azerbaijan', symbol: '₼', currency: 'AZN' },
-  { code: 'BS', name: 'Bahamas', symbol: 'B$', currency: 'BSD' },
-  { code: 'BH', name: 'Bahrain', symbol: 'BD', currency: 'BHD' },
-  { code: 'BD', name: 'Bangladesh', symbol: '৳', currency: 'BDT' },
-  { code: 'BB', name: 'Barbados', symbol: 'Bds$', currency: 'BBD' },
-  { code: 'BY', name: 'Belarus', symbol: 'Br', currency: 'BYN' },
-  { code: 'BE', name: 'Belgium', symbol: '€', currency: 'EUR' },
-  { code: 'BZ', name: 'Belize', symbol: 'BZ$', currency: 'BZD' },
-  { code: 'BJ', name: 'Benin', symbol: 'CFA', currency: 'XOF' },
-  { code: 'BM', name: 'Bermuda', symbol: 'BD$', currency: 'BMD' },
-  { code: 'BT', name: 'Bhutan', symbol: 'Nu', currency: 'BTN' },
-  { code: 'BO', name: 'Bolivia', symbol: 'Bs', currency: 'BOB' },
-  { code: 'BA', name: 'Bosnia and Herzegovina', symbol: 'KM', currency: 'BAM' },
-  { code: 'BW', name: 'Botswana', symbol: 'P', currency: 'BWP' },
-  { code: 'BR', name: 'Brazil', symbol: 'R$', currency: 'BRL' },
-  { code: 'BN', name: 'Brunei', symbol: 'B$', currency: 'BND' },
-  { code: 'BG', name: 'Bulgaria', symbol: 'лв', currency: 'BGN' },
-  { code: 'BF', name: 'Burkina Faso', symbol: 'CFA', currency: 'XOF' },
-  { code: 'BI', name: 'Burundi', symbol: 'FBu', currency: 'BIF' },
-  { code: 'KH', name: 'Cambodia', symbol: '៛', currency: 'KHR' },
-  { code: 'CM', name: 'Cameroon', symbol: 'FCF', currency: 'XAF' },
-  { code: 'CA', name: 'Canada', symbol: 'C$', currency: 'CAD' },
-  { code: 'CV', name: 'Cape Verde', symbol: 'Esc', currency: 'CVE' },
-  { code: 'KY', name: 'Cayman Islands', symbol: 'CI$', currency: 'KYD' },
-  { code: 'CF', name: 'Central African Republic', symbol: 'FCF', currency: 'XAF' },
-  { code: 'TD', name: 'Chad', symbol: 'FCF', currency: 'XAF' },
-  { code: 'CL', name: 'Chile', symbol: '$', currency: 'CLP' },
-  { code: 'CN', name: 'China', symbol: '¥', currency: 'CNY' },
-  { code: 'CO', name: 'Colombia', symbol: '$', currency: 'COP' },
-  { code: 'KM', name: 'Comoros', symbol: 'CF', currency: 'KMF' },
-  { code: 'CG', name: 'Congo', symbol: 'FCF', currency: 'XAF' },
-  { code: 'CD', name: 'Congo (DRC)', symbol: 'FC', currency: 'CDF' },
-  { code: 'CR', name: 'Costa Rica', symbol: '₡', currency: 'CRC' },
-  { code: 'CI', name: 'Côte d’Ivoire', symbol: 'CFA', currency: 'XOF' },
-  { code: 'HR', name: 'Croatia', symbol: '€', currency: 'EUR' },
-  { code: 'CU', name: 'Cuba', symbol: '$', currency: 'CUP' },
-  { code: 'CY', name: 'Cyprus', symbol: '€', currency: 'EUR' },
-  { code: 'CZ', name: 'Czech Republic', symbol: 'Kč', currency: 'CZK' },
-  { code: 'DK', name: 'Denmark', symbol: 'kr', currency: 'DKK' },
-  { code: 'DJ', name: 'Djibouti', symbol: 'Fdj', currency: 'DJF' },
-  { code: 'DM', name: 'Dominica', symbol: 'EC$', currency: 'XCD' },
-  { code: 'DO', name: 'Dominican Republic', symbol: 'RD$', currency: 'DOP' },
-  { code: 'EC', name: 'Ecuador', symbol: '$', currency: 'USD' },
-  { code: 'EG', name: 'Egypt', symbol: 'E£', currency: 'EGP' },
-  { code: 'SV', name: 'El Salvador', symbol: '$', currency: 'USD' },
-  { code: 'GQ', name: 'Equatorial Guinea', symbol: 'FCF', currency: 'XAF' },
-  { code: 'ER', name: 'Eritrea', symbol: 'Nfk', currency: 'ERN' },
-  { code: 'EE', name: 'Estonia', symbol: '€', currency: 'EUR' },
-  { code: 'SZ', name: 'Eswatini', symbol: 'E', currency: 'SZL' },
-  { code: 'ET', name: 'Ethiopia', symbol: 'Br', currency: 'ETB' },
-  { code: 'FJ', name: 'Fiji', symbol: 'FJ$', currency: 'FJD' },
-  { code: 'FI', name: 'Finland', symbol: '€', currency: 'EUR' },
-  { code: 'FR', name: 'France', symbol: '€', currency: 'EUR' },
-  { code: 'GF', name: 'French Guiana', symbol: '€', currency: 'EUR' },
-  { code: 'PF', name: 'French Polynesia', symbol: 'F', currency: 'XPF' },
-  { code: 'GA', name: 'Gabon', symbol: 'FCF', currency: 'XAF' },
-  { code: 'GM', name: 'Gambia', symbol: 'D', currency: 'GMD' },
-  { code: 'GE', name: 'Georgia', symbol: '₾', currency: 'GEL' },
-  { code: 'DE', name: 'Germany', symbol: '€', currency: 'EUR' },
-  { code: 'GH', name: 'Ghana', symbol: '₵', currency: 'GHS' },
-  { code: 'GI', name: 'Gibraltar', symbol: '£', currency: 'GIP' },
-  { code: 'GR', name: 'Greece', symbol: '€', currency: 'EUR' },
-  { code: 'GL', name: 'Greenland', symbol: 'kr', currency: 'DKK' },
-  { code: 'GD', name: 'Grenada', symbol: 'EC$', currency: 'XCD' },
-  { code: 'GP', name: 'Guadeloupe', symbol: '€', currency: 'EUR' },
-  { code: 'GU', name: 'Guam', symbol: '$', currency: 'USD' },
-  { code: 'GT', name: 'Guatemala', symbol: 'Q', currency: 'GTQ' },
-  { code: 'GN', name: 'Guinea', symbol: 'FG', currency: 'GNF' },
-  { code: 'GW', name: 'Guinea-Bissau', symbol: 'CFA', currency: 'XOF' },
-  { code: 'GY', name: 'Guyana', symbol: 'G$', currency: 'GYD' },
-  { code: 'HT', name: 'Haiti', symbol: 'G', currency: 'HTG' },
-  { code: 'HN', name: 'Honduras', symbol: 'L', currency: 'HNL' },
-  { code: 'HK', name: 'Hong Kong', symbol: 'HK$', currency: 'HKD' },
-  { code: 'HU', name: 'Hungary', symbol: 'Ft', currency: 'HUF' },
-  { code: 'IS', name: 'Iceland', symbol: 'kr', currency: 'ISK' },
-  { code: 'IN', name: 'India', symbol: '₹', currency: 'INR' },
-  { code: 'ID', name: 'Indonesia', symbol: 'Rp', currency: 'IDR' },
-  { code: 'IR', name: 'Iran', symbol: '﷼', currency: 'IRR' },
-  { code: 'IQ', name: 'Iraq', symbol: 'ID', currency: 'IQD' },
-  { code: 'IE', name: 'Ireland', symbol: '€', currency: 'EUR' },
-  { code: 'IL', name: 'Israel', symbol: '₪', currency: 'ILS' },
-  { code: 'IT', name: 'Italy', symbol: '€', currency: 'EUR' },
-  { code: 'JM', name: 'Jamaica', symbol: 'J$', currency: 'JMD' },
-  { code: 'JP', name: 'Japan', symbol: '¥', currency: 'JPY' },
-  { code: 'JO', name: 'Jordan', symbol: 'JD', currency: 'JOD' },
-  { code: 'KZ', name: 'Kazakhstan', symbol: '₸', currency: 'KZT' },
-  { code: 'KE', name: 'Kenya', symbol: 'KSh', currency: 'KES' },
-  { code: 'KI', name: 'Kiribati', symbol: 'A$', currency: 'AUD' },
-  { code: 'KP', name: 'North Korea', symbol: '₩', currency: 'KPW' },
-  { code: 'KR', name: 'South Korea', symbol: '₩', currency: 'KRW' },
-  { code: 'KW', name: 'Kuwait', symbol: 'KD', currency: 'KWD' },
-  { code: 'KG', name: 'Kyrgyzstan', symbol: 'с', currency: 'KGS' },
-  { code: 'LA', name: 'Laos', symbol: '₭', currency: 'LAK' },
-  { code: 'LV', name: 'Latvia', symbol: '€', currency: 'EUR' },
-  { code: 'LB', name: 'Lebanon', symbol: 'LL', currency: 'LBP' },
-  { code: 'LS', name: 'Lesotho', symbol: 'L', currency: 'LSL' },
-  { code: 'LR', name: 'Liberia', symbol: 'L$', currency: 'LRD' },
-  { code: 'LY', name: 'Libya', symbol: 'LD', currency: 'LYD' },
-  { code: 'LI', name: 'Liechtenstein', symbol: 'CHF', currency: 'CHF' },
-  { code: 'LT', name: 'Lithuania', symbol: '€', currency: 'EUR' },
-  { code: 'LU', name: 'Luxembourg', symbol: '€', currency: 'EUR' },
-  { code: 'MO', name: 'Macau', symbol: 'MOP', currency: 'MOP' },
-  { code: 'MG', name: 'Madagascar', symbol: 'Ar', currency: 'MGA' },
-  { code: 'MW', name: 'Malawi', symbol: 'MK', currency: 'MWK' },
-  { code: 'MY', name: 'Malaysia', symbol: 'RM', currency: 'MYR' },
-  { code: 'MV', name: 'Maldives', symbol: 'Rf', currency: 'MVR' },
-  { code: 'ML', name: 'Mali', symbol: 'CFA', currency: 'XOF' },
-  { code: 'MT', name: 'Malta', symbol: '€', currency: 'EUR' },
-  { code: 'MH', name: 'Marshall Islands', symbol: '$', currency: 'USD' },
-  { code: 'MQ', name: 'Martinique', symbol: '€', currency: 'EUR' },
-  { code: 'MR', name: 'Mauritania', symbol: 'UM', currency: 'MRU' },
-  { code: 'MU', name: 'Mauritius', symbol: 'Rs', currency: 'MUR' },
-  { code: 'MX', name: 'Mexico', symbol: '$', currency: 'MXN' },
-  { code: 'FM', name: 'Micronesia', symbol: '$', currency: 'USD' },
-  { code: 'MD', name: 'Moldova', symbol: 'L', currency: 'MDL' },
-  { code: 'MC', name: 'Monaco', symbol: '€', currency: 'EUR' },
-  { code: 'MN', name: 'Mongolia', symbol: '₮', currency: 'MNT' },
-  { code: 'ME', name: 'Montenegro', symbol: '€', currency: 'EUR' },
-  { code: 'MS', name: 'Montserrat', symbol: 'EC$', currency: 'XCD' },
-  { code: 'MA', name: 'Morocco', symbol: 'DH', currency: 'MAD' },
-  { code: 'MZ', name: 'Mozambique', symbol: 'MT', currency: 'MZN' },
-  { code: 'MM', name: 'Myanmar', symbol: 'K', currency: 'MMK' },
-  { code: 'NA', name: 'Namibia', symbol: 'N$', currency: 'NAD' },
-  { code: 'NR', name: 'Nauru', symbol: 'A$', currency: 'AUD' },
-  { code: 'NP', name: 'Nepal', symbol: 'Rs', currency: 'NPR' },
-  { code: 'NL', name: 'Netherlands', symbol: '€', currency: 'EUR' },
-  { code: 'NC', name: 'New Caledonia', symbol: 'F', currency: 'XPF' },
-  { code: 'NZ', name: 'New Zealand', symbol: 'NZ$', currency: 'NZD' },
-  { code: 'NI', name: 'Nicaragua', symbol: 'C$', currency: 'NIO' },
-  { code: 'NE', name: 'Niger', symbol: 'CFA', currency: 'XOF' },
-  { code: 'NG', name: 'Nigeria', symbol: '₦', currency: 'NGN' },
-  { code: 'MK', name: 'North Macedonia', symbol: 'ден', currency: 'MKD' },
-  { code: 'NO', name: 'Norway', symbol: 'kr', currency: 'NOK' },
-  { code: 'OM', name: 'Oman', symbol: 'OR', currency: 'OMR' },
-  { code: 'PK', name: 'Pakistan', symbol: 'Rs', currency: 'PKR' },
-  { code: 'PW', name: 'Palau', symbol: '$', currency: 'USD' },
-  { code: 'PS', name: 'Palestine', symbol: '₪', currency: 'ILS' },
-  { code: 'PA', name: 'Panama', symbol: 'B/.', currency: 'PAB' },
-  { code: 'PG', name: 'Papua New Guinea', symbol: 'K', currency: 'PGK' },
-  { code: 'PY', name: 'Paraguay', symbol: '₲', currency: 'PYG' },
-  { code: 'PE', name: 'Peru', symbol: 'S/', currency: 'PEN' },
-  { code: 'PH', name: 'Philippines', symbol: '₱', currency: 'PHP' },
-  { code: 'PL', name: 'Poland', symbol: 'zł', currency: 'PLN' },
-  { code: 'PT', name: 'Portugal', symbol: '€', currency: 'EUR' },
-  { code: 'PR', name: 'Puerto Rico', symbol: '$', currency: 'USD' },
-  { code: 'QA', name: 'Qatar', symbol: 'QR', currency: 'QAR' },
-  { code: 'RE', name: 'Réunion', symbol: '€', currency: 'EUR' },
-  { code: 'RO', name: 'Romania', symbol: 'lei', currency: 'RON' },
-  { code: 'RU', name: 'Russia', symbol: '₽', currency: 'RUB' },
-  { code: 'RW', name: 'Rwanda', symbol: 'RF', currency: 'RWF' },
-  { code: 'WS', name: 'Samoa', symbol: 'WS$', currency: 'WST' },
-  { code: 'SM', name: 'San Marino', symbol: '€', currency: 'EUR' },
-  { code: 'ST', name: 'São Tomé and Príncipe', symbol: 'Db', currency: 'STN' },
-  { code: 'SA', name: 'Saudi Arabia', symbol: 'SAR', currency: 'SAR' },
-  { code: 'SN', name: 'Senegal', symbol: 'CFA', currency: 'XOF' },
-  { code: 'RS', name: 'Serbia', symbol: 'din', currency: 'RSD' },
-  { code: 'SC', name: 'Seychelles', symbol: 'SR', currency: 'SCR' },
-  { code: 'SL', name: 'Sierra Leone', symbol: 'Le', currency: 'SLE' },
-  { code: 'SG', name: 'Singapore', symbol: 'S$', currency: 'SGD' },
-  { code: 'SK', name: 'Slovakia', symbol: '€', currency: 'EUR' },
-  { code: 'SI', name: 'Slovenia', symbol: '€', currency: 'EUR' },
-  { code: 'SB', name: 'Solomon Islands', symbol: 'SI$', currency: 'SBD' },
-  { code: 'SO', name: 'Somalia', symbol: 'Sh', currency: 'SOS' },
-  { code: 'ZA', name: 'South Africa', symbol: 'R', currency: 'ZAR' },
-  { code: 'SS', name: 'South Sudan', symbol: 'SS£', currency: 'SSP' },
-  { code: 'ES', name: 'Spain', symbol: '€', currency: 'EUR' },
-  { code: 'LK', name: 'Sri Lanka', symbol: 'Rs', currency: 'LKR' },
-  { code: 'KN', name: 'Saint Kitts and Nevis', symbol: 'EC$', currency: 'XCD' },
-  { code: 'LC', name: 'Saint Lucia', symbol: 'EC$', currency: 'XCD' },
-  { code: 'VC', name: 'Saint Vincent and the Grenadines', symbol: 'EC$', currency: 'XCD' },
-  { code: 'SD', name: 'Sudan', symbol: 'SDG', currency: 'SDG' },
-  { code: 'SR', name: 'Suriname', symbol: 'Sr$', currency: 'SRD' },
-  { code: 'SE', name: 'Sweden', symbol: 'kr', currency: 'SEK' },
-  { code: 'CH', name: 'Switzerland', symbol: 'CHF', currency: 'CHF' },
-  { code: 'SY', name: 'Syria', symbol: 'SP', currency: 'SYP' },
-  { code: 'TW', name: 'Taiwan', symbol: 'NT$', currency: 'TWD' },
-  { code: 'TJ', name: 'Tajikistan', symbol: 'SM', currency: 'TJS' },
-  { code: 'TZ', name: 'Tanzania', symbol: 'TSh', currency: 'TZS' },
-  { code: 'TH', name: 'Thailand', symbol: '฿', currency: 'THB' },
-  { code: 'TL', name: 'Timor-Leste', symbol: '$', currency: 'USD' },
-  { code: 'TG', name: 'Togo', symbol: 'CFA', currency: 'XOF' },
-  { code: 'TO', name: 'Tonga', symbol: 'T$', currency: 'TOP' },
-  { code: 'TT', name: 'Trinidad and Tobago', symbol: 'TT$', currency: 'TTD' },
-  { code: 'TN', name: 'Tunisia', symbol: 'DT', currency: 'TND' },
-  { code: 'TR', name: 'Turkey', symbol: '₺', currency: 'TRY' },
-  { code: 'TM', name: 'Turkmenistan', symbol: 'T', currency: 'TMT' },
-  { code: 'TC', name: 'Turks and Caicos', symbol: '$', currency: 'USD' },
-  { code: 'TV', name: 'Tuvalu', symbol: 'A$', currency: 'AUD' },
-  { code: 'UG', name: 'Uganda', symbol: 'USh', currency: 'UGX' },
-  { code: 'UA', name: 'Ukraine', symbol: '₴', currency: 'UAH' },
-  { code: 'AE', name: 'United Arab Emirates', symbol: 'AED', currency: 'AED' },
-  { code: 'GB', name: 'United Kingdom', symbol: '£', currency: 'GBP' },
-  { code: 'US', name: 'United States', symbol: '$', currency: 'USD' },
-  { code: 'UY', name: 'Uruguay', symbol: '$U', currency: 'UYU' },
-  { code: 'UZ', name: 'Uzbekistan', symbol: 'sum', currency: 'UZS' },
-  { code: 'VU', name: 'Vanuatu', symbol: 'VT', currency: 'VUV' },
-  { code: 'VA', name: 'Vatican City', symbol: '€', currency: 'EUR' },
-  { code: 'VE', name: 'Venezuela', symbol: 'Bs', currency: 'VES' },
-  { code: 'VN', name: 'Vietnam', symbol: '₫', currency: 'VND' },
-  { code: 'VG', name: 'British Virgin Islands', symbol: '$', currency: 'USD' },
-  { code: 'VI', name: 'U.S. Virgin Islands', symbol: '$', currency: 'USD' },
-  { code: 'YE', name: 'Yemen', symbol: 'YR', currency: 'YER' },
-  { code: 'ZM', name: 'Zambia', symbol: 'ZK', currency: 'ZMW' },
-  { code: 'ZW', name: 'Zimbabwe', symbol: 'Z$', currency: 'ZWL' },
-].sort((a, b) => a.name.localeCompare(b.name));
+const TITLE = 'Card brands';
+const SUBTITLE = 'The gift-card brands users can sell, the countries each one is sold in, and their order in the app’s Sell tab.';
+const POLL_MS = 30000;
+const ID_PARAM = uuidParam('id');
+const CHECK_FAILED = 'The latest catalog could not be loaded, so nothing was changed. Try again.';
+const BAD_LINK = 'That brand link is not valid, so nothing was opened.';
+const GONE_LINK = 'That brand is not in the catalog, so nothing was opened.';
+const LOAD_FAILED = 'The card catalog could not be loaded';
 
-interface Country {
-  id: string;
-  country_code: string;
-  country_name: string;
-  currency_symbol: string;
-  is_active: boolean;
+const SKELETON_COLUMNS: ReadonlyArray<TableSkeletonColumn> = [
+  { width: 32 },
+  { width: 168, avatar: true },
+  { width: 156, lines: 2 },
+  { width: 88 },
+];
+
+const WRITE_SKELETON_COLUMNS: ReadonlyArray<TableSkeletonColumn> = [
+  { width: 84 },
+  ...SKELETON_COLUMNS.slice(1),
+  { width: 28, align: 'right', button: true },
+];
+
+type EditorTarget = { mode: 'create' } | { mode: 'edit'; id: string };
+
+type MoveSource = 'button' | 'menu';
+
+function count(value: number): string {
+  return value.toLocaleString('en-NG');
 }
 
-interface Card {
-  id: string;
-  name: string;
-  logo_url: string | null;
-  is_active: boolean;
-  sort_order: number;
-  countries: Country[];
-}
-
-function codeToFlag(code: string): string {
-  if (!code || code.length !== 2) return '';
-  return code.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0)));
-}
-
-function formatCountries(countries: Country[]) {
-  if (!countries || countries.length === 0) return '-';
-  const names = countries.map((c) => c.country_name);
-  if (names.length <= 2) return names.join(', ');
-  return names.slice(0, 2).join(', ') + '...';
-}
-
-function CardStatus({ active }: { active: boolean }) {
-  return <StatusDot status={active ? 'Active' : 'Inactive'} tone={active ? 'success' : 'neutral'} />;
-}
-
-function CardLogo({ card, size = 32 }: { card: Card; size?: number }) {
-  return card.logo_url
-    ? <img src={card.logo_url} alt={card.name} style={{ width: size, height: size, objectFit: 'contain', borderRadius: 4 }} />
-    : <div style={{ width: size, height: size, background: 'var(--bg-subtle)', borderRadius: 4, flex: 'none' }} />;
-}
-
-function CardsMobile({
-  cards, loading, onEdit, onCountries, onToggle,
-}: {
-  cards: Card[];
-  loading: boolean;
-  onEdit: (c: Card) => void;
-  onCountries: (c: Card) => void;
-  onToggle: (c: Card) => void;
-}) {
-  if (loading && cards.length === 0) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {[0, 1, 2, 3].map((k) => (
-          <div key={k} style={{ height: 96, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
-        ))}
-      </div>
-    );
-  }
-  if (cards.length === 0) {
-    return (
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
-        No card brands yet
-      </div>
-    );
-  }
+export default function CardsPage() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {cards.map((card) => (
-        <div key={card.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-              <CardLogo card={card} size={36} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>{card.name}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>
-                  {card.countries.length} {card.countries.length === 1 ? 'country' : 'countries'} · sort {card.sort_order}
-                </div>
-              </div>
-            </div>
-            <CardStatus active={card.is_active} />
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <Button variant="ghost" size="sm" onClick={() => onEdit(card)}>Edit</Button>
-            <Button variant="ghost" size="sm" onClick={() => onCountries(card)}>Countries</Button>
-            <Button variant="secondary" size="sm" onClick={() => onToggle(card)}>
-              {card.is_active ? 'Deactivate' : 'Activate'}
-            </Button>
-          </div>
-        </div>
-      ))}
+    <Suspense fallback={<CatalogFallback />}>
+      <CardCatalog />
+    </Suspense>
+  );
+}
+
+function CatalogFallback() {
+  const canWrite = useCan('catalog.write');
+  return (
+    <div>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <ResponsiveView
+        desktop={
+          <Card>
+            <CardBody flush>
+              <Table flush aria-label="Card brands">
+                <TBody>
+                  <TableSkeleton columns={canWrite ? WRITE_SKELETON_COLUMNS : SKELETON_COLUMNS} rows={8} />
+                </TBody>
+              </Table>
+            </CardBody>
+          </Card>
+        }
+        mobile={
+          <MobileDataList<CatalogCard>
+            ariaLabel="Card brands"
+            items={[]}
+            getKey={(card) => card.id}
+            renderRow={(card) => ({ primary: brandLabel(card) })}
+            loading
+            initialLoading
+            skeletonRows={8}
+          />
+        }
+      />
     </div>
   );
 }
 
-export default function CardsPage() {
-  const isMobile = useIsMobile();
-  const [cards, setCards] = useState<Card[]>([]);
-  const [loading, setLoading] = useState(true);
+function CardCatalog() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawId = searchParams.get('id');
+  const canWrite = useCan('catalog.write');
+  const [openId, setOpenId] = useUrlState(ID_PARAM);
+  const focusLater = useDeferredFocus();
 
-  const [showCardModal, setShowCardModal] = useState(false);
-  const [editCard, setEditCard] = useState<Card | null>(null);
-  const [cardName, setCardName] = useState('');
-  const [cardActive, setCardActive] = useState(true);
-  const [logoUrl, setLogoUrl] = useState('');
-  const [logoPreview, setLogoPreview] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [cardError, setCardError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editor, setEditor] = useState<EditorTarget | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [statusId, setStatusId] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [search, setSearch] = useState('');
+  const [announcement, setAnnouncement] = useState('');
+  const busyRef = useRef(false);
+  const listRegionRef = useRef<HTMLDivElement>(null);
+  const lastOpenRef = useRef<string | null>(openId);
 
-  const [countriesCard, setCountriesCard] = useState<Card | null>(null);
-  const [newCountryCode, setNewCountryCode] = useState('');
-  const [newCurrencySymbol, setNewCurrencySymbol] = useState('');
-  const [newCurrencyName, setNewCurrencyName] = useState('');
-  const [newCountryActive, setNewCountryActive] = useState(true);
-  const [addingCountry, setAddingCountry] = useState(false);
-  const addingCountryLockRef = useRef(false);
-  const [countryQuery, setCountryQuery] = useState('');
-  const [countryOpen, setCountryOpen] = useState(false);
-  const countryBoxRef = useRef<HTMLDivElement>(null);
+  const catalog = useResource(
+    'cards',
+    (signal) => apiRequest('/api/cards', { signal, select: toCatalog }),
+    { pollMs: savingId ? 0 : POLL_MS },
+  );
+  const { refresh: refreshCatalog, mutate: mutateCatalog } = catalog;
+
+  const cards = useMemo(() => catalog.data?.cards ?? [], [catalog.data]);
+  const loaded = catalog.data !== undefined;
+  const listError = catalog.error;
+  const blocked = !loaded && listError !== null;
+  const showSkeleton = !loaded && !blocked;
+  const denied = listError?.status === 403 && !loaded;
+  const total = cards.length;
+  const stats = useMemo(() => catalogStats(cards), [cards]);
+  const positions = useMemo(() => new Map(cards.map((card, index) => [card.id, index])), [cards]);
+  const filtering = search !== '';
+  const rows = useMemo(
+    () => (filtering ? cards.filter((card) => matchesSearch(card, search)) : cards),
+    [cards, filtering, search],
+  );
+  const shared = useMemo(() => hasSharedPositions(cards), [cards]);
+  const locked = savingId !== null || statusId !== null;
+  const canReorder = canWrite && !filtering && total > 1;
+  const openCard = openId ? cards.find((card) => card.id === openId) ?? null : null;
+  const editCard = editor?.mode === 'edit' ? cards.find((card) => card.id === editor.id) ?? null : null;
+  const columnCount = canWrite ? 5 : 4;
+  const tableBusy = loaded && catalog.isRefreshing;
+  const badLink = rawId !== null && rawId.trim() !== '' && !isUuid(rawId.trim());
 
   useEffect(() => {
-    if (!countryOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (countryBoxRef.current && !countryBoxRef.current.contains(e.target as Node)) {
-        setCountryOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [countryOpen]);
+    if (!badLink) return;
+    toast.show(BAD_LINK, 'warning');
+    setOpenId((value) => value);
+  }, [badLink, setOpenId, toast]);
 
-  useEffect(() => { fetchCards(); }, []);
+  useEffect(() => {
+    if (openId) lastOpenRef.current = openId;
+  }, [openId]);
 
-  const fetchCards = async (silent = false) => {
-    if (!silent) setLoading(true);
-    const res = await fetch('/api/cards');
-    const data = await res.json();
-    setCards(data.cards || []);
-    if (!silent) setLoading(false);
+  useEffect(() => {
+    const list = catalog.data?.cards;
+    if (!openId || !list || list.some((card) => card.id === openId)) return;
+    toast.show(GONE_LINK, 'warning');
+    setOpenId(null);
+  }, [openId, catalog.data, setOpenId, toast]);
+
+  const reload = useCallback(async (): Promise<Catalog | null> => {
+    const result = await refreshCatalog();
+    return result && result.ok ? result.data : null;
+  }, [refreshCatalog]);
+
+  const patchCards = useCallback((update: (list: CatalogCard[]) => CatalogCard[]) => {
+    mutateCatalog((previous) => (previous ? { cards: update(previous.cards) } : previous));
+  }, [mutateCatalog]);
+
+  const refreshQuietly = useCallback(() => {
+    void refreshCatalog({ background: true });
+  }, [refreshCatalog]);
+
+  const retry = useCallback(() => {
+    void refreshCatalog();
+  }, [refreshCatalog]);
+
+  const openBrand = useCallback((id: string) => setOpenId(id), [setOpenId]);
+
+  const closePanel = useCallback(() => setOpenId(null), [setOpenId]);
+
+  const panelReturn = useCallback(() => {
+    const id = lastOpenRef.current;
+    return (id ? visibleTarget(`[data-row-open="${id}"]`) : null) ?? listRegionRef.current;
+  }, []);
+
+  const applySearch = useCallback((value: string) => setSearch(value), []);
+
+  const clearSearch = useCallback(() => {
+    setSearchText('');
+    setSearch('');
+  }, []);
+
+  const openEditor = (target: EditorTarget) => {
+    if (!canWrite || busyRef.current) return;
+    setEditor(target);
   };
 
-  const openCreate = () => {
-    setEditCard(null);
-    setCardName(''); setCardActive(true); setLogoUrl(''); setLogoPreview(''); setCardError('');
-    setShowCardModal(true);
+  const handleCreated = (saved: SavedCard) => {
+    patchCards((list) => appendCard(list, saved));
+    setEditor(null);
+    setOpenId(saved.id);
+    refreshQuietly();
   };
 
-  const openEdit = (card: Card) => {
-    setEditCard(card);
-    setCardName(card.name); setCardActive(card.is_active);
-    setLogoUrl(card.logo_url || ''); setLogoPreview(card.logo_url || ''); setCardError('');
-    setShowCardModal(true);
+  const handleUpdated = (saved: SavedCard | null) => {
+    if (saved) patchCards((list) => mergeSavedCard(list, saved));
+    setEditor(null);
+    refreshQuietly();
   };
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch('/api/cards/upload', { method: 'POST', body: formData });
-    const data = await res.json();
-    setUploading(false);
-    if (data.url) { setLogoUrl(data.url); setLogoPreview(data.url); }
-  };
-
-  const handleSaveCard = async () => {
-    if (!cardName.trim()) { setCardError('Card name is required.'); return; }
-    setSaving(true);
-    setCardError('');
-    const method = editCard ? 'PATCH' : 'POST';
-    const body = editCard
-      ? { type: 'card', id: editCard.id, name: cardName, is_active: cardActive, logo_url: logoUrl || null }
-      : { type: 'card', name: cardName, is_active: cardActive, logo_url: logoUrl || null };
-    const res = await fetch('/api/cards', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const data = await res.json();
-    setSaving(false);
-    if (!res.ok) { setCardError(data.error || 'Failed to save.'); return; }
-    setShowCardModal(false);
-    fetchCards(true);
-  };
-
-  const handleToggleCard = async (card: Card) => {
-    await fetch('/api/cards', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'card', id: card.id, is_active: !card.is_active }),
-    });
-    fetchCards(true);
-  };
-
-  const openCountries = (card: Card) => {
-    setCountriesCard(card);
-    setNewCountryCode(''); setNewCurrencySymbol(''); setNewCurrencyName(''); setNewCountryActive(true);
-  };
-
-  const handleAddCountry = async () => {
-    if (!newCountryCode || !newCurrencySymbol || !newCurrencyName) return;
-    if (addingCountryLockRef.current) return;
-    addingCountryLockRef.current = true;
-    setAddingCountry(true);
+  const move = async (card: CatalogCard, target: MoveTarget, source: MoveSource) => {
+    const before = catalog.data;
+    if (!canReorder || busyRef.current || !before) return;
+    const ids = before.cards.map((entry) => entry.id);
+    const next = moveId(ids, card.id, target);
+    if (!next) return;
+    busyRef.current = true;
+    const label = brandLabel(card);
+    const from = ids.indexOf(card.id) + 1;
+    const to = next.indexOf(card.id) + 1;
+    const selector = source === 'menu'
+      ? `[data-row-menu="${card.id}"]`
+      : `[data-move="${card.id}"][data-move-dir="${target}"]`;
+    const keepFocus = () => focusLater(() => visibleTarget(selector));
+    setSavingId(card.id);
+    patchCards((list) => renumberCards(list, next));
+    setAnnouncement(`${label} moved to position ${to} of ${next.length}.`);
+    keepFocus();
     try {
-      const countryName = ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || newCountryCode;
-      await fetch('/api/cards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'country',
-          card_id: countriesCard!.id,
-          country_code: newCountryCode,
-          country_name: countryName,
-          currency_symbol: newCurrencySymbol,
-          is_active: newCountryActive,
-        }),
-      });
-      setNewCountryCode(''); setNewCurrencySymbol(''); setNewCurrencyName('');
-      await fetchCards(true);
-      setCountriesCard((prev) => {
-        const updated = cards.find((c) => c.id === prev?.id);
-        return updated || prev;
-      });
+      const outcome = classifyMutation(await apiRequest('/api/cards', {
+        method: 'PATCH',
+        body: { type: 'reorder', ids: next, moved: card.id },
+        select: toReceipt,
+      }));
+      switch (outcome.kind) {
+        case 'done':
+          toast.show('Order saved. Users see the new order once their app refreshes its brand list.', 'success');
+          if (outcome.data.warning) toast.show(outcome.data.warning, 'warning');
+          refreshQuietly();
+          return;
+        case 'unknown':
+          setAnnouncement('');
+          toast.show(outcome.message, 'error');
+          void refreshCatalog();
+          return;
+        case 'expired':
+          mutateCatalog(before);
+          setAnnouncement('');
+          return;
+        case 'refused':
+        case 'retry':
+          mutateCatalog(before);
+          setAnnouncement('');
+          toast.show(
+            outcome.kind === 'refused' && outcome.status === 409
+              ? `The brand list changed since it was loaded, so the new order was not saved. The latest list is shown now; move ${label} again if it is still needed.`
+              : `The new order was not saved, so ${label} is back in position ${from}. ${outcome.message}`,
+            'error',
+          );
+          if (outcome.kind === 'refused' && outcome.status === 403) router.refresh();
+          void refreshCatalog();
+      }
     } finally {
-      setAddingCountry(false);
-      addingCountryLockRef.current = false;
+      busyRef.current = false;
+      setSavingId(null);
+      keepFocus();
     }
   };
 
-  const handleToggleCountry = async (country: Country) => {
-    await fetch('/api/cards', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'country', id: country.id, is_active: !country.is_active }),
-    });
-    fetchCards(true);
-  };
-
-  const handleRemoveCountry = async (country: Country) => {
-    await fetch('/api/cards', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'country', id: country.id }),
-    });
-    fetchCards(true);
-  };
-
-  useEffect(() => {
-    if (countriesCard) {
-      const updated = cards.find((c) => c.id === countriesCard.id);
-      if (updated) setCountriesCard(updated);
+  const reportStatus = (outcome: MutationOutcome<CardReceipt>, live: CatalogCard, next: boolean) => {
+    const label = brandLabel(live);
+    switch (outcome.kind) {
+      case 'done': {
+        const saved = outcome.data.card;
+        patchCards((list) => (
+          saved
+            ? mergeSavedCard(list, saved)
+            : list.map((entry) => (entry.id === live.id ? { ...entry, is_active: next } : entry))
+        ));
+        const sellable = availableCountries(live) > 0
+          ? 'Users can sell it once their app refreshes its brand list.'
+          : 'Make a country available so users can sell it.';
+        toast.show(
+          next ? `${label} is active. ${sellable}` : `${label} is inactive. Users stop seeing it once their app refreshes its brand list.`,
+          'success',
+        );
+        if (outcome.data.warning) toast.show(outcome.data.warning, 'warning');
+        refreshQuietly();
+        return;
+      }
+      case 'expired':
+        return;
+      case 'unknown':
+        toast.show(outcome.message, 'error');
+        refreshQuietly();
+        return;
+      case 'refused':
+      case 'retry':
+        toast.show(`${label} was not changed. ${outcome.message}`, 'error');
+        if (outcome.kind === 'refused' && outcome.status === 403) router.refresh();
+        refreshQuietly();
     }
-  }, [cards]);
+  };
 
-  const activeCount = cards.filter((c) => c.is_active).length;
-  const filteredCountries = ISO_COUNTRIES.filter((c) =>
-    c.name.toLowerCase().includes(countryQuery.toLowerCase()) ||
-    c.code.toLowerCase().includes(countryQuery.toLowerCase()) ||
-    c.currency.toLowerCase().includes(countryQuery.toLowerCase())
+  const changeStatus = async (card: CatalogCard, next: boolean) => {
+    if (!canWrite || busyRef.current) return;
+    busyRef.current = true;
+    setStatusId(card.id);
+    let sent = false;
+    try {
+      const fresh = await reload();
+      if (!fresh) {
+        toast.show(CHECK_FAILED, 'error');
+        return;
+      }
+      const live = fresh.cards.find((entry) => entry.id === card.id);
+      if (!live) {
+        toast.show(`${brandLabel(card)} is no longer in the catalog, so nothing was changed.`, 'warning');
+        return;
+      }
+      const label = brandLabel(live);
+      if (live.is_active === next) {
+        toast.show(`${label} is already ${statusText(next).toLowerCase()}, so nothing needed to change.`);
+        return;
+      }
+      const decision = await confirm<MutationOutcome<CardReceipt>>({
+        tone: next ? 'default' : 'danger',
+        title: next ? `Activate ${label}?` : `Deactivate ${label}?`,
+        message: next
+          ? 'This shows the brand to users in the Sell tab and the rate calculator.'
+          : 'This hides the brand from users in the Sell tab and the rate calculator.',
+        details: [
+          { label: 'Brand', value: label },
+          { label: 'Status', value: <ValueDiff before={statusText(live.is_active)} after={statusText(next)} /> },
+          { label: 'Available countries', value: `${availableCountries(live)} of ${live.countries.length}`, mono: true },
+          { label: 'Position', value: positionText(fresh.cards.indexOf(live), fresh.cards.length), mono: true },
+        ],
+        consequences: statusConsequences(live, next),
+        confirmLabel: next ? 'Activate brand' : 'Deactivate brand',
+        pendingLabel: next ? 'Activating…' : 'Deactivating…',
+        action: async () => {
+          sent = true;
+          const outcome = classifyMutation(await apiRequest('/api/cards', {
+            method: 'PATCH',
+            body: { type: 'card', id: live.id, is_active: next },
+            select: toCardReceipt,
+          }));
+          if (outcome.kind === 'retry') throw new Error(outcome.message);
+          return outcome;
+        },
+        returnFocusTo: () => visibleTarget(`[data-row-menu="${card.id}"]`) ?? listRegionRef.current,
+      });
+      if (decision?.value) {
+        reportStatus(decision.value, live, next);
+        return;
+      }
+      if (sent) refreshQuietly();
+    } finally {
+      busyRef.current = false;
+      setStatusId(null);
+    }
+  };
+
+  if (denied) {
+    return (
+      <div>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <AccessDenied required={['catalog.read']} />
+      </div>
+    );
+  }
+
+  const createButton = (
+    <Button
+      variant="primary"
+      size="sm"
+      leftIcon={<Plus size={14} aria-hidden />}
+      disabled={!loaded}
+      onClick={() => openEditor({ mode: 'create' })}
+    >
+      Add brand
+    </Button>
+  );
+
+  const emptyTitle = filtering ? `No brands match “${search}”` : 'No card brands yet';
+  const emptyHint = filtering
+    ? 'Search by brand name, or by a country’s name or code.'
+    : canWrite
+      ? 'Add the first brand users can sell.'
+      : 'Brands appear here once an admin adds them.';
+  const emptyAction = filtering
+    ? <Button variant="secondary" size="sm" onClick={clearSearch}>Clear search</Button>
+    : canWrite
+      ? createButton
+      : undefined;
+
+  const statItems: StatItem[] = [
+    { label: 'Brands', value: count(stats.total), loading: showSkeleton, unavailable: blocked },
+    { label: 'Active', value: count(stats.active), loading: showSkeleton, unavailable: blocked },
+    { label: 'Inactive', value: count(stats.inactive), loading: showSkeleton, unavailable: blocked },
+    {
+      label: 'Active without a country',
+      value: count(stats.needsCountry),
+      hint: stats.needsCountry > 0 ? 'Shown to users but cannot be sold' : undefined,
+      tone: stats.needsCountry > 0 ? 'warning' : 'neutral',
+      loading: showSkeleton,
+      unavailable: blocked,
+    },
+  ];
+
+  const moveControls = (card: CatalogCard, index: number, compact: boolean) => (
+    <MoveControls
+      card={card}
+      index={index}
+      total={total}
+      saving={savingId === card.id}
+      locked={locked}
+      showPosition={!compact}
+      onMove={(target) => void move(card, target, 'button')}
+    />
+  );
+
+  const rowMenu = (card: CatalogCard, index: number) => (
+    <BrandMenu
+      card={card}
+      index={index}
+      total={total}
+      locked={locked}
+      canReorder={canReorder}
+      onEdit={() => openEditor({ mode: 'edit', id: card.id })}
+      onCountries={() => openBrand(card.id)}
+      onMove={(target) => void move(card, target, 'menu')}
+      onStatus={(next) => void changeStatus(card, next)}
+    />
+  );
+
+  const desktopList = (
+    <Card>
+      <CardBody flush>
+        <Table flush aria-label="Card brands" busy={tableBusy}>
+          <THead>
+            <Tr>
+              <Th>Position</Th>
+              <Th>Brand</Th>
+              <Th>Countries</Th>
+              <Th>Status</Th>
+              {canWrite ? <Th align="right"><span className={s.srOnly}>Actions</span></Th> : null}
+            </Tr>
+          </THead>
+          <TBody>
+            {blocked && listError ? (
+              <TableState colSpan={columnCount}>
+                <ErrorState
+                  compact
+                  title={LOAD_FAILED}
+                  message={listError.message}
+                  requestId={listError.requestId}
+                  onRetry={retry}
+                  retrying={catalog.isInitialLoading || catalog.isRefreshing}
+                />
+              </TableState>
+            ) : showSkeleton ? (
+              <TableSkeleton columns={canWrite ? WRITE_SKELETON_COLUMNS : SKELETON_COLUMNS} rows={8} />
+            ) : rows.length === 0 ? (
+              <TableEmpty colSpan={columnCount} title={emptyTitle} hint={emptyHint} actions={emptyAction} />
+            ) : (
+              rows.map((card) => {
+                const index = positions.get(card.id) ?? 0;
+                return (
+                  <Tr key={card.id} selected={card.id === openId} onActivate={() => openBrand(card.id)}>
+                    <Td>
+                      {canReorder ? moveControls(card, index, false) : <span className={s.position}>{index + 1}</span>}
+                    </Td>
+                    <Td>
+                      <div className={s.brandCell}>
+                        <BrandMark src={card.logo_url} name={card.name} />
+                        <RowOpen onClick={() => openBrand(card.id)} aria-haspopup="dialog" data-row-open={card.id}>
+                          {brandLabel(card)}
+                        </RowOpen>
+                      </div>
+                    </Td>
+                    <Td>
+                      <CountryCell card={card} />
+                    </Td>
+                    <Td>
+                      <BrandStatus card={card} />
+                    </Td>
+                    {canWrite ? <Td align="right">{rowMenu(card, index)}</Td> : null}
+                  </Tr>
+                );
+              })
+            )}
+          </TBody>
+        </Table>
+      </CardBody>
+    </Card>
+  );
+
+  const mobileList = (
+    <MobileDataList<CatalogCard>
+      ariaLabel="Card brands"
+      items={rows}
+      getKey={(card) => card.id}
+      loading={showSkeleton || catalog.isRefreshing}
+      initialLoading={showSkeleton}
+      busy={tableBusy}
+      error={blocked && listError ? listError.message : null}
+      errorTitle={LOAD_FAILED}
+      onRetry={retry}
+      skeletonRows={8}
+      empty={{ title: emptyTitle, hint: emptyHint, actions: emptyAction }}
+      renderRow={(card) => {
+        const index = positions.get(card.id) ?? 0;
+        return {
+          leading: <BrandMark src={card.logo_url} name={card.name} />,
+          primary: brandLabel(card),
+          secondary: countryText(card),
+          status: <BrandStatus card={card} />,
+          meta: `Position ${positionText(index, total)}`,
+          onClick: () => openBrand(card.id),
+          actions: canWrite ? (
+            <>
+              {canReorder ? moveControls(card, index, true) : null}
+              {rowMenu(card, index)}
+            </>
+          ) : undefined,
+        };
+      }}
+    />
   );
 
   return (
     <div>
-      <PageHeader
-        title="Card & Country Management"
-        subtitle="Configure gift-card brands and the countries each one is available in."
-        actions={
-          <Button variant="primary" size="sm" leftIcon={<Plus size={14} />} onClick={openCreate}>
-            Add Card Brand
-          </Button>
-        }
-      />
+      <PageHeader title={TITLE} subtitle={SUBTITLE} actions={canWrite ? createButton : undefined} />
 
-      <StatStrip items={[
-        { label: 'Total brands', value: cards.length.toLocaleString() },
-        { label: 'Active', value: activeCount.toLocaleString() },
-      ]} />
+      {listError && loaded ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          meta={
+            catalog.lastUpdatedAt
+              ? `Showing the catalog from ${formatBusinessTime(new Date(catalog.lastUpdatedAt))} ${BUSINESS_TZ_LABEL}.`
+              : undefined
+          }
+          actions={<Button variant="ghost" size="sm" onClick={retry}>Try again</Button>}
+        >
+          The catalog could not be refreshed. {listError.message}
+        </Notice>
+      ) : null}
 
-      {isMobile ? (
-        <CardsMobile
-          cards={cards}
-          loading={loading}
-          onEdit={openEdit}
-          onCountries={openCountries}
-          onToggle={handleToggleCard}
+      <StatStrip aria-label="Catalog summary" items={statItems} />
+
+      {loaded && shared && canReorder ? (
+        <Notice tone="info" compact>
+          Some brands share a position, so the app can list them in either order. Moving any brand saves a clean order
+          for every brand.
+        </Notice>
+      ) : null}
+
+      {loaded && total > 0 ? (
+        <FilterBar
+          aria-label="Find a brand"
+          search={
+            <SearchInput
+              aria-label="Search brands"
+              placeholder="Brand, country or country code"
+              value={searchText}
+              onChange={setSearchText}
+              onDebouncedChange={applySearch}
+            />
+          }
+          onClear={clearSearch}
+          active={searchText.trim() !== ''}
         />
-      ) : (
-        <UICard>
-          <CardBody flush>
-            <Table flush>
-              <THead>
-                <Tr>
-                  <Th>Logo</Th>
-                  <Th>Card Name</Th>
-                  <Th>Countries</Th>
-                  <Th>Status</Th>
-                  <Th align="right">Sort Order</Th>
-                  <Th align="right">Actions</Th>
-                </Tr>
-              </THead>
-              <TBody>
-                {loading ? (
-                  <TableSkeleton colSpan={6} />
-                ) : cards.length === 0 ? (
-                  <TableEmpty colSpan={6}>No card brands yet</TableEmpty>
-                ) : cards.map((card) => (
-                  <Tr key={card.id}>
-                    <Td><CardLogo card={card} /></Td>
-                    <Td emphasis="primary">{card.name}</Td>
-                    <Td emphasis="secondary">{card.countries.length} ({formatCountries(card.countries)})</Td>
-                    <Td><CardStatus active={card.is_active} /></Td>
-                    <Td align="right" mono>{card.sort_order}</Td>
-                    <Td align="right">
-                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(card)}>Edit</Button>
-                        <Button variant="ghost" size="sm" onClick={() => openCountries(card)}>Countries</Button>
-                        <Button variant="secondary" size="sm" onClick={() => handleToggleCard(card)}>
-                          {card.is_active ? 'Deactivate' : 'Activate'}
-                        </Button>
-                        <span style={{ fontSize: 16, color: 'var(--fg-tertiary)', cursor: 'grab', userSelect: 'none' }}>⠿</span>
-                      </div>
-                    </Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-          </CardBody>
-        </UICard>
-      )}
+      ) : null}
 
-      <Modal
-        open={showCardModal}
-        onClose={() => setShowCardModal(false)}
-        title={editCard ? 'Edit Card Brand' : 'Add Card Brand'}
-        footer={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => setShowCardModal(false)}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={handleSaveCard} loading={saving}>Save</Button>
-          </>
-        }
-      >
-        <FieldShell label="Card name">
-          <Input value={cardName} onChange={(e) => setCardName(e.target.value)} />
-        </FieldShell>
+      {filtering && canWrite && total > 1 ? (
+        <p className={s.hint}>
+          {`Showing ${plural(rows.length, 'matching brand', 'matching brands')}. Clear the search to change the order.`}
+        </p>
+      ) : null}
 
-        <FieldShell label="Logo">
-          <div
-            style={{ width: 100, height: 100, border: '2px dashed var(--border-default)', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: 6 }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {logoPreview ? (
-              <img src={logoPreview} alt="Logo preview" style={{ width: 96, height: 96, objectFit: 'contain', borderRadius: 6 }} />
-            ) : (
-              <>
-                <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1={12} y1={3} x2={12} y2={15} />
-                </svg>
-                <span style={{ fontSize: 11, color: 'var(--fg-tertiary)' }}>{uploading ? 'Uploading...' : 'Upload Logo'}</span>
-              </>
-            )}
-          </div>
-          <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} />
-        </FieldShell>
+      <div ref={listRegionRef} className={s.listRegion} tabIndex={-1} role="region" aria-label="Brands">
+        <ResponsiveView desktop={desktopList} mobile={mobileList} />
+      </div>
 
-        <FieldShell label="Active">
-          <Toggle checked={cardActive} onChange={setCardActive} />
-        </FieldShell>
+      <p className={s.srOnly} role="status">{announcement}</p>
 
-        {cardError && <p style={{ fontSize: 12, color: 'var(--tone-danger-fg)', margin: '8px 0 0' }}>{cardError}</p>}
-      </Modal>
+      {openCard ? (
+        <BrandPanel
+          key={openCard.id}
+          card={openCard}
+          index={positions.get(openCard.id) ?? 0}
+          total={total}
+          canWrite={canWrite}
+          reload={reload}
+          patchCards={patchCards}
+          refreshQuietly={refreshQuietly}
+          onEdit={() => openEditor({ mode: 'edit', id: openCard.id })}
+          onClose={closePanel}
+          returnFocusTo={panelReturn}
+        />
+      ) : null}
 
-      <SidePanel
-        open={!!countriesCard}
-        onClose={() => setCountriesCard(null)}
-        title={countriesCard ? `${countriesCard.name} — Countries` : 'Countries'}
-      >
-        {countriesCard && (
-          <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
-              {countriesCard.countries.length === 0 && (
-                <p style={{ fontSize: 12, color: 'var(--fg-tertiary)' }}>No countries added yet.</p>
-              )}
-              {countriesCard.countries.map((country) => (
-                <div key={country.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>{codeToFlag(country.country_code)}  {country.country_name}</span>
-                    <span style={{ fontSize: 12, color: 'var(--fg-tertiary)' }}> ({country.currency_symbol})</span>
-                  </div>
-                  <Toggle checked={country.is_active} onChange={() => handleToggleCountry(country)} />
-                  <Button variant="dangerSubtle" size="sm" onClick={() => handleRemoveCountry(country)}>Remove</Button>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--fg-tertiary)', margin: '16px 0 10px' }}>+ Add Country</div>
-
-            <FieldShell label="Country">
-              <div ref={countryBoxRef} style={{ position: 'relative' }}>
-                <Input
-                  placeholder="Search country"
-                  value={countryOpen ? countryQuery : (newCountryCode ? `${codeToFlag(newCountryCode)}  ${ISO_COUNTRIES.find((c) => c.code === newCountryCode)?.name || ''}` : '')}
-                  onFocus={() => { setCountryOpen(true); setCountryQuery(''); }}
-                  onChange={(e) => { setCountryQuery(e.target.value); setCountryOpen(true); }}
-                />
-                {countryOpen && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
-                    {filteredCountries.map((c) => (
-                      <div
-                        key={c.code}
-                        style={{ padding: '10px 12px', fontSize: 13, color: 'var(--fg-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setNewCountryCode(c.code);
-                          setNewCurrencySymbol(c.symbol);
-                          setNewCurrencyName(c.currency);
-                          setCountryOpen(false);
-                          setCountryQuery('');
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>{codeToFlag(c.code)}  {c.name}</span>
-                        <span style={{ color: 'var(--fg-tertiary)', fontSize: 11, marginLeft: 6 }}>{c.currency} {c.symbol}</span>
-                      </div>
-                    ))}
-                    {filteredCountries.length === 0 && (
-                      <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--fg-tertiary)' }}>No matches</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </FieldShell>
-
-            <FieldShell label="Currency symbol">
-              <Input maxLength={5} placeholder="e.g. $" value={newCurrencySymbol} onChange={(e) => setNewCurrencySymbol(e.target.value)} />
-            </FieldShell>
-
-            <FieldShell label="Currency name">
-              <Input placeholder="e.g. USD" value={newCurrencyName} onChange={(e) => setNewCurrencyName(e.target.value)} />
-            </FieldShell>
-
-            <FieldShell label="Active">
-              <Toggle checked={newCountryActive} onChange={setNewCountryActive} />
-            </FieldShell>
-
-            <Button
-              variant="primary"
-              size="sm"
-              style={{ width: '100%', marginTop: 8 }}
-              onClick={handleAddCountry}
-              loading={addingCountry}
-              disabled={!newCountryCode || !newCurrencySymbol || !newCurrencyName || addingCountry}
-            >
-              Add Country
-            </Button>
-          </>
-        )}
-      </SidePanel>
+      {canWrite && editor && (editor.mode === 'create' || editCard) ? (
+        <BrandEditor
+          key={editor.mode === 'edit' ? `edit-${editor.id}` : 'create'}
+          card={editor.mode === 'edit' ? editCard : null}
+          cards={cards}
+          reload={reload}
+          onCreated={handleCreated}
+          onUpdated={handleUpdated}
+          onStale={refreshQuietly}
+          onClose={() => setEditor(null)}
+        />
+      ) : null}
     </div>
   );
 }

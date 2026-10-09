@@ -1,31 +1,49 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { requireAdmin } from '../../../lib/guard';
+import { fail, ok } from '../../../lib/api';
+import { READ_PERMISSION, readAudienceParam } from '../../../(dashboard)/notifications-broadcast/broadcastRules';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
-}
+const COUNT_FAILED = 'The recipients could not be counted. Try again.';
 
 export async function GET(req: NextRequest) {
-  const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('notifications_broadcast')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin(READ_PERMISSION);
+  if (!guard.ok) return guard.response;
 
-  const audience = new URL(req.url).searchParams.get('audience') || 'all';
-  if (audience === 'specific') return NextResponse.json({ count: 1 });
+  const parsed = readAudienceParam(new URL(req.url).searchParams.get('audience'));
+  if (!parsed.ok) return fail('VALIDATION_ERROR', parsed.message);
+  const audience = parsed.value;
 
-  const { data, error } = await supabaseAdmin.rpc('resolve_broadcast_audience', { p_audience: audience });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  let count = (data || []).length;
+  if (audience === 'specific') {
+    return ok({ count: 1, audience, accounts: 1, anonymous_devices: 0 });
+  }
 
+  const accounts = await supabaseAdmin.rpc('resolve_broadcast_audience', { p_audience: audience }, { count: 'exact' });
+  if (accounts.error) {
+    console.error('broadcast recipient count:', accounts.error.message);
+    return fail('INTERNAL_ERROR', COUNT_FAILED);
+  }
+  const accountCount = typeof accounts.count === 'number'
+    ? accounts.count
+    : Array.isArray(accounts.data) ? accounts.data.length : 0;
+
+  let anonymousCount = 0;
   if (audience === 'all_anon') {
-    const { count: anonCount } = await supabaseAdmin
+    const anonymous = await supabaseAdmin
       .from('user_push_tokens')
       .select('token', { count: 'exact', head: true })
       .is('user_id', null);
-    count += anonCount || 0;
+    if (anonymous.error) {
+      console.error('broadcast app-only device count:', anonymous.error.message);
+      return fail('INTERNAL_ERROR', COUNT_FAILED);
+    }
+    anonymousCount = anonymous.count ?? 0;
   }
 
-  return NextResponse.json({ count });
+  return ok({
+    count: accountCount + anonymousCount,
+    audience,
+    accounts: accountCount,
+    anonymous_devices: anonymousCount,
+  });
 }

@@ -1,0 +1,81 @@
+.hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-secondary);
+}
+
+.filterSelect {
+  flex: 1 1 10rem;
+  min-width: 9rem;
+  max-width: 12rem;
+}
+
+.listTop {
+  min-width: 0;
+  scroll-margin-top: var(--space-20);
+}
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 17rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stack .nameMissing {
+  font-weight: var(--weight-medium);
+  color: var(--fg-tertiary);
+}
+
+.stack .nameMissing:hover {
+  color: var(--fg-secondary);
+}
+
+.lead {
+  max-width: 16rem;
+  color: var(--fg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sub,
+.subMono {
+  max-width: 16rem;
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subMono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.time {
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--fg-tertiary);
+}
+
+@media (max-width: 768px) {
+  .filterSelect {
+    max-width: none;
+  }
+}

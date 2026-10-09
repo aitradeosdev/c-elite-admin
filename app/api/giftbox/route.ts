@@ -1,130 +1,191 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
+import { after, type NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { redactAudit } from '../../lib/redact';
+import { requireAdmin } from '../../lib/guard';
+import { writeAudit, type AuditInput } from '../../lib/audit';
+import { fail, ok } from '../../lib/api';
 import { bustPromoCache } from '../../lib/promoCacheBust';
+import {
+  giftboxConflicts, giftboxValues, planGiftboxUpdate, readGiftboxCreate, readGiftboxPatch, readReason, readRules,
+  sameRules, type Rule, type StoredGiftbox,
+} from '../../(dashboard)/bonuses-rewards/rewardRules';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
+const TABLE = 'giftbox_items';
+const COUNT_BATCH = 10;
+const GUARDED_TEXT_FIELDS = ['title', 'description', 'expiry_date', 'eligibility_condition'] as const;
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const CHANGED_ELSEWHERE =
+  'Another admin changed this gift box after you opened it, so nothing was saved. Review the latest values and try again.';
+
+type ItemRead = { ok: true; row: StoredGiftbox | null } | { ok: false };
+
+async function readBody(req: NextRequest): Promise<unknown> {
+  return req.json().catch(() => null);
 }
 
-export async function GET(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+function auditFields(recorded: boolean) {
+  return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
+}
 
-  const { data: items, error } = await supabaseAdmin
-    .from('giftbox_items')
+function publicGiftbox(row: StoredGiftbox, claims: number | null) {
+  return { ...row, claims: claims ?? 0, claims_counted: claims !== null };
+}
+
+async function countClaims(id: string): Promise<number | null> {
+  const { count, error } = await supabaseAdmin
+    .from('giftbox_claims')
+    .select('id', { count: 'exact', head: true })
+    .eq('item_id', id);
+  if (error) {
+    console.error('giftbox claim count:', id, error.message);
+    return null;
+  }
+  return count ?? 0;
+}
+
+async function countAll(ids: readonly string[]): Promise<Map<string, number | null>> {
+  const counts = new Map<string, number | null>();
+  for (let start = 0; start < ids.length; start += COUNT_BATCH) {
+    const batch = ids.slice(start, start + COUNT_BATCH);
+    const results = await Promise.all(batch.map((id) => countClaims(id)));
+    batch.forEach((id, index) => counts.set(id, results[index]));
+  }
+  return counts;
+}
+
+async function readItem(id: string): Promise<ItemRead> {
+  const { data, error } = await supabaseAdmin.from(TABLE).select('*').eq('id', id).maybeSingle<StoredGiftbox>();
+  if (error) {
+    console.error('giftbox read:', id, error.message);
+    return { ok: false };
+  }
+  return { ok: true, row: data ?? null };
+}
+
+export async function GET() {
+  const guard = await requireAdmin('rewards.read');
+  if (!guard.ok) return guard.response;
+
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
     .select('*')
     .order('created_at', { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const ids = (items || []).map((i) => i.id);
-  const claimCounts: Record<string, number> = {};
-  if (ids.length > 0) {
-    const { data: claims } = await supabaseAdmin
-      .from('giftbox_claims').select('item_id').in('item_id', ids);
-    (claims || []).forEach((c) => {
-      claimCounts[c.item_id] = (claimCounts[c.item_id] || 0) + 1;
-    });
+  if (error) {
+    console.error('giftbox list:', error.message);
+    return fail('INTERNAL_ERROR', 'The gift boxes could not be loaded. Try again.');
   }
 
-  const withCounts = (items || []).map((i) => ({ ...i, claims: claimCounts[i.id] || 0 }));
-  return NextResponse.json({ items: withCounts });
+  const rows = (data ?? []) as StoredGiftbox[];
+  const counts = await countAll(rows.map((row) => row.id));
+  return ok({ items: rows.map((row) => publicGiftbox(row, counts.get(row.id) ?? null)) });
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin('rewards.write');
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const body = await req.json();
-  const { title, description, reward_naira, expiry_date, eligibility_condition, eligibility_rules, is_active } = body;
+  const body = await readBody(req);
+  const checked = readGiftboxCreate(body);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  const reason = readReason(body && typeof body === 'object' ? (body as Record<string, unknown>).reason : undefined);
+  if (!reason.ok) return fail('VALIDATION_ERROR', reason.message);
+  const input = checked.value;
 
-  if (!title || reward_naira === undefined || reward_naira === null) {
-    return NextResponse.json({ error: 'Missing title or reward' }, { status: 400 });
+  const audit: AuditInput = {
+    admin,
+    action: 'CREATE_GIFTBOX_ITEM',
+    entity: TABLE,
+    after: input,
+    reason: reason.value,
+    sensitivity: 'financial',
+  };
+
+  const { data, error } = await supabaseAdmin.from(TABLE).insert(input).select('*').single<StoredGiftbox>();
+  if (error || !data) {
+    const message = error?.message ?? 'No row was returned.';
+    console.error('giftbox create:', message);
+    await writeAudit({ ...audit, result: 'failure', error: message });
+    return fail('INTERNAL_ERROR', 'The gift box could not be created. Try again.');
   }
-  if (String(title).length > 120) return NextResponse.json({ error: 'Title too long' }, { status: 400 });
-  if (description != null && String(description).length > 1000) return NextResponse.json({ error: 'Description too long' }, { status: 400 });
-  if (eligibility_condition != null && String(eligibility_condition).length > 200) return NextResponse.json({ error: 'Condition too long' }, { status: 400 });
-  const rewardVal = Number(reward_naira);
-  if (!Number.isFinite(rewardVal) || rewardVal < 0 || rewardVal > 1e8) {
-    return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
-  }
 
-  const { data, error } = await supabaseAdmin
-    .from('giftbox_items')
-    .insert({
-      title,
-      description: description || null,
-      reward_naira: rewardVal,
-      expiry_date: expiry_date || null,
-      eligibility_condition: eligibility_condition || null,
-      eligibility_rules: Array.isArray(eligibility_rules) ? eligibility_rules : [],
-      is_active: is_active ?? true,
-    })
-    .select('id').single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id, action: 'CREATE_GIFTBOX_ITEM', entity: 'giftbox_items',
-    entity_id: data.id, after_value: redactAudit(body),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-
-  bustPromoCache();
-  return NextResponse.json({ success: true, id: data.id });
+  const recorded = await writeAudit({ ...audit, entity_id: data.id, after: giftboxValues(data), result: 'success' });
+  after(() => bustPromoCache());
+  return ok({ id: data.id, item: publicGiftbox(data, 0), ...auditFields(recorded.ok) });
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin && !admin.page_permissions.includes('bonuses_rewards')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdmin('rewards.write');
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const body = await req.json();
-  const { id } = body;
-  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+  const checked = readGiftboxPatch(await readBody(req));
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  const patch = checked.value;
 
-  const updates: any = {};
-  if (body.title !== undefined) {
-    const t = String(body.title);
-    if (t.length > 120) return NextResponse.json({ error: 'Title too long' }, { status: 400 });
-    updates.title = t;
+  const read = await readItem(patch.id);
+  if (!read.ok) return fail('INTERNAL_ERROR', 'The gift box could not be read, so nothing was saved. Try again.');
+  if (!read.row) return fail('RESOURCE_NOT_FOUND', 'That gift box no longer exists.');
+  const live = read.row;
+
+  if (patch.expected) {
+    const conflicts = giftboxConflicts(patch.expected, live);
+    if (conflicts.length > 0) {
+      return fail('STATE_CONFLICT', CHANGED_ELSEWHERE, { details: { item: publicGiftbox(live, null), fields: conflicts } });
+    }
   }
-  if (body.description !== undefined) {
-    if (body.description != null && String(body.description).length > 1000) return NextResponse.json({ error: 'Description too long' }, { status: 400 });
-    updates.description = body.description || null;
+
+  let rules: Rule[] | undefined;
+  if (patch.rules !== undefined && !sameRules(patch.rules, live.eligibility_rules)) {
+    const checkedRules = readRules(patch.rules);
+    if (!checkedRules.ok) return fail('VALIDATION_ERROR', checkedRules.message);
+    rules = checkedRules.value;
   }
-  if (body.reward_naira !== undefined) {
-    const n = Number(body.reward_naira);
-    if (!Number.isFinite(n) || n < 0 || n > 1e8) return NextResponse.json({ error: 'Invalid reward_naira' }, { status: 400 });
-    updates.reward_naira = n;
+
+  const plan = planGiftboxUpdate(patch.fields, rules, live);
+  if (plan.problem) return fail('VALIDATION_ERROR', plan.problem);
+  if (plan.changed.length === 0) return ok({ changed: false, item: publicGiftbox(live, null) });
+
+  const audit: AuditInput = {
+    admin,
+    action: 'UPDATE_GIFTBOX_ITEM',
+    entity: TABLE,
+    entity_id: patch.id,
+    before: { title: live.title, ...plan.before },
+    after: plan.update,
+    reason: patch.reason,
+    sensitivity: plan.financial ? 'financial' : 'normal',
+  };
+
+  let query = supabaseAdmin.from(TABLE).update(plan.update).eq('id', patch.id);
+  query = live.reward_naira === null ? query.is('reward_naira', null) : query.eq('reward_naira', live.reward_naira);
+  query = live.is_active === null ? query.is('is_active', null) : query.eq('is_active', live.is_active);
+  for (const field of GUARDED_TEXT_FIELDS) {
+    if (!plan.changed.includes(field)) continue;
+    const value = live[field];
+    query = value === null || value === undefined ? query.is(field, null) : query.eq(field, value);
   }
-  if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null;
-  if (body.eligibility_condition !== undefined) {
-    if (body.eligibility_condition != null && String(body.eligibility_condition).length > 200) return NextResponse.json({ error: 'Condition too long' }, { status: 400 });
-    updates.eligibility_condition = body.eligibility_condition || null;
+  const { data, error } = await query.select('*');
+
+  if (error) {
+    console.error('giftbox update:', patch.id, error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', 'The gift box could not be saved. Try again.');
   }
-  if (body.eligibility_rules !== undefined) updates.eligibility_rules = Array.isArray(body.eligibility_rules) ? body.eligibility_rules.slice(0, 50) : [];
-  if (body.is_active !== undefined) updates.is_active = !!body.is_active;
 
-  const { data: before } = await supabaseAdmin.from('giftbox_items').select('*').eq('id', id).single();
+  const saved = ((data ?? []) as StoredGiftbox[])[0];
+  if (!saved) {
+    const again = await readItem(patch.id);
+    if (again.ok && !again.row) return fail('RESOURCE_NOT_FOUND', 'That gift box no longer exists.');
+    const latest = again.ok && again.row ? again.row : null;
+    return fail('STATE_CONFLICT', CHANGED_ELSEWHERE, {
+      details: {
+        item: latest ? publicGiftbox(latest, null) : null,
+        fields: latest && patch.expected ? giftboxConflicts(patch.expected, latest) : [],
+      },
+    });
+  }
 
-  const { error } = await supabaseAdmin
-    .from('giftbox_items')
-    .update(updates)
-    .eq('id', id);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id, action: 'UPDATE_GIFTBOX_ITEM', entity: 'giftbox_items',
-    entity_id: id, before_value: redactAudit(before), after_value: redactAudit(updates),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-
-  bustPromoCache();
-  return NextResponse.json({ success: true });
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  after(() => bustPromoCache());
+  return ok({ changed: true, item: publicGiftbox(saved, null), ...auditFields(recorded.ok) });
 }

@@ -1,151 +1,134 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { redactAudit } from '../../lib/redact';
+import { requireSuperAdmin } from '../../lib/guard';
+import { writeAudit, type AuditInput } from '../../lib/audit';
+import { fail, ok } from '../../lib/api';
+import {
+  SECRET_KEYS,
+  SETTINGS_KEYS,
+  planSave,
+  presentSettings,
+  readSaveRequest,
+  storedValues,
+  type StoredSetting,
+} from '../../(dashboard)/admin-settings/rules';
 
-const GATEWAYS = ['paystack', 'monnify', 'novac'];
-const BILL_PROVIDERS = ['vtpass', 'novac'];
+const ENTITY = 'app_config';
+const COLUMNS = 'key, value, is_public, updated_at';
+const PUBLIC_CACHE_KEY = 'app_config:public';
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const NOT_SAVED = 'The settings could not be saved. Nothing was changed.';
+const SECRET_WRITE_FAILED = 'The database refused the write.';
 
-const KEYS = [
-  ...GATEWAYS.map((g) => `gateway_${g}_enabled`),
-  'active_payment_gateway',
-  ...BILL_PROVIDERS.map((p) => `bill_${p}_enabled`),
-  'active_bill_provider',
-  'chatwoot_base_url',
-  'chatwoot_website_token',
-  'chatwoot_identity_key',
-  'app_current_version',
-  'app_minimum_version',
-  'app_update_type',
-  'app_update_message',
-  'emergency_mode',
+type SettingsRead = { ok: true; rows: StoredSetting[] } | { ok: false };
 
-  'max_card_approval_naira',
+async function readSettings(): Promise<SettingsRead> {
+  const { data, error } = await supabaseAdmin.from('app_config').select(COLUMNS).in('key', [...SETTINGS_KEYS]);
+  if (error) {
+    console.error('admin settings read:', error.message);
+    return { ok: false };
+  }
+  return { ok: true, rows: (data ?? []) as StoredSetting[] };
+}
 
-  'terms_url',
-  'privacy_url',
-  'store_url_android',
-  'store_url_ios',
-];
+async function sealSecretRows(keys: readonly string[]): Promise<boolean> {
+  if (keys.length === 0) return true;
+  const { error } = await supabaseAdmin
+    .from('app_config')
+    .upsert(keys.map((key) => ({ key, is_public: false })), { onConflict: 'key' });
+  if (error) {
+    console.error('admin settings secret seal failed:', error.code ?? 'unknown');
+    return false;
+  }
+  return true;
+}
 
-const URL_KEYS = new Set(['chatwoot_base_url', 'terms_url', 'privacy_url', 'store_url_android', 'store_url_ios']);
-const TOKEN_KEYS = new Set(['chatwoot_website_token', 'chatwoot_identity_key']);
-const TOKEN_MAX_LEN = 256;
-const SECRET_KEYS = new Set(['chatwoot_identity_key']);
-const URL_MAX_LEN = 2048;
-const URL_RE = /^https:\/\/[^\s<>"']{3,}$/i;
-const CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+async function keepSecretsPrivate(): Promise<void> {
+  const { error } = await supabaseAdmin.from('app_config').update({ is_public: false }).in('key', [...SECRET_KEYS]);
+  if (error) console.error('admin settings secret privacy failed:', error.code ?? 'unknown');
+}
 
-const ALLOWED_UPDATE = new Set(KEYS);
+async function clearPublicCache(): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.rpc('edge_cache_delete', { p_key: PUBLIC_CACHE_KEY });
+    if (error) console.error('admin settings cache clear:', error.message);
+  } catch (error) {
+    console.error('admin settings cache clear:', error instanceof Error ? error.message : String(error));
+  }
+}
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
+function auditFields(recorded: boolean) {
+  return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
 }
 
 export async function GET() {
-  const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
 
-  const { data, error } = await supabaseAdmin.from('app_config').select('key, value').in('key', KEYS);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const config: Record<string, string> = {};
-  (data || []).forEach((r) => { config[r.key] = r.value; });
-  return NextResponse.json({ config });
+  const read = await readSettings();
+  if (!read.ok) return fail('INTERNAL_ERROR', 'The settings could not be loaded.');
+  return ok({ ...presentSettings(read.rows) });
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { changes } = await req.json();
-  if (!changes || typeof changes !== 'object') {
-    return NextResponse.json({ error: 'No changes' }, { status: 400 });
+  const body: unknown = await req.json().catch(() => null);
+  const parsed = readSaveRequest(body);
+  if (!parsed.ok) return fail('VALIDATION_ERROR', parsed.message);
+  const { request } = parsed;
+
+  const read = await readSettings();
+  if (!read.ok) return fail('INTERNAL_ERROR', 'The current settings could not be read, so nothing was changed.');
+
+  const planned = planSave(storedValues(read.rows), request);
+  if (!planned.ok) {
+    if (planned.code === 'STATE_CONFLICT') {
+      return fail('STATE_CONFLICT', planned.message, { details: { conflicts: planned.conflicts } });
+    }
+    return fail('VALIDATION_ERROR', planned.message);
   }
-  const keys = Object.keys(changes).filter((k) => ALLOWED_UPDATE.has(k));
-  if (keys.length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
+  const { plan } = planned;
+  const changed = Object.keys(plan.updates);
 
-  if (changes.active_payment_gateway) {
-    const primary = String(changes.active_payment_gateway);
-    if (!GATEWAYS.includes(primary)) {
-      return NextResponse.json({ error: 'Invalid primary gateway' }, { status: 400 });
-    }
-    const enabledKey = `gateway_${primary}_enabled`;
-    const enabledVal = changes[enabledKey] ?? (await supabaseAdmin
-      .from('app_config').select('value').eq('key', enabledKey).single()).data?.value;
-    if (enabledVal !== 'true') {
-      return NextResponse.json({ error: 'Primary gateway must be enabled' }, { status: 400 });
-    }
-  }
-
-  if (changes.active_bill_provider) {
-    const primary = String(changes.active_bill_provider);
-    if (!BILL_PROVIDERS.includes(primary)) {
-      return NextResponse.json({ error: 'Invalid primary bill provider' }, { status: 400 });
-    }
-    const enabledKey = `bill_${primary}_enabled`;
-    const enabledVal = changes[enabledKey] ?? (await supabaseAdmin
-      .from('app_config').select('value').eq('key', enabledKey).single()).data?.value;
-    if (enabledVal !== 'true') {
-      return NextResponse.json({ error: 'Primary bill provider must be enabled' }, { status: 400 });
-    }
+  if (changed.length === 0) {
+    await keepSecretsPrivate();
+    return ok({ changed, unchanged: plan.unchanged });
   }
 
-  if (changes.max_card_approval_naira !== undefined) {
-    const n = Number(changes.max_card_approval_naira);
-    if (!Number.isFinite(n) || n < 1000 || n > 1_000_000_000_000) {
-      return NextResponse.json({
-        error: 'Max approval amount must be a number between 1,000 and 1,000,000,000,000 NGN',
-      }, { status: 400 });
-    }
+  const secretWrite = plan.secretUpdates.length > 0;
+  const audit: AuditInput = {
+    admin,
+    action: plan.action,
+    entity: ENTITY,
+    entity_id: plan.entityId,
+    before: plan.before,
+    after: plan.after,
+    reason: request.reason,
+    sensitivity: plan.sensitivity,
+  };
+
+  if (!(await sealSecretRows(plan.secretUpdates))) {
+    await writeAudit({ ...audit, result: 'failure', error: SECRET_WRITE_FAILED });
+    return fail('INTERNAL_ERROR', NOT_SAVED);
   }
 
-  for (const k of keys) {
-    if (!URL_KEYS.has(k)) continue;
-    const raw = String(changes[k] ?? '');
-    if (raw.length === 0) continue;
-    if (raw.length > URL_MAX_LEN) {
-      return NextResponse.json({ error: `${k} exceeds ${URL_MAX_LEN} characters` }, { status: 400 });
-    }
-    if (CONTROL_RE.test(raw)) {
-      return NextResponse.json({ error: `${k} contains disallowed characters` }, { status: 400 });
-    }
-    if (!URL_RE.test(raw)) {
-      return NextResponse.json({
-        error: `${k} must be a valid https:// URL`,
-      }, { status: 400 });
-    }
+  const updatedAt = new Date().toISOString();
+  const { error } = await supabaseAdmin
+    .from('app_config')
+    .upsert(changed.map((key) => ({ key, value: plan.updates[key], updated_at: updatedAt })), { onConflict: 'key' });
+
+  if (error) {
+    console.error('admin settings save failed:', secretWrite ? error.code ?? 'unknown' : error.message);
+    await writeAudit({ ...audit, result: 'failure', error: secretWrite ? SECRET_WRITE_FAILED : error.message });
+    return fail('INTERNAL_ERROR', NOT_SAVED);
   }
 
-  for (const k of keys) {
-    if (!TOKEN_KEYS.has(k)) continue;
-    const raw = String(changes[k] ?? '');
-    if (raw.length === 0) continue;
-    if (raw.length > TOKEN_MAX_LEN || CONTROL_RE.test(raw) || /\s/.test(raw)) {
-      return NextResponse.json({ error: `${k} must be a single token of at most ${TOKEN_MAX_LEN} characters` }, { status: 400 });
-    }
-  }
+  await keepSecretsPrivate();
+  await clearPublicCache();
 
-  const rows = keys.map((k) => ({
-    key: k, value: String(changes[k]), updated_at: new Date().toISOString(),
-  }));
-  const { error } = await supabaseAdmin.from('app_config').upsert(rows, { onConflict: 'key' });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const secretKeys = keys.filter((k) => SECRET_KEYS.has(k));
-  if (secretKeys.length > 0) {
-    await supabaseAdmin.from('app_config').update({ is_public: false }).in('key', secretKeys);
-  }
-
-  try {
-    await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' });
-  } catch { }
-
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id, action: 'UPDATE_ADMIN_SETTINGS', entity: 'app_config',
-    entity_id: 'batch', after_value: redactAudit(Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, SECRET_KEYS.has(k) && String(v ?? '').length > 0 ? '[set]' : v]))),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-  return NextResponse.json({ success: true });
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ changed, unchanged: plan.unchanged, ...auditFields(recorded.ok) });
 }

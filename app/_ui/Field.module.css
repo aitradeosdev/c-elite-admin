@@ -54,7 +54,7 @@
   box-shadow: 0 0 0 3px var(--ring-color);
 }
 .control:disabled {
-  background: var(--bg-muted);
+  background-color: var(--bg-muted);
   color: var(--fg-disabled);
   cursor: not-allowed;
 }
@@ -63,7 +63,7 @@
 }
 .control.invalid:focus {
   border-color: var(--tone-danger-fg);
-  box-shadow: 0 0 0 3px rgba(225, 73, 73, 0.20);
+  box-shadow: 0 0 0 3px var(--ring-color-danger);
 }
 
 .mono {
@@ -81,10 +81,24 @@
 
 .select {
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: right var(--space-3) center;
   padding-right: var(--space-8);
+}
+
+.sm {
+  height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: var(--text-sm);
+}
+
+.inline {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+  vertical-align: middle;
 }
 
 .fieldWithAffix {
@@ -114,3 +128,7 @@
 .fieldWithAffix .control { border-radius: 0; }
 .fieldWithAffix > .control:first-child { border-top-left-radius: var(--radius-md); border-bottom-left-radius: var(--radius-md); }
 .fieldWithAffix > .control:last-child  { border-top-right-radius: var(--radius-md); border-bottom-right-radius: var(--radius-md); }
+
+.select:disabled {
+  background-image: var(--select-chevron-disabled);
+}

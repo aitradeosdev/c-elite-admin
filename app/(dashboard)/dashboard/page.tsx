@@ -1,198 +1,106 @@
-import type { ReactNode } from 'react';
-import Link from 'next/link';
-import {
-  ClipboardList, Wallet, Users as UsersIcon, ArrowDownToLine,
-  TrendingUp, TicketPercent, Gift, Share2,
-  ArrowLeftRight, Receipt, Activity, CreditCard, ShieldCheck, UserPlus, Coins,
-} from 'lucide-react';
+import { LayoutDashboard } from 'lucide-react';
 import { verifyAdminFromRequest } from '../../lib/jwt';
-import { buildCan, getDashboardStats, getRecentSubmissions } from '../../lib/dashboard';
+import { resolveAdminPermissions } from '../../lib/permissions';
+import { getDashboardData, type RecentSubmission } from '../../lib/dashboard';
+import { BUSINESS_TZ_LABEL, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
+import { Card, EmptyState, PageHeader, StatStrip } from '../../_ui';
 import AutoRefresh from './AutoRefresh';
+import { ActionTiles, Band, OpenQueueLink } from './DashboardBands';
+import { RecentSubmissions, type RecentRow } from './RecentSubmissions';
+import { RefreshButton, RetryState } from './Refresh';
 import {
-  PageHeader, Kpi, KpiGrid, SectionTitle, Card, CardHeader, CardBody,
-  Table, THead, TBody, Tr, Th, Td, TableEmpty, Button,
-} from '../../_ui';
-import { StatusDot } from '../_shared/statusUi';
+  REFRESH_INTERVAL_MS, STRIP_BANDS, buildActionTiles, buildStripCells, overviewSubtitle,
+} from './metrics';
+import s from './page.module.css';
 
-function formatNaira(amount: number) {
-  return '₦' + amount.toLocaleString('en-NG', { minimumFractionDigits: 2 });
-}
+const REFRESH_SECONDS = REFRESH_INTERVAL_MS / 1000;
+const RECENT_ERROR = `The latest card submissions could not be fetched. The overview retries on its own every ${REFRESH_SECONDS} seconds.`;
 
-function formatCount(n: number) {
-  return n.toLocaleString();
-}
-
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'info' | 'purple' | 'neutral' {
-  switch (status) {
-    case 'approved': case 'dispute_resolved': return 'success';
-    case 'pending': case 'disputed': return 'warning';
-    case 'rejected': return 'danger';
-    default: return 'neutral';
-  }
-}
-
-function statusLabel(status: string) {
-  return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+function toRecentRow(row: RecentSubmission, now: Date): RecentRow {
+  return {
+    id: row.id,
+    href: `/card-queue?id=${encodeURIComponent(row.id)}`,
+    user: row.users?.username ? `@${row.users.username}` : 'Unknown user',
+    card: row.cards?.name || 'Unknown card',
+    country: row.country_name || null,
+    payout: row.payout_naira,
+    status: row.status,
+    submittedAt: formatBusinessDateTime(row.created_at),
+    age: formatAge(row.created_at, now),
+  };
 }
 
 export default async function DashboardPage() {
   const admin = await verifyAdminFromRequest();
-  const can = buildCan(admin);
+  const permissions = resolveAdminPermissions(admin);
+  const data = await getDashboardData(permissions);
 
-  const showSubmissions = can('card_queue');
-  const [stats, submissions] = await Promise.all([
-    getDashboardStats(can),
-    showSubmissions ? getRecentSubmissions() : Promise.resolve([] as any[]),
-  ]);
-
-  const n = (k: string) => stats[k] || 0;
-
-  const kpis: { perm: string; node: ReactNode }[] = [
-    { perm: 'card_queue', node: (
-      <Kpi key="pc" label="Pending cards" icon={<ClipboardList size={14} />}
-        value={formatCount(n('pendingCards'))} hint="Awaiting admin review" />
-    ) },
-    { perm: 'card_queue', node: (
-      <Kpi key="ct" label="Cards today" icon={<TrendingUp size={14} />}
-        value={formatCount(n('cardsToday'))} hint="Submissions in the last 24h" />
-    ) },
-    { perm: 'withdrawals', node: (
-      <Kpi key="tp" label="Today's payouts" icon={<Wallet size={14} />}
-        value={formatNaira(n('todayPayouts'))} hint="Withdrawals settled today" />
-    ) },
-    { perm: 'withdrawals', node: (
-      <Kpi key="pw" label="Pending withdrawals" icon={<ArrowDownToLine size={14} />}
-        value={formatCount(n('pendingWithdrawals'))} hint="In the approval queue" />
-    ) },
-    { perm: 'transactions_overview', node: (
-      <Kpi key="txt" label="Transactions today" icon={<Receipt size={14} />}
-        value={formatCount(n('txToday'))} hint="All transaction types" />
-    ) },
-    { perm: 'transactions_overview', node: (
-      <Kpi key="txv" label="Transaction volume" icon={<Receipt size={14} />}
-        value={formatNaira(n('txVolumeToday'))} hint="Successful, today" />
-    ) },
-    { perm: 'users', node: (
-      <Kpi key="tu" label="Total users" icon={<UsersIcon size={14} />}
-        value={formatCount(n('totalUsers'))} hint="All-time registrations" />
-    ) },
-    { perm: 'users', node: (
-      <Kpi key="nu" label="New users today" icon={<UserPlus size={14} />}
-        value={formatCount(n('newUsersToday'))} hint="Signups in the last 24h" />
-    ) },
-    { perm: 'user_activity_monitor', node: (
-      <Kpi key="ou" label="Users online" icon={<Activity size={14} />}
-        value={formatCount(n('onlineUsers'))} hint="Active in the last 5 min" />
-    ) },
-    { perm: 'coupons', node: (
-      <Kpi key="ac" label="Active coupons" icon={<TicketPercent size={14} />}
-        value={formatCount(n('activeCoupons'))} hint="Currently redeemable" />
-    ) },
-    { perm: 'bonuses_rewards', node: (
-      <Kpi key="gb" label="Giftbox claims" icon={<Gift size={14} />}
-        value={formatCount(n('giftboxToday'))} hint="Claimed today" />
-    ) },
-    { perm: 'bonuses_rewards', node: (
-      <Kpi key="rp" label="Reward pool" icon={<Coins size={14} />}
-        value={formatNaira(n('rewardPool'))} hint="Bonuses + coupon rewards granted (all-time)" />
-    ) },
-    { perm: 'referral_management', node: (
-      <Kpi key="rt" label="Referrals today" icon={<Share2 size={14} />}
-        value={formatCount(n('referralsToday'))} hint="New referral signups" />
-    ) },
-    { perm: 'platform_balance', node: (
-      <Kpi key="wt" label="Total wallet balance" icon={<Wallet size={14} />}
-        value={formatNaira(n('walletTotal'))} hint="Sum across all user wallets" />
-    ) },
-    { perm: 'card_management', node: (
-      <Kpi key="acd" label="Active cards" icon={<CreditCard size={14} />}
-        value={formatCount(n('activeCards'))} hint="Live in the catalog" />
-    ) },
-    { perm: 'admin_accounts', node: (
-      <Kpi key="ad" label="Admin accounts" icon={<ShieldCheck size={14} />}
-        value={formatCount(n('totalAdmins'))} hint="Total admin users" />
-    ) },
-  ];
-  const visibleKpis = kpis.filter((k) => can(k.perm));
+  const now = new Date(data.generated_at);
+  const failed = Boolean(data.metrics_error);
+  const actionTiles = buildActionTiles(data.stats, permissions, failed, now);
+  const strips = STRIP_BANDS
+    .map((band) => ({ band, cells: buildStripCells(band.metrics, data.stats, permissions, failed) }))
+    .filter((entry) => entry.cells.length > 0);
+  const canSeeCards = permissions.has('cards.read');
+  const hasMetrics = actionTiles.length > 0 || strips.length > 0;
 
   return (
-    <div>
-      <AutoRefresh />
+    <div className={s.page}>
+      <AutoRefresh intervalMs={REFRESH_INTERVAL_MS} />
 
       <PageHeader
         title="Overview"
-        subtitle="Today's activity across the CardElite platform."
+        subtitle={overviewSubtitle(data.range.from)}
+        actions={
+          <>
+            <span className={s.updated} title={`Refreshes automatically every ${REFRESH_SECONDS} seconds`}>
+              Updated {formatBusinessTime(now)} {BUSINESS_TZ_LABEL}
+            </span>
+            <RefreshButton />
+          </>
+        }
       />
 
-      {visibleKpis.length > 0 ? (
-        <KpiGrid>{visibleKpis.map((k) => k.node)}</KpiGrid>
-      ) : null}
+      <div className={s.bands}>
+        {failed && hasMetrics ? (
+          <Card>
+            <RetryState
+              title="Metrics could not be calculated"
+              message={`Every figure below shows as unavailable rather than zero. The overview also retries on its own every ${REFRESH_SECONDS} seconds.`}
+              stillFailing="Metrics are still unavailable. The overview will keep retrying."
+            />
+          </Card>
+        ) : null}
 
-      {visibleKpis.length === 0 ? (
-        <Card>
-          <CardBody>
-            <p style={{ color: 'var(--fg-secondary)', fontSize: 14 }}>
-              No dashboard metrics for your permissions. Use the side navigation
-              to access the pages you manage.
-            </p>
-          </CardBody>
-        </Card>
-      ) : null}
+        {actionTiles.length > 0 ? (
+          <Band id="overview-action" label="Needs action">
+            <ActionTiles tiles={actionTiles} />
+          </Band>
+        ) : null}
 
-      {can('card_queue') ? (
-        <>
-      <SectionTitle>Recent card submissions</SectionTitle>
-      <Card>
-        <CardHeader
-          title="Latest 10"
-          subtitle="Real-time feed — auto-refreshes every 30 seconds."
-          actions={
-            <Link href="/card-queue">
-              <Button variant="secondary" size="sm">Open queue</Button>
-            </Link>
-          }
-        />
-        <CardBody flush>
-          <Table flush>
-            <THead>
-              <Tr>
-                <Th>User</Th>
-                <Th>Card</Th>
-                <Th>Country</Th>
-                <Th align="right">Payout</Th>
-                <Th>Submitted</Th>
-                <Th>Status</Th>
-                <Th align="right">Actions</Th>
-              </Tr>
-            </THead>
-            <TBody>
-              {submissions.length === 0 ? (
-                <TableEmpty colSpan={7}>No submissions yet</TableEmpty>
-              ) : (
-                submissions.map((row: any) => (
-                  <Tr key={row.id}>
-                    <Td emphasis="primary">{row.users?.username || '—'}</Td>
-                    <Td>{row.cards?.name || '—'}</Td>
-                    <Td emphasis="secondary">{row.country_name || '—'}</Td>
-                    <Td align="right" mono>{formatNaira(row.payout_naira)}</Td>
-                    <Td emphasis="secondary">{new Date(row.created_at).toLocaleDateString()}</Td>
-                    <Td>
-                      <StatusDot status={statusLabel(row.status)} tone={statusTone(row.status)} />
-                    </Td>
-                    <Td align="right">
-                      <Link href="/card-queue">
-                        <Button variant="ghost" size="sm">Open</Button>
-                      </Link>
-                    </Td>
-                  </Tr>
-                ))
-              )}
-            </TBody>
-          </Table>
-        </CardBody>
-      </Card>
-        </>
-      ) : null}
+        {strips.map(({ band, cells }) => (
+          <Band key={band.id} id={`overview-${band.id}`} label={band.label}>
+            <StatStrip fill flush items={cells} />
+          </Band>
+        ))}
+
+        {!hasMetrics && !canSeeCards ? (
+          <EmptyState
+            icon={<LayoutDashboard size={20} strokeWidth={1.75} />}
+            title="Nothing to show on your overview"
+            hint="Your account holds no permissions with overview figures. Use the side navigation to open the pages you manage."
+          />
+        ) : null}
+
+        {canSeeCards ? (
+          <Band id="overview-recent" label="Recent submissions" aside={<OpenQueueLink />}>
+            <RecentSubmissions
+              rows={data.recent_submissions.map((row) => toRecentRow(row, now))}
+              error={data.recent_submissions_error ? RECENT_ERROR : null}
+            />
+          </Band>
+        ) : null}
+      </div>
     </div>
   );
 }

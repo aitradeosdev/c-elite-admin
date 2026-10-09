@@ -37,9 +37,15 @@
 .md { height: 34px; padding: 0 var(--space-4); }
 .lg { height: 40px; padding: 0 var(--space-5); font-size: var(--text-md); }
 
-.iconSm { width: 28px; padding: 0; }
-.iconMd { width: 34px; padding: 0; }
-.iconLg { width: 40px; padding: 0; }
+.iconSm { width: 28px; height: 28px; padding: 0; }
+.iconMd { width: 34px; height: 34px; padding: 0; }
+.iconLg { width: 40px; height: 40px; padding: 0; }
+
+.link { vertical-align: middle; }
+.link,
+.link:hover {
+  text-decoration: none;
+}
 
 .primary {
   background: var(--accent-base);
@@ -76,7 +82,7 @@
 
 .danger {
   background: var(--tone-danger-fg);
-  color: #FFFFFF;
+  color: var(--tone-danger-on);
   border-color: var(--tone-danger-fg);
 }
 .danger:hover:not(:disabled) {
@@ -90,12 +96,12 @@
 }
 .dangerSubtle:hover:not(:disabled) {
   background: var(--tone-danger-fg);
-  color: #FFFFFF;
+  color: var(--tone-danger-on);
 }
 
 .success {
   background: var(--tone-success-fg);
-  color: #FFFFFF;
+  color: var(--tone-success-on);
   border-color: var(--tone-success-fg);
 }
 .success:hover:not(:disabled) {
@@ -115,3 +121,21 @@
 }
 
 .icon { flex: none; display: inline-flex; }
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+  .spinner { animation-duration: 1.6s; }
+}

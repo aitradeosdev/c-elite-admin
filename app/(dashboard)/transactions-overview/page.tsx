@@ -1,299 +1,656 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Download, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Download, RotateCw } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, Select, ExportModal, TableSkeleton, } from '../../_ui';
-import { printTable, rangeToDates, type RangeKey } from '../../lib/printExport';
-import { useIsMobile } from '../../lib/useIsMobile';
-import { formatNaira, StatusDot, StatStrip } from '../_shared/statusUi';
+  AccessDenied, Button, Card, CardBody, DateRangePicker, ErrorState, ExportModal, FilterBar, MobileDataList, Money,
+  Notice, PageHeader, Pagination, Ref, ResponsiveView, RowOpen, SearchInput, Select, SidePanel, StatStrip, StatusDot,
+  TBody, THead, Table, TableEmpty, TableSkeleton, TableState, Td, Th, Tr, combineCodecs, dateRangeParam, formatNaira,
+  stringParam, truncateRef, urlParam, useCan, usePermissions, useResource, useTableSort, useToast, useUrlState,
+  uuidParam,
+  type DateRangeValue, type ExportFiltersOption, type ExportRangeValue, type TableSkeletonColumn,
+} from '../../_ui';
+import { apiRequest } from '../../lib/apiClient';
+import { describeExportWindow, printTable, resolveExportRange } from '../../lib/printExport';
+import { businessDateKey, formatAge, formatBusinessDateTime, type ExportRangeDates } from '../../lib/time';
+import {
+  SEARCH_MAX, STATUS_OPTIONS, TYPE_GROUPS, buildExportQuery, buildListQuery, filterQuery, filtersActive,
+  isKnownStatus, isKnownType, messageOf, normalizeTokens, statusText, toDetail, toListResult, tokensLabel, typeLabel,
+  userHandle, validId,
+  type Capabilities, type ExportResponse, type FilterState, type ListSummary, type Transaction,
+} from './model';
+import { DetailBody, DetailSkeleton } from './TransactionParts';
+import s from './page.module.css';
 
-const TYPE_GROUPS: { label: string; key: string; values: string[] }[] = [
-  { label: 'Giftcards', key: 'giftcards', values: ['giftcard_credit'] },
-  { label: 'Withdrawals', key: 'withdrawals', values: ['withdrawal', 'withdrawal_refund'] },
-  { label: 'Bills', key: 'bills', values: ['airtime', 'data', 'cable', 'electricity'] },
-  { label: 'Bonuses', key: 'bonuses', values: ['signup_bonus', 'giftbox_bonus', 'referral_bonus', 'bonus_redeem', 'level_bonus'] },
+const PAGE_SIZE = 50;
+const COLUMN_COUNT = 6;
+const DATE_PRESETS = ['today', '7d', '30d', 'month', 'all'] as const;
+const SUBTITLE = 'Full audit-log view of every money movement on the platform. Times are WAT.';
+const BAD_LINK = 'That transaction link is not valid. Check the ID and try again.';
+const EXPORT_OFFLINE = 'Could not reach the server, so the export was not created. Check your connection and try again.';
+
+const SKELETON_COLUMNS: ReadonlyArray<TableSkeletonColumn> = [
+  { width: 120, lines: 2 },
+  { width: 132, lines: 2 },
+  { width: 88, align: 'right' },
+  { width: 76 },
+  { width: 96 },
+  { width: 124, lines: 2 },
 ];
-const STATUS_OPTIONS = ['', 'pending', 'pending_review', 'success', 'failed'];
 
-function TypeLabel({ type }: { type: string }) {
+const SEARCH_PARAM = stringParam('search', { maxLength: SEARCH_MAX });
+
+const TX_URL = combineCodecs({
+  search: SEARCH_PARAM,
+  type: urlParam('type', { parse: normalizeTokens, format: (value: string) => normalizeTokens(value) || null }),
+  status: urlParam('status', { parse: normalizeTokens, format: (value: string) => normalizeTokens(value) || null }),
+  range: dateRangeParam(),
+  id: uuidParam('id'),
+});
+
+type FilterPatch = Partial<Omit<ReturnType<typeof TX_URL.parse>, 'id'>>;
+
+const CLEARED: FilterPatch = { search: '', type: '', status: '', range: { from: null, to: null } };
+
+function searchKey(value: string): string {
+  return SEARCH_PARAM.parse(new URLSearchParams({ search: value }));
+}
+
+function countText(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-NG') : '—';
+}
+
+function moneyText(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatNaira(value) : '—';
+}
+
+export default function TransactionsPage() {
   return (
-    <span style={{
-      fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.04em',
-      color: 'var(--fg-secondary)', background: 'var(--bg-subtle)',
-      border: '1px solid var(--border-default)', padding: '2px 7px',
-      borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
-    }}>{(type || '-').replace(/_/g, ' ')}</span>
+    <Suspense fallback={<ExplorerFallback />}>
+      <TransactionsExplorer />
+    </Suspense>
   );
 }
 
-function TransactionsMobile({ rows, loading }: { rows: any[]; loading: boolean }) {
-  if (loading && rows.length === 0) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {[0, 1, 2, 3].map((k) => (
-          <div key={k} style={{ height: 84, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
-        ))}
-      </div>
-    );
-  }
-  if (rows.length === 0) {
-    return (
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
-        No transactions found
-      </div>
-    );
-  }
+function ExplorerFallback() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {rows.map((t: any) => (
-        <div key={t.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-              {formatNaira(t.amount)}
-            </div>
-            <StatusDot status={t.status} />
-          </div>
-          <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginTop: 4, color: 'var(--fg-primary)' }}>
-            @{t.users?.username || '—'}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-            <TypeLabel type={t.type} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
-              {t.reference_id || '—'} · {new Date(t.created_at).toLocaleString()}
-            </span>
-          </div>
-        </div>
-      ))}
+    <div>
+      <PageHeader title="Transactions" subtitle={SUBTITLE} />
+      <ResponsiveView
+        desktop={
+          <Card>
+            <CardBody flush>
+              <Table flush aria-label="Transactions">
+                <TBody>
+                  <TableSkeleton columns={SKELETON_COLUMNS} rows={10} />
+                </TBody>
+              </Table>
+            </CardBody>
+          </Card>
+        }
+        mobile={
+          <MobileDataList<Transaction>
+            ariaLabel="Transactions"
+            items={[]}
+            getKey={(row) => row.id}
+            renderRow={(row) => ({ primary: typeLabel(row.type) })}
+            loading
+            initialLoading
+            skeletonRows={8}
+          />
+        }
+      />
     </div>
   );
 }
 
-export default function TransactionsOverviewPage() {
-  const isMobile = useIsMobile();
-  const [rows, setRows] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
+function TransactionsExplorer() {
+  const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawId = searchParams.get('id');
+  const [url, setUrl] = useUrlState(TX_URL);
+  const openId = url.id;
+
+  const canExport = useCan('transactions.export');
+  const { can: has } = usePermissions();
+  const can = useMemo<Capabilities>(() => ({
+    users: has('users.read'),
+    withdrawals: has('withdrawals.read'),
+    cards: has('cards.read'),
+  }), [has]);
+
+  const filters = useMemo<FilterState>(() => ({
+    search: url.search,
+    type: url.type,
+    status: url.status,
+    from: url.range.from,
+    to: url.range.to,
+  }), [url.search, url.type, url.status, url.range.from, url.range.to]);
+  const filterKey = filterQuery(filters);
+
+  const [searchText, setSearchText] = useState(url.search);
   const [page, setPage] = useState(1);
-  const [stats, setStats] = useState({ totalCount: 0, totalAmount: 0, todayCount: 0, todayAmount: 0 });
+  const [pageScope, setPageScope] = useState(filterKey);
+  if (pageScope !== filterKey) {
+    setPageScope(filterKey);
+    setPage(1);
+  }
+  const { sort, toggle: toggleSort } = useTableSort({ key: 'created_at', dir: 'desc' });
+  const [summary, setSummary] = useState<ListSummary | null>(null);
+
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportRange, setExportRange] = useState<RangeKey>('7d');
+  const [exportRange, setExportRange] = useState<ExportRangeValue>('filters');
   const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
-  const limit = 25;
 
-  const [type, setType] = useState('');
-  const [status, setStatus] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [search, setSearch] = useState('');
+  const wantSummary = useRef(true);
+  const appliedSearch = useRef(url.search);
+  const exportingRef = useRef(false);
 
-  const [applied, setApplied] = useState({ type: '', status: '', dateFrom: '', dateTo: '', search: '' });
+  const listKey = useMemo(() => buildListQuery(filters, sort, page, PAGE_SIZE), [filters, sort, page]);
 
-  const buildParams = useCallback(() => {
-    const params = new URLSearchParams();
-    if (applied.type) params.set('type', applied.type);
-    if (applied.status) params.set('status', applied.status);
-    if (applied.dateFrom) params.set('date_from', applied.dateFrom);
-    if (applied.dateTo) params.set('date_to', applied.dateTo);
-    if (applied.search) params.set('search', applied.search);
-    params.set('page', String(page));
-    params.set('limit', String(limit));
-    return params;
-  }, [applied, page]);
+  const list = useResource(listKey, (signal) => apiRequest('/api/transactions', {
+    query: { ...Object.fromEntries(new URLSearchParams(listKey)), summary: wantSummary.current ? '1' : '0' },
+    signal,
+    select: toListResult,
+  }));
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch('/api/transactions?' + buildParams().toString());
-    const json = await res.json();
-    setRows(json.transactions || []);
-    setTotal(json.total || 0);
-    setStats(json.stats || { totalCount: 0, totalAmount: 0, todayCount: 0, todayAmount: 0 });
-    setLoading(false);
-  }, [buildParams]);
+  const detail = useResource(
+    openId ? `transaction:${openId}` : null,
+    (signal) => apiRequest('/api/transactions', { query: { id: openId }, signal, select: toDetail }),
+    { keepPreviousData: false },
+  );
 
-  useEffect(() => { load(); }, [load]);
+  const { refresh: refreshList } = list;
+  const { refresh: refreshDetail } = detail;
 
-  const applyFilters = () => {
-    setApplied({ type, status, dateFrom, dateTo, search });
+  const incomingSummary = list.data?.summary ?? null;
+  if (incomingSummary !== null && incomingSummary !== summary) setSummary(incomingSummary);
+
+  const badLink = rawId !== null && validId(rawId.trim()) === null;
+
+  useEffect(() => {
+    if (!badLink) return;
+    toast.show(BAD_LINK, 'warning');
+    setUrl((value) => value);
+  }, [badLink, setUrl, toast]);
+
+  useEffect(() => {
+    if (url.search === appliedSearch.current) return;
+    appliedSearch.current = url.search;
+    setSearchText(url.search);
+  }, [url.search]);
+
+  useEffect(() => {
+    if (list.data?.summary) wantSummary.current = false;
+  }, [list.data]);
+
+  useEffect(() => {
+    const data = list.data;
+    if (!data || list.isPreviousData) return;
+    const lastPage = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
+    if (data.transactions.length === 0 && page > lastPage) setPage(lastPage);
+  }, [list.data, list.isPreviousData, page]);
+
+  const openRow = useCallback((id: string) => setUrl((value) => ({ ...value, id })), [setUrl]);
+
+  const closeDrawer = useCallback(() => setUrl((value) => ({ ...value, id: null })), [setUrl]);
+
+  const updateFilters = useCallback((patch: FilterPatch) => {
+    setUrl((value) => ({ ...value, ...patch }));
+  }, [setUrl]);
+
+  const applySearch = useCallback((value: string) => {
+    appliedSearch.current = searchKey(value);
+    updateFilters({ search: value });
+  }, [updateFilters]);
+
+  const applyRange = useCallback((next: DateRangeValue) => {
+    updateFilters({ range: next });
+  }, [updateFilters]);
+
+  const clearFilters = useCallback(() => {
+    appliedSearch.current = '';
+    setSearchText('');
+    updateFilters(CLEARED);
+  }, [updateFilters]);
+
+  const onSort = useCallback((key: string) => {
+    toggleSort(key);
     setPage(1);
+  }, [toggleSort]);
+
+  const retryList = useCallback(() => {
+    void refreshList();
+  }, [refreshList]);
+
+  const retryDetail = useCallback(() => {
+    void refreshDetail();
+  }, [refreshDetail]);
+
+  const refresh = () => {
+    wantSummary.current = true;
+    void refreshList();
+    void refreshDetail();
   };
 
-  const clearFilters = () => {
-    setType('');
-    setStatus('');
-    setDateFrom('');
-    setDateTo('');
-    setSearch('');
-    setApplied({ type: '', status: '', dateFrom: '', dateTo: '', search: '' });
-    setPage(1);
+  const exportFilters = useMemo<ExportFiltersOption>(
+    () => ({ label: 'Current filters', from: filters.from, to: filters.to }),
+    [filters.from, filters.to],
+  );
+
+  const downloadCsv = async (res: Response) => {
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = `transactions-${businessDateKey(new Date())}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    const exported = Number(res.headers.get('x-export-rows') || 0);
+    const matching = Number(res.headers.get('x-total-count') || exported);
+    if (res.headers.get('x-export-truncated') === '1') {
+      toast.show(
+        `Exported ${exported.toLocaleString('en-NG')} of ${matching.toLocaleString('en-NG')} matching transactions. Narrow the time frame to export the rest.`,
+        'warning',
+      );
+    } else {
+      toast.show(`Exported ${exported.toLocaleString('en-NG')} transactions.`, 'success');
+    }
   };
 
-  const totalPages = Math.ceil(total / limit);
+  const printPdf = async (res: Response, span: ExportRangeDates): Promise<boolean> => {
+    const body = (await res.json().catch(() => null)) as ExportResponse | null;
+    if (!body || body.success === false || !Array.isArray(body.rows)) {
+      toast.show(messageOf(body, 'The export could not be created.'), 'error');
+      return false;
+    }
+    const printed = printTable({
+      title: 'Transactions',
+      meta: [
+        span.label,
+        describeExportWindow(span),
+        `${body.rows.length.toLocaleString('en-NG')} rows`,
+        `generated ${formatBusinessDateTime(new Date())} WAT`,
+      ].join(' · '),
+      columns: ['Transaction ID', 'User', 'Email', 'Type', 'Amount', 'Status', 'Reference', 'Created (WAT)'],
+      rows: body.rows.map((r) => [
+        r.ID, r.User, r.Email, typeLabel(r.Type), formatNaira(r.Amount), statusText(r.Status), r.Reference,
+        r.DateLagos || formatBusinessDateTime(r.Date),
+      ]),
+    });
+    if (!printed) {
+      toast.show('Your browser blocked the print window. Allow pop-ups for this site and try again.', 'warning');
+      return false;
+    }
+    if (body.truncated) {
+      toast.show(
+        `Printed ${body.rows.length.toLocaleString('en-NG')} of ${Number(body.total ?? 0).toLocaleString('en-NG')} matching transactions. Narrow the time frame to include the rest.`,
+        'warning',
+      );
+    } else {
+      toast.show(`Opened ${body.rows.length.toLocaleString('en-NG')} transactions for printing.`, 'success');
+    }
+    return true;
+  };
 
-  const exportCSV = async () => {
-    setExporting('csv');
+  const runExport = async (format: 'csv' | 'pdf') => {
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    setExporting(format);
     try {
-      const params = buildParams();
-      params.set('csv', '1');
-      params.delete('page');
-      params.delete('limit');
-      const { from, to } = rangeToDates(exportRange);
-      if (from) params.set('date_from', from);
-      if (to) params.set('date_to', to);
-      const res = await fetch('/api/transactions?' + params.toString());
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `transactions-${Date.now()}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setExportOpen(false);
+      const span = resolveExportRange(exportRange, exportFilters);
+      const query = buildExportQuery(filters, sort, span, format);
+      const res = await fetch(`/api/transactions?${query}`, { cache: 'no-store' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as ExportResponse | null;
+        if (res.status !== 401) toast.show(messageOf(body, 'The export could not be created.'), 'error');
+        if (res.status === 403) router.refresh();
+        return;
+      }
+      if (format === 'csv') {
+        await downloadCsv(res);
+        setExportOpen(false);
+        return;
+      }
+      if (await printPdf(res, span)) setExportOpen(false);
+    } catch {
+      toast.show(EXPORT_OFFLINE, 'error');
     } finally {
+      exportingRef.current = false;
       setExporting(null);
     }
   };
 
-  const exportPdf = async () => {
-    setExporting('pdf');
-    try {
-      const params = buildParams();
-      params.set('pdf', '1');
-      params.delete('page');
-      params.delete('limit');
-      const { from, to, label } = rangeToDates(exportRange);
-      if (from) params.set('date_from', from);
-      if (to) params.set('date_to', to);
-      const res = await fetch('/api/transactions?' + params.toString());
-      const json = await res.json();
-      const rows = json.rows || [];
-      const ok = printTable({
-        title: 'Transactions',
-        meta: `${label} · ${rows.length} rows · generated ${new Date().toLocaleString()}`,
-        columns: ['ID', 'User', 'Email', 'Type', 'Amount', 'Status', 'Reference', 'Date'],
-        rows: rows.map((r: any) => [
-          r.ID, r.User, r.Email, r.Type, r.Amount, r.Status, r.Reference, r.Date,
-        ]),
-      });
-      if (!ok) alert('Pop-up blocked — allow pop-ups to export PDF.');
-      else setExportOpen(false);
-    } finally {
-      setExporting(null);
-    }
-  };
+  const data = list.data;
+  const rows = data?.transactions ?? [];
+  const total = data?.total ?? 0;
+  const listError = list.error;
+  const foreground = list.isInitialLoading || list.isRefreshing;
+  const blocked = rows.length === 0 && listError !== null;
+  const showSkeleton = list.isInitialLoading && !blocked;
+  const busy = list.isRefreshing;
+  const refreshing = list.isRefreshing && !list.isPreviousData;
+  const summaryLoading = summary === null && showSkeleton;
+  const denied = listError?.status === 403;
+  const notFound = detail.error?.status === 404;
+  const shown = notFound ? null : detail.data?.transaction ?? rows.find((row) => row.id === openId) ?? null;
+  const active = searchText.trim() !== '' || filtersActive(filters);
+  const emptyTitle = active ? 'No transactions match these filters' : 'No transactions yet';
+  const emptyHint = active
+    ? 'Try a different search, type, status or date range, or clear the filters.'
+    : 'Every credit, debit, withdrawal and bill payment appears here as soon as it is recorded.';
+  const clearButton = active ? (
+    <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>
+  ) : undefined;
+
+  if (denied) {
+    return (
+      <div>
+        <PageHeader title="Transactions" subtitle={SUBTITLE} />
+        <AccessDenied required={['transactions.read']} />
+      </div>
+    );
+  }
+
+  const desktopList = (
+    <>
+      {listError && rows.length > 0 ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          actions={<Button variant="ghost" size="sm" onClick={retryList}>Try again</Button>}
+        >
+          The list could not be updated. {listError.message} Showing the previous results.
+        </Notice>
+      ) : null}
+      <Card>
+        <CardBody flush>
+          <Table flush aria-label="Transactions" busy={busy}>
+            <THead>
+              <Tr>
+                <Th>Transaction</Th>
+                <Th>User</Th>
+                <Th align="right" sortKey="amount" sort={sort} onSort={onSort}>Amount</Th>
+                <Th>Status</Th>
+                <Th>Reference</Th>
+                <Th sortKey="created_at" sort={sort} onSort={onSort}>Created</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {blocked && listError ? (
+                <TableState colSpan={COLUMN_COUNT}>
+                  <ErrorState
+                    compact
+                    title="Transactions could not be loaded"
+                    message={listError.message}
+                    requestId={listError.requestId}
+                    onRetry={retryList}
+                    retrying={foreground}
+                  />
+                </TableState>
+              ) : showSkeleton ? (
+                <TableSkeleton columns={SKELETON_COLUMNS} rows={10} />
+              ) : rows.length === 0 ? (
+                <TableEmpty colSpan={COLUMN_COUNT} title={emptyTitle} hint={emptyHint} actions={clearButton} />
+              ) : (
+                rows.map((row) => (
+                  <Tr key={row.id} selected={row.id === openId} onActivate={() => openRow(row.id)}>
+                    <Td>
+                      <div className={s.stack}>
+                        <RowOpen onClick={() => openRow(row.id)} aria-haspopup="dialog">
+                          {typeLabel(row.type)}
+                        </RowOpen>
+                        <span className={s.subMono} translate="no">{truncateRef(row.id, 8)}</span>
+                      </div>
+                    </Td>
+                    <Td>
+                      <div className={s.stack}>
+                        {can.users && row.user_id ? (
+                          <Link href={`/users/${row.user_id}`} className={s.userLink}>
+                            {userHandle(row.users, row.user_id)}
+                          </Link>
+                        ) : (
+                          <span className={s.lead}>{userHandle(row.users, row.user_id)}</span>
+                        )}
+                        <span className={s.sub}>{row.users?.full_name || row.users?.email || '—'}</span>
+                      </div>
+                    </Td>
+                    <Td align="right">
+                      <Money value={row.amount} emphasis="primary" />
+                    </Td>
+                    <Td>
+                      <StatusDot status={row.status || 'unknown'} />
+                    </Td>
+                    <Td>
+                      <Ref value={row.reference_id} label="reference" size="sm" emphasis="secondary" />
+                    </Td>
+                    <Td>
+                      <div className={s.stack}>
+                        <span className={s.time}>{formatBusinessDateTime(row.created_at)}</span>
+                        <span className={s.sub}>{formatAge(row.created_at)} ago</span>
+                      </div>
+                    </Td>
+                  </Tr>
+                ))
+              )}
+            </TBody>
+          </Table>
+        </CardBody>
+      </Card>
+    </>
+  );
+
+  const mobileList = (
+    <MobileDataList<Transaction>
+      ariaLabel="Transactions"
+      items={rows}
+      getKey={(row) => row.id}
+      loading={foreground}
+      initialLoading={showSkeleton}
+      busy={foreground && !showSkeleton}
+      error={listError ? listError.message : null}
+      errorTitle="Transactions could not be loaded"
+      onRetry={retryList}
+      skeletonRows={8}
+      empty={{ title: emptyTitle, hint: emptyHint, actions: clearButton }}
+      renderRow={(row) => ({
+        primary: typeLabel(row.type),
+        value: <Money value={row.amount} />,
+        secondary: userHandle(row.users, row.user_id),
+        status: <StatusDot status={row.status || 'unknown'} />,
+        meta: `${formatBusinessDateTime(row.created_at)} · ${formatAge(row.created_at)} ago`,
+        onClick: () => openRow(row.id),
+      })}
+    />
+  );
 
   return (
     <div>
       <PageHeader
         title="Transactions"
-        subtitle="Full audit-log view of every money movement on the platform."
+        subtitle={SUBTITLE}
         actions={
-          <Button variant="primary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
-            Export
-          </Button>
+          <div className={s.headerActions}>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<RotateCw size={14} />}
+              loading={refreshing}
+              onClick={refresh}
+            >
+              Refresh
+            </Button>
+            {canExport ? (
+              <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
+                Export
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
-      <StatStrip items={[
-        { label: 'Total transactions', value: stats.totalCount.toLocaleString() },
-        { label: 'Total volume', value: formatNaira(stats.totalAmount), mono: true },
-        { label: 'Today transactions', value: stats.todayCount.toLocaleString() },
-        { label: 'Today volume', value: formatNaira(stats.todayAmount), mono: true },
-      ]} />
-
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
-        <Input placeholder="Search user" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 200, maxWidth: 240 }} />
-        <Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 160 }}>
-          <option value="">All types</option>
-          {TYPE_GROUPS.map((g) => (
-            <option key={g.key} value={g.values.join(',')}>{g.label}</option>
-          ))}
-        </Select>
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 160 }}>
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.filter(Boolean).map((st) => (
-            <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
-          ))}
-        </Select>
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ minWidth: 150 }} />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ minWidth: 150 }} />
-        <Button variant="primary" size="sm" leftIcon={<Filter size={14} />} onClick={applyFilters}>Apply</Button>
-        <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>Clear</Button>
-      </div>
-
-      {isMobile ? (
-        <TransactionsMobile rows={rows} loading={loading} />
-      ) : (
-        <Card>
-          <CardBody flush>
-            <Table flush>
-              <THead>
-                <Tr>
-                  <Th>User</Th>
-                  <Th>Type</Th>
-                  <Th align="right">Amount</Th>
-                  <Th>Status</Th>
-                  <Th>Reference</Th>
-                  <Th>Date</Th>
-                </Tr>
-              </THead>
-              <TBody>
-                {loading ? (
-                  <TableSkeleton colSpan={6} />
-                ) : rows.length === 0 ? (
-                  <TableEmpty colSpan={6}>No transactions found</TableEmpty>
-                ) : rows.map((t: any) => (
-                  <Tr key={t.id}>
-                    <Td emphasis="primary">
-                      {t.users?.username ? (
-                        <Link href={`/users/${t.user_id}`} style={{ color: 'var(--fg-link)' }}>@{t.users.username}</Link>
-                      ) : '—'}
-                    </Td>
-                    <Td><TypeLabel type={t.type} /></Td>
-                    <Td align="right" mono emphasis="primary">{formatNaira(t.amount)}</Td>
-                    <Td><StatusDot status={t.status} /></Td>
-                    <Td emphasis="muted" mono style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {t.reference_id || '—'}
-                    </Td>
-                    <Td emphasis="secondary" mono>{new Date(t.created_at).toLocaleString()}</Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-          </CardBody>
-        </Card>
-      )}
-
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 'var(--space-4)' }}>
-          <Button variant="secondary" size="sm" leftIcon={<ChevronLeft size={14} />} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-            Previous
-          </Button>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', letterSpacing: '0.03em' }}>
-            PAGE {page} / {totalPages} · {total.toLocaleString()} RESULTS
-          </span>
-          <Button variant="secondary" size="sm" rightIcon={<ChevronRight size={14} />} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
-            Next
-          </Button>
-        </div>
-      )}
-
-      <ExportModal
-        open={exportOpen}
-        onClose={() => setExportOpen(false)}
-        title="Transactions"
-        subtitle="Choose a time frame, then download CSV or print PDF."
-        range={exportRange}
-        onRangeChange={setExportRange}
-        metaLine="up to 50,000 rows"
-        exporting={exporting}
-        onCsv={exportCSV}
-        onPdf={exportPdf}
+      <StatStrip
+        items={[
+          { label: 'Matching', value: data ? countText(total) : '—', loading: showSkeleton },
+          { label: 'All transactions', value: countText(summary?.stats?.totalCount), loading: summaryLoading },
+          {
+            label: 'Total volume · any status',
+            value: moneyText(summary?.stats?.totalAmount),
+            mono: true,
+            loading: summaryLoading,
+            loadingWidth: '7em',
+          },
+          { label: 'Today · WAT', value: countText(summary?.today?.count), loading: summaryLoading },
+          {
+            label: 'Successful volume today',
+            value: moneyText(summary?.today?.success_volume),
+            mono: true,
+            loading: summaryLoading,
+            loadingWidth: '7em',
+          },
+        ]}
       />
+
+      {summary?.error ? (
+        <p className={s.hint} role="status">{summary.error} Use Refresh to try again.</p>
+      ) : null}
+
+      <FilterBar
+        aria-label="Filter transactions"
+        search={
+          <SearchInput
+            aria-label="Search transactions"
+            placeholder="Name, username, email, transaction ID or reference"
+            value={searchText}
+            onChange={setSearchText}
+            onDebouncedChange={applySearch}
+            loading={busy}
+          />
+        }
+        filters={
+          <>
+            <Select
+              inline
+              aria-label="Transaction type"
+              value={filters.type}
+              onChange={(event) => updateFilters({ type: event.target.value })}
+            >
+              <option value="">All types</option>
+              {TYPE_GROUPS.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((entry) => (
+                    <option key={entry.value} value={entry.value}>{entry.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+              {filters.type && !isKnownType(filters.type) ? (
+                <option value={filters.type}>{tokensLabel(filters.type, typeLabel)}</option>
+              ) : null}
+            </Select>
+            <Select
+              inline
+              aria-label="Status"
+              value={filters.status}
+              onChange={(event) => updateFilters({ status: event.target.value })}
+            >
+              <option value="">All statuses</option>
+              {STATUS_OPTIONS.map((entry) => (
+                <option key={entry.value} value={entry.value}>{entry.label}</option>
+              ))}
+              {filters.status && !isKnownStatus(filters.status) ? (
+                <option value={filters.status}>{tokensLabel(filters.status, statusText)}</option>
+              ) : null}
+            </Select>
+            <DateRangePicker
+              value={url.range}
+              onChange={applyRange}
+              presets={DATE_PRESETS}
+              legend="Created between"
+            />
+          </>
+        }
+        onClear={clearFilters}
+        active={active}
+      />
+
+      {data?.searchCapped ? (
+        <p className={s.hint} role="status">
+          More than 100 users match this search, so only transactions for the first 100 are listed. Add more of the
+          name, username or email to narrow it.
+        </p>
+      ) : null}
+
+      <ResponsiveView desktop={desktopList} mobile={mobileList} />
+
+      {data && !blocked ? (
+        <Pagination
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPageChange={setPage}
+          noun="transactions"
+          disabled={foreground}
+          label="Transaction pages"
+        />
+      ) : null}
+
+      <SidePanel
+        open={openId !== null}
+        onClose={closeDrawer}
+        title="Transaction"
+        subtitle={shown ? `${typeLabel(shown.type)} · ${userHandle(shown.users, shown.user_id)}` : undefined}
+      >
+        {shown ? (
+          <>
+            {detail.error ? (
+              <Notice
+                tone="warning"
+                compact
+                announce="polite"
+                actions={<Button variant="ghost" size="sm" onClick={retryDetail}>Try again</Button>}
+              >
+                {detail.error.message} Showing the details loaded earlier.
+              </Notice>
+            ) : null}
+            <div aria-busy={detail.isInitialLoading || detail.isRefreshing || undefined}>
+              <DetailBody transaction={shown} can={can} />
+            </div>
+          </>
+        ) : detail.error ? (
+          <ErrorState
+            compact
+            title={notFound ? 'Transaction not found' : 'This transaction could not be loaded'}
+            message={detail.error.message}
+            requestId={detail.error.requestId}
+            onRetry={retryDetail}
+            retrying={detail.isInitialLoading}
+          />
+        ) : (
+          <DetailSkeleton />
+        )}
+      </SidePanel>
+
+      {canExport ? (
+        <ExportModal
+          open={exportOpen}
+          onClose={() => setExportOpen(false)}
+          title="Export transactions"
+          subtitle="Exports transactions matching the current search, type and status for the time frame you pick."
+          rowLimitNote="Up to 50,000 rows. You are told if an export is cut short."
+          range={exportRange}
+          onRangeChange={setExportRange}
+          filtersOption={exportFilters}
+          exporting={exporting}
+          onCsv={() => void runExport('csv')}
+          onPdf={() => void runExport('pdf')}
+        />
+      ) : null}
     </div>
   );
 }

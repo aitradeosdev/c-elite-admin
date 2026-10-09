@@ -1,0 +1,113 @@
+.root {
+  --checkbox-border: var(--fg-tertiary);
+  --checkbox-fill: var(--bg-surface);
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 100%;
+  cursor: pointer;
+  user-select: none;
+}
+
+@media (hover: hover) {
+  .root:where(:not(.disabled)):hover { --checkbox-border: var(--fg-secondary); }
+}
+
+.root.invalid { --checkbox-border: var(--tone-danger-fg); }
+
+.root.filled {
+  --checkbox-border: var(--accent-base);
+  --checkbox-fill: var(--accent-base);
+}
+
+@media (hover: hover) {
+  .root.filled:where(:not(.disabled)):hover {
+    --checkbox-border: var(--accent-hover);
+    --checkbox-fill: var(--accent-hover);
+  }
+}
+
+.root.disabled { cursor: not-allowed; opacity: 0.5; }
+
+.control {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: calc(var(--text-md) * var(--leading-snug));
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--checkbox-border);
+  border-radius: var(--radius-xs);
+  background: var(--checkbox-fill);
+  color: var(--accent-fg);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.glyph {
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.filled .glyph {
+  opacity: 1;
+  transform: none;
+}
+
+.input:focus-visible + .box {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+}
+
+.invalid .input:focus-visible + .box { outline-color: var(--tone-danger-fg); }
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--fg-primary);
+}
+
+.described .label { font-weight: var(--weight-medium); }
+
+.description {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .box,
+  .glyph { transition: none; }
+}

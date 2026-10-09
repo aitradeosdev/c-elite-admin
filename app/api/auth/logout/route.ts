@@ -1,7 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
+import { verifyAdminJWT } from '../../../lib/jwt';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { writeAudit } from '../../../lib/audit';
+import { clientIpFrom, ok, requestId } from '../../../lib/api';
+
+async function revokeSessions(adminId: string): Promise<string | null> {
+  try {
+    const { data: cur, error: readError } = await supabaseAdmin
+      .from('admin_users').select('token_version').eq('id', adminId).single<{ token_version: number | null }>();
+    const next = (cur?.token_version ?? 0) + 1;
+    const { error: writeError } = await supabaseAdmin
+      .from('admin_users').update({ token_version: next }).eq('id', adminId);
+    return readError?.message ?? writeError?.message ?? null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
@@ -9,23 +24,27 @@ export async function POST(req: NextRequest) {
   if (token) {
     const admin = await verifyAdminJWT(token);
     if (admin) {
-      try {
-        const { data: cur } = await supabaseAdmin
-          .from('admin_users').select('token_version').eq('id', admin.admin_id).single();
-        const next = ((cur?.token_version as number) ?? 0) + 1;
-        await supabaseAdmin.from('admin_users').update({ token_version: next }).eq('id', admin.admin_id);
-      } catch {}
-      await supabaseAdmin.from('audit_log').insert({
-        admin_id: admin.admin_id,
+      const revokeError = await revokeSessions(admin.admin_id);
+      if (revokeError) console.error('admin logout session revoke failed:', revokeError);
+      await writeAudit({
+        admin: {
+          admin_id: admin.admin_id,
+          role_title: admin.role_title,
+          ip: clientIpFrom((name) => req.headers.get(name)),
+          user_agent: (req.headers.get('user-agent') || '').slice(0, 512),
+          request_id: await requestId(),
+        },
         action: 'LOGOUT',
         entity: 'admin_users',
         entity_id: admin.admin_id,
-        ip_address: req.headers.get('x-forwarded-for') || 'unknown',
+        result: revokeError ? 'partial' : 'success',
+        error: revokeError,
+        sensitivity: 'security',
       });
     }
   }
 
-  const response = NextResponse.json({ success: true });
+  const response = await ok();
   response.cookies.set('admin_token', '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

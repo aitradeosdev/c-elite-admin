@@ -1,0 +1,236 @@
+.root {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  color: var(--fg-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--space-10);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.copy {
+  flex: none;
+  margin-left: auto;
+}
+
+.copiedIcon {
+  color: var(--tone-success-fg);
+}
+
+.body {
+  position: relative;
+  max-height: var(--json-viewer-max-height, 20rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+.entry {
+  min-width: 0;
+}
+
+.entry:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 0;
+  border-radius: var(--radius-sm);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.indent {
+  padding-left: var(--space-4);
+}
+
+.text {
+  min-width: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 var(--space-1) 0 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  white-space: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .toggle:hover {
+    background: var(--bg-muted);
+  }
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 0;
+}
+
+.twisty {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-4);
+  height: calc(var(--leading-relaxed) * 1em);
+  color: var(--fg-secondary);
+}
+
+.chevron {
+  display: block;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.toggle[aria-expanded='true'] .chevron {
+  transform: rotate(90deg);
+}
+
+.children {
+  margin: 0 0 0 calc(var(--space-2) - 1px);
+  padding: 0 0 0 var(--space-2);
+  border-left: 1px solid var(--border-subtle);
+  list-style: none;
+}
+
+.more {
+  margin: 0;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-link);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .more:hover {
+    color: var(--accent-hover);
+  }
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 0;
+}
+
+.key,
+.punct,
+.masked {
+  color: var(--fg-secondary);
+}
+
+.count {
+  color: var(--fg-secondary);
+  font-style: italic;
+}
+
+.masked {
+  letter-spacing: 0.02em;
+}
+
+.string {
+  color: var(--fg-primary);
+}
+
+.number {
+  color: var(--code-number);
+}
+
+.boolean {
+  color: var(--code-boolean);
+}
+
+.nullValue {
+  color: var(--code-null);
+}
+
+.special {
+  color: var(--code-null);
+  font-style: italic;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  user-select: none;
+}
+
+@media (pointer: coarse) {
+  .row {
+    min-height: var(--space-6);
+    align-items: center;
+  }
+
+  .toggle {
+    align-self: stretch;
+    align-items: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle,
+  .chevron {
+    transition: none;
+  }
+}

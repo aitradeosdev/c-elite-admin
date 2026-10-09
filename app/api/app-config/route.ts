@@ -1,100 +1,139 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { redactAudit } from '../../lib/redact';
-import { validateConfigUrl } from '../../lib/configUrls';
+import { requireSuperAdmin } from '../../lib/guard';
+import { writeAudit, type AuditInput } from '../../lib/audit';
+import { fail, ok } from '../../lib/api';
+import { isSecretConfigKey } from '../../lib/configSecrets';
+import { planConfigWrite, readConfigKeys, readConfigPatch } from '../../(dashboard)/referral-management/appConfigRules';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
+const ENTITY = 'app_config';
+const ACTION = 'UPDATE_APP_CONFIG';
+const PUBLIC_CACHE_KEY = 'app_config:public';
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const NOT_SAVED = 'The settings could not be saved. Nothing was changed.';
+
+const ALLOWED_KEYS = new Set<string>([
+  'bill_vtpass_enabled', 'bill_novac_enabled', 'active_bill_provider',
+  'gateway_paystack_enabled', 'gateway_monnify_enabled', 'gateway_novac_enabled',
+  'min_withdrawal_amount', 'max_withdrawal_amount', 'max_daily_withdrawal', 'withdraw_fee',
+  'min_electricity_amount', 'electricity_quick_amounts',
+  'min_airtime_amount', 'max_airtime_amount',
+  'min_data_amount', 'max_data_amount',
+  'min_cable_amount', 'max_cable_amount',
+  'signup_bonus_amount', 'signup_bonus_condition', 'signup_bonus_active',
+  'referral_active', 'referral_referrer_bonus', 'referral_referee_bonus', 'referral_min_trade_usd', 'referral_max_per_day',
+  'level_bonus_active', 'levels_active',
+  'pin_reset_freeze_hours',
+  'large_withdrawal_flag_threshold',
+  'signup_rate_limit_per_hour',
+  'anomaly_dormant_days', 'anomaly_dormant_amount',
+  'anomaly_rapid_window_mins', 'anomaly_rapid_ratio',
+  'anomaly_failures_window_mins', 'anomaly_failures_threshold',
+  'critical_alert_amount', 'alert_email_batch',
+  'paystack_webhook_ips', 'monnify_webhook_ips', 'novac_webhook_ips',
+  'terms_url', 'privacy_url', 'chatwoot_base_url', 'chatwoot_website_token',
+  'store_url_android', 'store_url_ios',
+  'app_current_version', 'app_update_type', 'app_update_message',
+  'withdrawal_narrations',
+  'coupon_terms_of_use',
+  'iana_timezone',
+]);
+
+interface ConfigRow {
+  key: string;
+  value: string | null;
+}
+
+async function clearPublicCache(): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.rpc('edge_cache_delete', { p_key: PUBLIC_CACHE_KEY });
+    if (error) console.error('app config cache clear:', error.message);
+  } catch (error) {
+    console.error('app config cache clear:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function auditFields(recorded: boolean) {
+  return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
 }
 
 export async function GET(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
 
-  const url = new URL(req.url);
-  const keys = url.searchParams.get('keys');
+  const requested = readConfigKeys(new URL(req.url).searchParams.get('keys'));
+  if (!requested.ok) return fail('VALIDATION_ERROR', requested.message);
+  if (requested.keys && requested.keys.length === 0) return ok({ config: {} });
 
   let query = supabaseAdmin.from('app_config').select('key, value');
-  if (keys) query = query.in('key', keys.split(','));
-
+  if (requested.keys) query = query.in('key', requested.keys);
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('app config read:', error.message);
+    return fail('INTERNAL_ERROR', 'The configuration could not be loaded.');
+  }
 
-  const map: Record<string, string> = {};
-  (data || []).forEach((r) => { map[r.key] = r.value; });
-  return NextResponse.json({ config: map });
+  const config: Record<string, string | null> = {};
+  for (const row of (data ?? []) as ConfigRow[]) {
+    if (typeof row.key !== 'string' || isSecretConfigKey(row.key)) continue;
+    config[row.key] = row.value;
+  }
+  return ok({ config });
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await getAdmin(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { changes } = await req.json();
-  if (!changes || typeof changes !== 'object' || Object.keys(changes).length === 0) {
-    return NextResponse.json({ error: 'No changes provided' }, { status: 400 });
+  const body: unknown = await req.json().catch(() => null);
+  const checked = readConfigPatch(body, ALLOWED_KEYS);
+  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  const { patch } = checked;
+
+  const { data: rows, error: readError } = await supabaseAdmin
+    .from('app_config')
+    .select('key, value')
+    .in('key', Object.keys(patch.changes));
+  if (readError) {
+    console.error('app config current read:', readError.message);
+    return fail('INTERNAL_ERROR', 'The current values could not be read, so nothing was saved.');
+  }
+  const current: Record<string, string | null> = {};
+  for (const row of (rows ?? []) as ConfigRow[]) {
+    if (typeof row.key === 'string') current[row.key] = typeof row.value === 'string' ? row.value : null;
   }
 
-  const ALLOWED_KEYS = new Set<string>([
-    'bill_vtpass_enabled', 'bill_novac_enabled', 'active_bill_provider',
-    'gateway_paystack_enabled', 'gateway_monnify_enabled', 'gateway_novac_enabled',
-    'min_withdrawal_amount', 'max_withdrawal_amount', 'max_daily_withdrawal', 'withdraw_fee',
-    'min_electricity_amount', 'electricity_quick_amounts',
-    'min_airtime_amount', 'max_airtime_amount',
-    'min_data_amount', 'max_data_amount',
-    'min_cable_amount', 'max_cable_amount',
-    'signup_bonus_amount', 'signup_bonus_condition', 'signup_bonus_active',
-    'referral_active', 'referral_referrer_bonus', 'referral_referee_bonus', 'referral_min_trade_usd', 'referral_max_per_day',
-    'level_bonus_active', 'levels_active',
-    'pin_reset_freeze_hours',
-    'large_withdrawal_flag_threshold',
-    'signup_rate_limit_per_hour',
-    'anomaly_dormant_days', 'anomaly_dormant_amount',
-    'anomaly_rapid_window_mins', 'anomaly_rapid_ratio',
-    'anomaly_failures_window_mins', 'anomaly_failures_threshold',
-    'critical_alert_amount', 'alert_email_batch',
-    'paystack_webhook_ips', 'monnify_webhook_ips', 'novac_webhook_ips',
-    'terms_url', 'privacy_url', 'chatwoot_base_url', 'chatwoot_website_token', 'chatwoot_identity_key',
-    'store_url_android', 'store_url_ios',
-    'app_current_version', 'app_update_type', 'app_update_message',
-    'emergency_mode', 'withdrawal_narrations',
-    'coupon_terms_of_use',
-    'iana_timezone',
-  ]);
-  const incoming = Object.keys(changes);
-  const rejected = incoming.filter((k) => !ALLOWED_KEYS.has(k));
-  if (rejected.length > 0) {
-    return NextResponse.json({ error: `Unknown app_config keys: ${rejected.join(', ')}` }, { status: 400 });
+  const planned = planConfigWrite(patch, current);
+  if (!planned.ok) {
+    return fail('STATE_CONFLICT', planned.message, { details: { conflicts: planned.conflicts } });
   }
-  for (const k of incoming) {
-    const urlErr = validateConfigUrl(k, changes[k]);
-    if (urlErr) return NextResponse.json({ error: urlErr }, { status: 400 });
-  }
-  const keys = incoming;
-  const { data: before } = await supabaseAdmin
-    .from('app_config').select('key, value').in('key', keys);
-  const beforeMap: Record<string, string> = {};
-  (before || []).forEach((r) => { beforeMap[r.key] = r.value; });
+  const { plan } = planned;
+  const changed = Object.keys(plan.updates);
+  if (changed.length === 0) return ok({ changed, unchanged: plan.unchanged });
 
-  const rows = keys.map((key) => ({ key, value: String(changes[key]), updated_at: new Date().toISOString() }));
+  const audit: AuditInput = {
+    admin,
+    action: ACTION,
+    entity: ENTITY,
+    entity_id: plan.entityId,
+    before: plan.before,
+    after: plan.after,
+    sensitivity: plan.sensitivity,
+  };
+
+  const updatedAt = new Date().toISOString();
   const { error } = await supabaseAdmin
     .from('app_config')
-    .upsert(rows, { onConflict: 'key' });
+    .upsert(changed.map((key) => ({ key, value: plan.updates[key], updated_at: updatedAt })), { onConflict: 'key' });
+  if (error) {
+    console.error('app config save failed:', error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', NOT_SAVED);
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await clearPublicCache();
 
-  try {
-    await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' });
-  } catch {}
-
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id, action: 'UPDATE_APP_CONFIG', entity: 'app_config',
-    entity_id: 'batch', before_value: redactAudit(beforeMap), after_value: redactAudit(changes),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-
-  return NextResponse.json({ success: true });
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ changed, unchanged: plan.unchanged, ...auditFields(recorded.ok) });
 }

@@ -1,0 +1,123 @@
+.root {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.root .input {
+  padding-right: var(--space-8);
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-tertiary);
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.root:focus-within .chevron { color: var(--fg-secondary); }
+
+.open .chevron { transform: translateY(-50%) rotate(180deg); }
+
+.disabled .chevron { color: var(--fg-disabled); }
+
+.listbox {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1);
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--fg-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  cursor: pointer;
+  user-select: none;
+}
+
+.option[data-active] { background: var(--bg-subtle); }
+
+.option[data-active='keyboard'] {
+  outline: 2px solid var(--accent-base);
+  outline-offset: -2px;
+}
+
+.option:active { background: var(--bg-muted); }
+
+.check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-4);
+  height: calc(var(--text-md) * var(--leading-snug));
+  color: var(--accent-base);
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  min-width: 0;
+}
+
+.label { overflow-wrap: anywhere; }
+
+.option[aria-selected='true'] .label { font-weight: var(--weight-medium); }
+
+.description {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+}
+
+.empty {
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+}
+
+.hint {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron { transition: none; }
+}

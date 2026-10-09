@@ -1,6 +1,7 @@
 export function sanitizeSearch(raw: string, maxLen = 64): string {
   return raw
-    .replace(/[^a-zA-Z0-9 @._+\-]/g, '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{M}\p{N} @._+\-]/gu, '')
     .replace(/\.+/g, '.')
     .trim()
     .slice(0, maxLen);

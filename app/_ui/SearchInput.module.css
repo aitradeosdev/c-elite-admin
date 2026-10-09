@@ -1,0 +1,98 @@
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.leading {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-tertiary);
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.root:focus-within .leading { color: var(--fg-secondary); }
+
+.disabled .leading { color: var(--fg-disabled); }
+
+.root .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: calc(var(--space-3) + 14px + var(--space-2));
+  padding-right: var(--space-8);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.input::-webkit-search-decoration,
+.input::-webkit-search-cancel-button,
+.input::-webkit-search-results-button,
+.input::-webkit-search-results-decoration {
+  display: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.clear {
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .clear:hover {
+    background: var(--bg-muted);
+    color: var(--fg-primary);
+  }
+}
+
+.clear:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-primary);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--fg-secondary);
+  border-radius: var(--radius-pill);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leading,
+  .clear { transition: none; }
+  .spinner { animation-duration: 1.6s; }
+}

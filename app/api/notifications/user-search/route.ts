@@ -1,36 +1,42 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { requireAdminAll } from '../../../lib/guard';
+import { fail, ok } from '../../../lib/api';
 import { sanitizeSearch } from '../../../lib/sanitize';
+import {
+  SEARCH_LIMIT, SEARCH_MIN, SEARCH_PERMISSIONS, SEARCH_RATE_LIMIT, SEARCH_RATE_WINDOW_SECONDS,
+} from '../../../(dashboard)/notifications-broadcast/broadcastRules';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
-}
+const USER_COLUMNS = 'id, full_name, username, email, is_active, deleted_at, push_notifications_enabled';
 
 export async function GET(req: NextRequest) {
-  const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const canSearch = admin.is_super_admin
-    || (admin.page_permissions.includes('notifications_broadcast') && admin.page_permissions.includes('users'));
-  if (!canSearch) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireAdminAll(SEARCH_PERMISSIONS);
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
   const q = sanitizeSearch(new URL(req.url).searchParams.get('q') || '');
-  if (q.length < 3) return NextResponse.json({ users: [] });
+  if (q.length < SEARCH_MIN) return ok({ users: [] });
 
-  const { data: rlOk } = await supabaseAdmin.rpc('check_rate_limit_by_key', {
+  const { data: allowed, error: limitError } = await supabaseAdmin.rpc('check_rate_limit_by_key', {
     p_key: `admin_user_search:${admin.admin_id}`,
     p_action: 'admin_user_search',
-    p_limit: 60,
-    p_window_secs: 60,
+    p_limit: SEARCH_RATE_LIMIT,
+    p_window_secs: SEARCH_RATE_WINDOW_SECONDS,
   });
-  if (rlOk === false) return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+  if (limitError) console.error('broadcast user search rate limit:', limitError.message);
+  if (allowed === false) {
+    return fail('RATE_LIMITED', 'Too many user searches in the last minute. Wait a moment, then try again.');
+  }
 
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, full_name, username, email')
+    .select(USER_COLUMNS)
     .or(`username.ilike.%${q}%,email.ilike.%${q}%,full_name.ilike.%${q}%`)
-    .limit(10);
-  if (error) return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
-  return NextResponse.json({ users: data || [] });
+    .order('username', { ascending: true, nullsFirst: false })
+    .limit(SEARCH_LIMIT);
+  if (error) {
+    console.error('broadcast user search:', error.message);
+    return fail('INTERNAL_ERROR', 'The user search failed. Try again.');
+  }
+  return ok({ users: data ?? [] });
 }

@@ -1,205 +1,212 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { AlertTriangle, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ThemeSwitcher } from '../_ui/ThemeSwitcher';
+import s from './login.module.css';
 
-function EyeIcon({ visible }: { visible: boolean }) {
-  return visible ? (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx={12} cy={12} r={3} />
-    </svg>
-  ) : (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-      <line x1={1} y1={1} x2={23} y2={23} />
-    </svg>
-  );
+type FieldName = 'email' | 'username' | 'password';
+
+function safeNext(raw: string | null): string {
+  if (!raw) return '/dashboard';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/dashboard';
+  if (raw.startsWith('/login')) return '/dashboard';
+  return raw;
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = safeNext(searchParams.get('next'));
+
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [touched, setTouched] = useState<Record<FieldName, boolean>>({
+    email: false,
+    username: false,
+    password: false,
+  });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !username || !password || loading) return;
-    setLoading(true);
-    setError('');
+  useEffect(() => { emailRef.current?.focus(); }, []);
 
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, username, password }),
-    });
-
-    const data = await res.json();
-    setLoading(false);
-
-    if (!res.ok) {
-      setError(data.error || 'Login failed');
-      return;
+  const fieldError = (name: FieldName): string | null => {
+    if (!touched[name]) return null;
+    if (name === 'email') {
+      if (!email.trim()) return 'Enter your admin email.';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return 'That does not look like an email address.';
+      return null;
     }
-
-    router.push('/dashboard');
+    if (name === 'username') return username.trim() ? null : 'Enter your admin username.';
+    return password ? null : 'Enter your password.';
   };
 
-  return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <p style={styles.wordmark}>CardElite</p>
-        <p style={styles.adminLabel}>Admin Panel</p>
-        <div style={styles.divider} />
+  const markTouched = (name: FieldName) => setTouched((t) => ({ ...t, [name]: true }));
 
-        <form onSubmit={handleSubmit}>
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>EMAIL</label>
+  const complete = Boolean(email.trim() && username.trim() && password);
+
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setTouched({ email: true, username: true, password: true });
+      if (!complete || loading) return;
+
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), username: username.trim(), password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(
+            data?.error ||
+              (res.status === 429
+                ? 'Too many attempts. Wait a few minutes and try again.'
+                : 'Sign in failed. Check your details and try again.'),
+          );
+          return;
+        }
+        router.push(next);
+      } catch {
+        setError('Could not reach the server. Check your connection and try again.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [complete, loading, email, username, password, router, next],
+  );
+
+  return (
+    <main className={s.page}>
+      <div className={s.themeSlot}>
+        <ThemeSwitcher />
+      </div>
+
+      <section className={s.panel} aria-labelledby="login-heading">
+        <header className={s.head}>
+          <span className={s.mark} aria-hidden>CE</span>
+          <div className={s.headText}>
+            <h1 id="login-heading" className={s.wordmark}>CardElite</h1>
+            <p className={s.kicker}>Admin console</p>
+          </div>
+        </header>
+
+        <form onSubmit={handleSubmit} noValidate>
+          <div className={s.field}>
+            <label className={s.label} htmlFor="login-email">Email</label>
             <input
-              style={styles.input}
+              id="login-email"
+              ref={emailRef}
+              className={[s.input, fieldError('email') && s.inputInvalid].filter(Boolean).join(' ')}
               type="email"
+              inputMode="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onBlur={() => markTouched('email')}
               autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={loading}
+              aria-invalid={!!fieldError('email') || undefined}
+              aria-describedby={fieldError('email') ? 'login-email-error' : undefined}
             />
+            {fieldError('email') ? (
+              <p id="login-email-error" className={s.fieldError}>{fieldError('email')}</p>
+            ) : null}
           </div>
 
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>USERNAME</label>
+          <div className={s.field}>
+            <label className={s.label} htmlFor="login-username">Username</label>
             <input
-              style={styles.input}
+              id="login-username"
+              className={[s.input, fieldError('username') && s.inputInvalid].filter(Boolean).join(' ')}
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              onBlur={() => markTouched('username')}
               autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={loading}
+              aria-invalid={!!fieldError('username') || undefined}
+              aria-describedby={fieldError('username') ? 'login-username-error' : undefined}
             />
+            {fieldError('username') ? (
+              <p id="login-username-error" className={s.fieldError}>{fieldError('username')}</p>
+            ) : null}
           </div>
 
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>PASSWORD</label>
-            <div style={styles.passwordWrapper}>
+          <div className={s.field}>
+            <label className={s.label} htmlFor="login-password">Password</label>
+            <div className={s.passwordWrap}>
               <input
-                style={{ ...styles.input, paddingRight: 40 }}
+                id="login-password"
+                className={[s.input, s.inputWithAffix, fieldError('password') && s.inputInvalid].filter(Boolean).join(' ')}
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onBlur={() => markTouched('password')}
                 autoComplete="current-password"
+                disabled={loading}
+                aria-invalid={!!fieldError('password') || undefined}
+                aria-describedby={fieldError('password') ? 'login-password-error' : undefined}
               />
               <button
                 type="button"
-                style={styles.eyeBtn}
-                onClick={() => setShowPassword(!showPassword)}
+                className={s.affixBtn}
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                tabIndex={0}
               >
-                <EyeIcon visible={showPassword} />
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            {fieldError('password') ? (
+              <p id="login-password-error" className={s.fieldError}>{fieldError('password')}</p>
+            ) : null}
           </div>
 
-          {error && <p style={styles.error}>{error}</p>}
+          {error ? (
+            <div className={s.formError} role="alert">
+              <AlertTriangle size={15} className={s.formErrorIcon} />
+              <span>{error}</span>
+            </div>
+          ) : null}
 
-          <button
-            type="submit"
-            style={{ ...styles.loginBtn, opacity: loading ? 0.7 : 1 }}
-            disabled={loading}
-          >
-            {loading ? 'Logging in...' : 'Login'}
+          <button type="submit" className={s.submit} disabled={loading}>
+            {loading ? (
+              <>
+                <Loader2 size={15} className={s.spin} />
+                <span>Signing in…</span>
+              </>
+            ) : (
+              <span>Sign in</span>
+            )}
           </button>
         </form>
-      </div>
-    </div>
+
+        <p className={s.foot}>
+          Admin access is granted by a super administrator. Every sign-in attempt is recorded.
+        </p>
+      </section>
+    </main>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: '100vh',
-    backgroundColor: '#F7F7F7',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  card: {
-    width: 400,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 32,
-    boxShadow: '0 2px 16px rgba(0,0,0,0.08)',
-  },
-  wordmark: {
-    fontSize: 20,
-    fontWeight: 800,
-    color: '#111111',
-    textAlign: 'center',
-    margin: 0,
-  },
-  adminLabel: {
-    fontSize: 12,
-    color: '#888888',
-    textAlign: 'center',
-    margin: '4px 0 0',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#EEEEEE',
-    margin: '0 0 24px',
-  },
-  fieldGroup: {
-    marginBottom: 14,
-  },
-  label: {
-    display: 'block',
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#333333',
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  input: {
-    width: '100%',
-    backgroundColor: '#FFFFFF',
-    border: '1.5px solid #E8E8E8',
-    borderRadius: 8,
-    padding: '10px 14px',
-    fontSize: 13,
-    color: '#111111',
-    outline: 'none',
-    boxSizing: 'border-box',
-  },
-  passwordWrapper: {
-    position: 'relative',
-  },
-  eyeBtn: {
-    position: 'absolute',
-    right: 10,
-    top: '50%',
-    transform: 'translateY(-50%)',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: 14,
-    padding: 0,
-  },
-  loginBtn: {
-    width: '100%',
-    backgroundColor: '#111111',
-    color: '#FFFFFF',
-    border: 'none',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-    marginTop: 8,
-  },
-  error: {
-    fontSize: 12,
-    color: '#E53935',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-};
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className={s.page} />}>
+      <LoginForm />
+    </Suspense>
+  );
+}

@@ -16,6 +16,9 @@
   --fg-inverse:    #FAFAF9;        
   --fg-link:       #5B5BD6;
 
+  --select-chevron:          url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='%2357575A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  --select-chevron-disabled: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='%23B5B5B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+
   --border-default:#E5E5E2;        
   --border-subtle: #EFEFEC;        
   --border-strong: #D4D4D1;
@@ -38,6 +41,10 @@
   --tone-danger-fg:  #A11B1B;
   --tone-danger-border: #F2BDBD;
 
+  --tone-success-on: #FFFFFF;
+  --tone-danger-on:  #FFFFFF;
+  --tone-warning-on: #FFFFFF;
+
   --tone-info-bg:    #E5EFFD;
   --tone-info-fg:    #1554A8;
   --tone-info-border:#B7D1F2;
@@ -50,8 +57,20 @@
   --tone-purple-fg: #6E2BB0;
   --tone-purple-border: #DCC4F0;
 
+  --code-number:  #2F5D94;
+  --code-boolean: #7A3FA8;
+  --code-null:    #67676C;
+
   --ring-color:    rgba(91, 91, 214, 0.35);
+  --ring-color-danger: rgba(161, 27, 27, 0.30);
   --ring-offset:   var(--bg-app);
+
+  --overlay-scrim:         rgba(15, 15, 18, 0.50);
+  --overlay-scrim-light:   rgba(15, 15, 18, 0.32);
+  --overlay-scrim-heavy:   rgba(8, 8, 10, 0.92);
+  --overlay-control-bg:    rgba(255, 255, 255, 0.14);
+  --overlay-control-hover: rgba(255, 255, 255, 0.26);
+  --overlay-control-fg:    #FFFFFF;
 
   --shadow-xs:     0 1px 2px rgba(20, 20, 22, 0.04);
   --shadow-sm:     0 2px 4px rgba(20, 20, 22, 0.05), 0 1px 2px rgba(20, 20, 22, 0.04);
@@ -76,6 +95,9 @@
   --fg-inverse:    #131316;
   --fg-link:       #9D9DEC;
 
+  --select-chevron:          url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='%23A5A5AA' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  --select-chevron-disabled: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='%2345454A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+
   --border-default:#26262C;
   --border-subtle: #1E1E23;
   --border-strong: #32323A;
@@ -98,6 +120,10 @@
   --tone-danger-fg:  #F18A8A;
   --tone-danger-border: rgba(225, 73, 73, 0.32);
 
+  --tone-success-on: #0B0B0D;
+  --tone-danger-on:  #0B0B0D;
+  --tone-warning-on: #0B0B0D;
+
   --tone-info-bg:    rgba(85, 132, 220, 0.16);
   --tone-info-fg:    #91B5F2;
   --tone-info-border: rgba(85, 132, 220, 0.32);
@@ -110,8 +136,20 @@
   --tone-purple-fg:  #C49CF0;
   --tone-purple-border: rgba(160, 99, 215, 0.32);
 
+  --code-number:  #8DB0E0;
+  --code-boolean: #C3A0E6;
+  --code-null:    #8E8E94;
+
   --ring-color:    rgba(115, 115, 232, 0.40);
+  --ring-color-danger: rgba(225, 73, 73, 0.35);
   --ring-offset:   var(--bg-app);
+
+  --overlay-scrim:         rgba(0, 0, 0, 0.66);
+  --overlay-scrim-light:   rgba(0, 0, 0, 0.45);
+  --overlay-scrim-heavy:   rgba(0, 0, 0, 0.94);
+  --overlay-control-bg:    rgba(255, 255, 255, 0.12);
+  --overlay-control-hover: rgba(255, 255, 255, 0.22);
+  --overlay-control-fg:    #FFFFFF;
 
   --shadow-xs:     0 1px 2px rgba(0, 0, 0, 0.30);
   --shadow-sm:     0 2px 4px rgba(0, 0, 0, 0.30), 0 1px 2px rgba(0, 0, 0, 0.24);
@@ -146,7 +184,11 @@
   --radius-pill: 9999px;
 
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-label: 0.6875rem;
+  --tracking-label: 0.08em;
+  --content-max: 1600px;
 
   --text-xs:    0.6875rem;  
   --text-sm:    0.75rem;    
@@ -177,8 +219,11 @@
   --z-base:     0;
   --z-raised:   10;
   --z-sticky:   100;
+  --z-popover:  400;
   --z-overlay:  500;
+  --z-drawer:   510;
   --z-modal:    1000;
+  --z-lightbox: 1500;
   --z-toast:    2000;
   --z-tooltip:  3000;
 }

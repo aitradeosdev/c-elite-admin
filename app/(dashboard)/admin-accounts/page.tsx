@@ -1,439 +1,639 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  PageHeader, Card, CardBody, Table, THead, TBody, Tr, Th, Td, TableEmpty,
-  Button, Input, FieldShell, SidePanel, Modal, TableSkeleton, } from '../../_ui';
-import { useIsMobile } from '../../lib/useIsMobile';
-import { StatusDot, StatStrip } from '../_shared/statusUi';
+  Eye, LogOut, MoreHorizontal, Pencil, RotateCw, ShieldCheck, Trash2, UserCheck, UserPlus, UserX,
+} from 'lucide-react';
+import {
+  AccessDenied, Badge, Button, Card, CardBody, ErrorState, FilterBar, Menu, MobileDataList, Notice, PageHeader,
+  ResponsiveView, SearchInput, SidePanel, SkeletonLines, StatStrip, StatusDot, TBody, THead, Table, TableEmpty,
+  TableSkeleton, TableState, Tabs, Td, Th, Tr, combineCodecs, enumParam, useConfirm, usePermissions, useResource,
+  useTableSort, useToast, useUrlState, uuidParam,
+  type MenuEntryInput, type MobileDataListSortOption, type TableSkeletonColumn,
+} from '../../_ui';
+import { apiRequest, type ApiFailure } from '../../lib/apiClient';
+import { isUuid } from '../../lib/http';
+import { formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
+import {
+  STATUS_LABEL, STATUS_TABS, STATUS_TAB_VALUES, STATUS_TONE, adminHandle, adminStats, allowsAction, capabilitiesFor,
+  classifyMutation, hasRowActions, isSelf, rowActionRequest, statusOf, tabCounts, toAdminList, toMutationResult,
+  visibleAdmins, withAdmin,
+  type AdminCapabilities, type AdminList, type AdminRow, type MutationOutcome, type RowActionKind, type StatusTab,
+} from './model';
+import { ROW_ACTION_PENDING, rowActionConfirm, rowActionSuccess } from './confirmOptions';
+import { AccessCell } from './GrantParts';
+import { AdminEditor } from './AdminEditor';
+import { AdminDetails } from './AdminDetails';
+import s from './page.module.css';
 
-const ASSIGNABLE_PAGES = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'card_queue', label: 'Card Queue' },
-  { key: 'card_management', label: 'Card & Country Management' },
-  { key: 'card_type_builder', label: 'Card Type & Field Builder' },
-  { key: 'rates_management', label: 'Rates Management' },
-  { key: 'withdrawals', label: 'Withdrawals' },
-  { key: 'users', label: 'Users' },
-  { key: 'transactions_overview', label: 'Transactions Overview' },
-  { key: 'bonuses_rewards', label: 'Bonuses & Rewards' },
-  { key: 'referral_management', label: 'Referral Management' },
-  { key: 'coupons', label: 'Coupons' },
-  { key: 'notifications_broadcast', label: 'Notifications Broadcast' },
-  { key: 'notification_templates', label: 'Notification Templates' },
-  { key: 'email_templates', label: 'Email Templates' },
-  { key: 'platform_balance', label: 'Platform Balance' },
-  { key: 'activity', label: 'Activity (Audit Log)' },
-  { key: 'limits_fees', label: 'Limits & Fees' },
-  { key: 'admin_settings', label: 'Settings' },
-  { key: 'bill_settings', label: 'Bill Settings' },
-  { key: 'anomaly_alerts', label: 'Anomaly & Alerts' },
-  { key: 'security_limits', label: 'Rate Limits & Webhook IPs' },
-  { key: 'user_activity_monitor', label: 'User Activity Monitor' },
+const TITLE = 'Admin accounts';
+const SUBTITLE = 'Who can sign in to the console, what each admin can do, and their sessions. Super administrators only; times are WAT.';
+const COLUMN_COUNT = 6;
+const BAD_LINK = 'That admin link is not valid, so nothing was opened.';
+const MISSING_LINK = 'That admin account could not be found, so nothing was opened.';
+
+const ADMINS_URL = combineCodecs({
+  tab: enumParam('status', STATUS_TAB_VALUES, 'all'),
+  id: uuidParam('id'),
+});
+
+const SKELETON_COLUMNS: readonly TableSkeletonColumn[] = [
+  { width: 150, lines: 2 },
+  { width: 180 },
+  { width: 170, lines: 2 },
+  { width: 130, lines: 2 },
+  { width: 96 },
+  { width: 96, align: 'right', button: true },
 ];
 
-interface AdminUser {
-  id: string;
-  username: string;
-  email: string | null;
-  role_title: string;
-  page_permissions: string[];
-  last_login_at: string | null;
-  is_active: boolean;
-  is_super_admin: boolean;
-  deleted_at: string | null;
+const MOBILE_SORT: ReadonlyArray<MobileDataListSortOption> = [
+  { key: 'username', label: 'Username' },
+  { key: 'last_login_at', label: 'Last sign-in' },
+];
+
+const EMPTY_COPY: Readonly<Record<StatusTab, { title: string; hint: string }>> = {
+  all: { title: 'No admin accounts yet', hint: 'Create an account to give someone access to the console.' },
+  active: { title: 'No active admins', hint: 'Reactivate an account or create a new one.' },
+  inactive: { title: 'No inactive admins', hint: 'Deactivated accounts are listed here until they are deleted.' },
+  deleted: { title: 'No deleted admins', hint: 'Deleted accounts stay listed here for the record.' },
+};
+
+const NO_ADMINS: readonly AdminRow[] = [];
+
+function readFailureText(failure: ApiFailure): string {
+  return `Could not check the latest account details, so nothing was changed. ${failure.message}`;
 }
 
-type PanelMode = 'create' | 'edit' | null;
-
-function formatPages(pages: string[]) {
-  if (!pages || pages.length === 0) return '-';
-  const labels = pages.map((p) => ASSIGNABLE_PAGES.find((a) => a.key === p)?.label || p);
-  if (labels.length <= 3) return labels.join(', ');
-  return labels.slice(0, 3).join(', ') + '...';
-}
-
-function AdminActions({
-  admin, onEdit, onToggle, onDelete,
-}: {
-  admin: AdminUser;
-  onEdit: (a: AdminUser) => void;
-  onToggle: (a: AdminUser) => void;
-  onDelete: (a: AdminUser) => void;
-}) {
-  if (admin.is_super_admin || admin.deleted_at) return <span style={{ color: 'var(--fg-tertiary)' }}>—</span>;
-  return (
-    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-      <Button variant="ghost" size="sm" onClick={() => onEdit(admin)}>Edit</Button>
-      <Button variant="secondary" size="sm" onClick={() => onToggle(admin)}>
-        {admin.is_active ? 'Deactivate' : 'Reactivate'}
-      </Button>
-      {!admin.is_active && (
-        <Button variant="dangerSubtle" size="sm" onClick={() => onDelete(admin)}>Delete</Button>
-      )}
-    </div>
-  );
-}
-
-function AdminAccountsMobile({
-  admins, loading, onEdit, onToggle, onDelete,
-}: {
-  admins: AdminUser[];
-  loading: boolean;
-  onEdit: (a: AdminUser) => void;
-  onToggle: (a: AdminUser) => void;
-  onDelete: (a: AdminUser) => void;
-}) {
-  if (loading && admins.length === 0) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {[0, 1, 2, 3].map((k) => (
-          <div key={k} style={{ height: 96, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', opacity: 0.5 }} />
-        ))}
-      </div>
-    );
+function staleActionText(kind: RowActionKind, admin: AdminRow, self: boolean): string {
+  const handle = adminHandle(admin);
+  if (admin.deleted_at) return `${handle} was deleted, so nothing was changed.`;
+  if (self) return 'You cannot do this to your own account here.';
+  if (kind === 'reactivate') return `${handle} is already active.`;
+  if (kind === 'remove') {
+    return admin.is_super_admin ? 'Super admin accounts cannot be deleted.' : `Deactivate ${handle} before deleting the account.`;
   }
-  if (admins.length === 0) {
-    return (
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '48px 20px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--text-md)' }}>
-        No admin accounts yet
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {admins.map((admin) => (
-        <div key={admin.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' }}>
-                {admin.username}
-                {admin.deleted_at && <span style={{ color: 'var(--tone-danger-fg)', fontWeight: 500, fontSize: 'var(--text-xs)' }}> (deleted admin)</span>}
-              </div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', marginTop: 2 }}>{admin.role_title}</div>
-            </div>
-            <StatusDot status={admin.is_active ? 'Active' : 'Inactive'} tone={admin.is_active ? 'success' : 'neutral'} />
-          </div>
-          <div style={{ marginTop: 8, fontSize: 'var(--text-sm)', color: admin.email ? 'var(--fg-secondary)' : 'var(--tone-danger-fg)' }}>
-            {admin.email || '— (no alerts)'}
-          </div>
-          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
-            {formatPages(admin.page_permissions)}
-          </div>
-          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)' }}>
-            last login {admin.last_login_at ? new Date(admin.last_login_at).toLocaleDateString() : 'never'}
-          </div>
-          {!admin.is_super_admin && !admin.deleted_at && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-              <Button variant="ghost" size="sm" onClick={() => onEdit(admin)}>Edit</Button>
-              <Button variant="secondary" size="sm" onClick={() => onToggle(admin)}>
-                {admin.is_active ? 'Deactivate' : 'Reactivate'}
-              </Button>
-              {!admin.is_active && (
-                <Button variant="dangerSubtle" size="sm" onClick={() => onDelete(admin)}>Delete</Button>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+  return `${handle} is already inactive.`;
+}
+
+function signInText(value: string | null): string {
+  return value ? `Signed in ${formatAge(value)} ago` : 'Never signed in';
 }
 
 export default function AdminAccountsPage() {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <AdminAccounts />
+    </Suspense>
+  );
+}
+
+function PageFallback() {
+  return (
+    <div>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <ResponsiveView
+        desktop={
+          <Card>
+            <CardBody flush>
+              <Table flush aria-label="Admin accounts">
+                <TBody>
+                  <TableSkeleton columns={SKELETON_COLUMNS} rows={5} />
+                </TBody>
+              </Table>
+            </CardBody>
+          </Card>
+        }
+        mobile={
+          <MobileDataList<AdminRow>
+            ariaLabel="Admin accounts"
+            items={NO_ADMINS}
+            getKey={(row) => row.id}
+            renderRow={(row) => ({ primary: adminHandle(row) })}
+            loading
+            initialLoading
+            skeletonRows={5}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+function AdminCell({ admin, self }: { admin: AdminRow; self: boolean }) {
+  return (
+    <div className={s.stack}>
+      <span className={s.nameLine}>
+        <span className={s.lead}>{adminHandle(admin)}</span>
+        {self ? <Badge tone="neutral">You</Badge> : null}
+      </span>
+      <span className={s.sub}>{admin.role_title || 'No role title'}</span>
+    </div>
+  );
+}
+
+function EmailCell({ admin }: { admin: AdminRow }) {
+  if (admin.email) return <span className={s.email}>{admin.email}</span>;
+  return <span className={s.warnText}>No email, cannot sign in</span>;
+}
+
+function SignInCell({ value }: { value: string | null }) {
+  if (!value) return <span className={s.muted}>Never</span>;
+  return (
+    <div className={s.stack}>
+      <span className={s.time}>{formatBusinessDateTime(value)}</span>
+      <span className={s.sub}>{formatAge(value)} ago</span>
+    </div>
+  );
+}
+
+function StatusCell({ admin }: { admin: AdminRow }) {
+  const status = statusOf(admin);
+  return (
+    <span className={s.statusCell}>
+      <StatusDot status={status} tone={STATUS_TONE[status]} label={STATUS_LABEL[status]} />
+      {admin.is_super_admin ? (
+        <Badge tone="neutral">
+          <ShieldCheck size={12} aria-hidden />
+          Super admin
+        </Badge>
+      ) : null}
+    </span>
+  );
+}
+
+function AdminAccounts() {
+  const { isSuperAdmin } = usePermissions();
+  const { show: notify } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
-  const isMobile = useIsMobile();
-  const [admins, setAdmins] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [panelMode, setPanelMode] = useState<PanelMode>(null);
-  const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
+  const searchParams = useSearchParams();
+  const rawId = searchParams.get('id');
+  const [url, setUrl] = useUrlState(ADMINS_URL);
+  const [query, setQuery] = useState('');
+  const { sort, setSort, toggle: toggleSort } = useTableSort(null);
+  const [creating, setCreating] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+  const actingRef = useRef(false);
+  const listRegionRef = useRef<HTMLDivElement>(null);
+  const createButtonRef = useRef<HTMLButtonElement>(null);
 
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [roleTitle, setRoleTitle] = useState('');
-  const [selectedPages, setSelectedPages] = useState<string[]>([]);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [saving, setSaving] = useState(false);
+  const list = useResource<AdminList>(
+    isSuperAdmin ? 'admin-accounts' : null,
+    (signal) => apiRequest('/api/admin-accounts', { signal, select: toAdminList }),
+  );
+  const { refresh: refreshList, mutate: mutateList } = list;
+  const data = list.data;
+  const admins = data?.admins ?? NO_ADMINS;
+  const currentAdminId = data?.currentAdminId ?? null;
+  const rows = useMemo(() => visibleAdmins(admins, url.tab, query, sort), [admins, url.tab, query, sort]);
+  const counts = useMemo(() => tabCounts(admins), [admins]);
+  const stats = useMemo(() => adminStats(admins), [admins]);
+  const openAdmin = url.id ? admins.find((row) => row.id === url.id) ?? null : null;
 
-  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
-  const [deleteInput, setDeleteInput] = useState('');
-  const [deleteError, setDeleteError] = useState('');
+  const badLink = rawId !== null && rawId.trim() !== '' && !isUuid(rawId.trim());
 
   useEffect(() => {
-    fetchAdmins();
+    if (!badLink) return;
+    notify(BAD_LINK, 'warning');
+    setUrl((value) => value);
+  }, [badLink, notify, setUrl]);
+
+  useEffect(() => {
+    if (!url.id || !data || list.isPreviousData || openAdmin) return;
+    notify(MISSING_LINK, 'warning');
+    setUrl((value) => ({ ...value, id: null }));
+  }, [url.id, data, list.isPreviousData, openAdmin, notify, setUrl]);
+
+  const readFresh = useCallback(async (): Promise<AdminList | null> => {
+    const result = await apiRequest('/api/admin-accounts', { select: toAdminList });
+    if (!result.ok) {
+      if (result.error.status !== 401) notify(readFailureText(result.error), 'error');
+      if (result.error.status === 403) router.refresh();
+      return null;
+    }
+    mutateList(result.data);
+    return result.data;
+  }, [mutateList, notify, router]);
+
+  const applyAdmin = useCallback((admin: AdminRow) => {
+    mutateList((previous) => withAdmin(previous, admin));
+  }, [mutateList]);
+
+  const refreshQuietly = useCallback(() => {
+    void refreshList({ background: true });
+  }, [refreshList]);
+
+  const openRow = useCallback((admin: AdminRow) => {
+    setCreating(false);
+    setUrl((value) => ({ ...value, id: admin.id }));
+  }, [setUrl]);
+
+  const closePanel = useCallback(() => {
+    setCreating(false);
+    setUrl((value) => (value.id === null ? value : { ...value, id: null }));
+  }, [setUrl]);
+
+  const startCreate = useCallback(() => {
+    setUrl((value) => (value.id === null ? value : { ...value, id: null }));
+    setCreating(true);
+  }, [setUrl]);
+
+  const changeTab = useCallback((next: StatusTab) => {
+    setUrl((value) => ({ ...value, tab: next }));
+  }, [setUrl]);
+
+  const rowFocus = useCallback((id: string | null) => () => {
+    const region = listRegionRef.current;
+    if (!region) return null;
+    const opener = id
+      ? Array.from(region.querySelectorAll<HTMLElement>('[data-admin-open]')).find(
+          (element) => element.dataset.adminOpen === id && element.getClientRects().length > 0,
+        )
+      : undefined;
+    return opener ?? region;
   }, []);
 
-  const fetchAdmins = async (silent = false) => {
-    if (!silent) setLoading(true);
-    const res = await fetch('/api/admin-accounts');
-    if (res.status === 403) { if (!silent) setLoading(false); return; }
-    const data = await res.json();
-    setAdmins(data.admins || []);
-    if (!silent) setLoading(false);
+  const report = (kind: RowActionKind, admin: AdminRow, outcome: MutationOutcome) => {
+    switch (outcome.kind) {
+      case 'done':
+        notify(
+          outcome.result.changed ? rowActionSuccess(kind, admin) : 'Nothing changed. The account was already in that state.',
+          'success',
+        );
+        if (outcome.result.warning) notify(outcome.result.warning, 'warning');
+        return;
+      case 'unknown':
+        notify(outcome.message, 'error');
+        return;
+      case 'stale':
+        notify(outcome.message, 'warning');
+        return;
+      case 'refused':
+        notify(outcome.message, 'error');
+        router.refresh();
+        return;
+      case 'expired':
+        return;
+    }
   };
 
-  const openCreate = () => {
-    setEditTarget(null);
-    setUsername(''); setEmail(''); setPassword(''); setConfirmPassword('');
-    setRoleTitle(''); setSelectedPages([]); setFormError('');
-    setPanelMode('create');
+  const runAction = async (kind: RowActionKind, target: AdminRow) => {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setActing(target.id);
+    let sent = false;
+    let settled = false;
+    try {
+      const fresh = await readFresh();
+      if (!fresh) return;
+      const live = fresh.admins.find((row) => row.id === target.id);
+      if (!live) {
+        notify(`${adminHandle(target)} no longer exists, so nothing was changed.`, 'warning');
+        return;
+      }
+      if (!allowsAction(capabilitiesFor(live, fresh.currentAdminId), kind)) {
+        notify(staleActionText(kind, live, isSelf(live, fresh.currentAdminId)), 'warning');
+        return;
+      }
+      const decision = await confirm<MutationOutcome>({
+        ...rowActionConfirm(kind, live),
+        pendingLabel: ROW_ACTION_PENDING[kind],
+        action: async ({ reason }) => {
+          sent = true;
+          const request = rowActionRequest(kind, live, reason);
+          const attempt = classifyMutation(await apiRequest('/api/admin-accounts', {
+            method: request.method,
+            body: request.body,
+            select: toMutationResult,
+          }));
+          if (attempt.kind === 'retry') throw new Error(attempt.message);
+          settled = true;
+          if (attempt.kind === 'done' && attempt.result.admin) applyAdmin(attempt.result.admin);
+          if (attempt.kind !== 'expired') await refreshList({ background: true });
+          return attempt;
+        },
+        returnFocusTo: rowFocus(live.id),
+      });
+      if (decision?.value) report(kind, live, decision.value);
+    } finally {
+      actingRef.current = false;
+      setActing(null);
+      if (sent && !settled) refreshQuietly();
+    }
   };
 
-  const openEdit = (admin: AdminUser) => {
-    setEditTarget(admin);
-    setUsername(admin.username);
-    setEmail(admin.email || '');
-    setPassword(''); setConfirmPassword('');
-    setRoleTitle(admin.role_title);
-    setSelectedPages(admin.page_permissions || []);
-    setFormError('');
-    setPanelMode('edit');
-  };
+  const menuItems = (admin: AdminRow, capabilities: AdminCapabilities): MenuEntryInput[] => [
+    capabilities.revoke && {
+      label: 'Sign out everywhere',
+      icon: <LogOut size={14} aria-hidden />,
+      onSelect: () => void runAction('revoke', admin),
+    },
+    capabilities.deactivate && {
+      label: 'Deactivate',
+      icon: <UserX size={14} aria-hidden />,
+      onSelect: () => void runAction('deactivate', admin),
+    },
+    capabilities.reactivate && {
+      label: 'Reactivate',
+      icon: <UserCheck size={14} aria-hidden />,
+      onSelect: () => void runAction('reactivate', admin),
+    },
+    capabilities.remove && { type: 'separator' },
+    capabilities.remove && {
+      label: 'Delete account',
+      icon: <Trash2 size={14} aria-hidden />,
+      danger: true,
+      onSelect: () => void runAction('remove', admin),
+    },
+  ];
 
-  const closePanel = () => { setPanelMode(null); setEditTarget(null); };
-
-  const togglePage = (key: string) => {
-    setSelectedPages((prev) =>
-      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]
+  const actionsFor = (admin: AdminRow, withOpen: boolean): ReactNode => {
+    const capabilities = capabilitiesFor(admin, currentAdminId);
+    const handle = adminHandle(admin);
+    const more = hasRowActions(capabilities);
+    if (!withOpen && !more) return undefined;
+    return (
+      <div className={s.rowActions}>
+        {withOpen ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={capabilities.edit ? <Pencil size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
+            aria-label={`${capabilities.edit ? 'Edit' : 'View'} ${handle}`}
+            aria-haspopup="dialog"
+            data-admin-open={admin.id}
+            onClick={() => openRow(admin)}
+          >
+            {capabilities.edit ? 'Edit' : 'View'}
+          </Button>
+        ) : null}
+        {more ? (
+          <Menu
+            align="end"
+            aria-label={`Actions for ${handle}`}
+            items={menuItems(admin, capabilities)}
+            trigger={(props) => (
+              <Button
+                {...props}
+                variant="ghost"
+                size="sm"
+                iconOnly
+                leftIcon={<MoreHorizontal size={16} aria-hidden />}
+                aria-label={`More actions for ${handle}`}
+                loading={acting === admin.id}
+                disabled={acting !== null}
+              />
+            )}
+          />
+        ) : null}
+      </div>
     );
   };
 
-  const handleSave = async () => {
-    setFormError('');
-    if (!username.trim() || !roleTitle.trim()) { setFormError('Username and role title are required.'); return; }
-    if (panelMode === 'create' && !email.trim()) { setFormError('Email is required (used for security alerts).'); return; }
-    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setFormError('Enter a valid email.'); return; }
-    if (panelMode === 'create' && !password) { setFormError('Password is required.'); return; }
-    if (password && password !== confirmPassword) { setFormError('Passwords do not match.'); return; }
-    if (selectedPages.length === 0) { setFormError('Assign at least one page.'); return; }
+  if (!isSuperAdmin || (list.error?.status === 403 && data === undefined)) {
+    return (
+      <div>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <AccessDenied
+          title="Super administrators only"
+          message="Admin accounts are managed by super administrators. Ask one if you need an account created or changed."
+        />
+      </div>
+    );
+  }
 
-    setSaving(true);
-    const res = await fetch('/api/admin-accounts', {
-      method: panelMode === 'create' ? 'POST' : 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: editTarget?.id,
-        username: username.trim(),
-        email: email.trim(),
-        password: password || undefined,
-        role_title: roleTitle.trim(),
-        page_permissions: selectedPages,
-      }),
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (!res.ok) { setFormError(data.error || 'Failed to save.'); return; }
-    closePanel();
-    fetchAdmins(true);
-  };
+  const listError = list.error;
+  const loaded = data !== undefined;
+  const foreground = list.isInitialLoading || list.isRefreshing;
+  const blocked = !loaded && listError !== null;
+  const showSkeleton = !loaded && !blocked;
+  const tableBusy = loaded && list.isRefreshing;
+  const searching = query.trim() !== '';
+  const emptyTitle = searching ? 'No admins match this search' : EMPTY_COPY[url.tab].title;
+  const emptyHint = searching ? 'Try a username, email or role title, or clear the search.' : EMPTY_COPY[url.tab].hint;
+  const clearSearch = searching ? (
+    <Button variant="secondary" size="sm" onClick={() => setQuery('')}>Clear search</Button>
+  ) : undefined;
+  const retry = () => void refreshList();
+  const tabItems = STATUS_TABS.map((item) => ({
+    value: item.value,
+    label: item.label,
+    count: loaded ? counts[item.value].toLocaleString('en-NG') : undefined,
+  }));
 
-  const handleToggleActive = async (admin: AdminUser) => {
-    await fetch('/api/admin-accounts', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: admin.id, is_active: !admin.is_active }),
-    });
-    fetchAdmins(true);
-  };
+  const staleNotice = listError && loaded ? (
+    <Notice
+      tone="warning"
+      compact
+      announce="polite"
+      meta={list.lastUpdatedAt ? `Showing the list from ${formatBusinessTime(new Date(list.lastUpdatedAt))} WAT.` : undefined}
+      actions={<Button variant="ghost" size="sm" onClick={retry}>Try again</Button>}
+    >
+      The list could not be refreshed. {listError.message}
+    </Notice>
+  ) : null;
 
-  const handleDelete = async () => {
-    if (!deleteTarget || deleteInput !== 'DELETE') return;
-    setDeleteError('');
-    const res = await fetch('/api/admin-accounts', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: deleteTarget.id }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setDeleteError(data.error || 'Failed to delete.');
-      return;
-    }
-    setDeleteTarget(null);
-    setDeleteInput('');
-    fetchAdmins(true);
-  };
+  const desktop = (
+    <Card>
+      <CardBody flush>
+        <Table flush aria-label="Admin accounts" busy={tableBusy}>
+          <THead>
+            <Tr>
+              <Th sortKey="username" sort={sort} onSort={toggleSort}>Admin</Th>
+              <Th>Email</Th>
+              <Th>Access</Th>
+              <Th sortKey="last_login_at" sort={sort} onSort={toggleSort}>Last sign-in</Th>
+              <Th>Status</Th>
+              <Th align="right"><span className={s.srOnly}>Actions</span></Th>
+            </Tr>
+          </THead>
+          <TBody>
+            {blocked && listError ? (
+              <TableState colSpan={COLUMN_COUNT}>
+                <ErrorState
+                  compact
+                  title="Admin accounts could not be loaded"
+                  message={listError.message}
+                  requestId={listError.requestId}
+                  onRetry={retry}
+                  retrying={foreground}
+                />
+              </TableState>
+            ) : showSkeleton ? (
+              <TableSkeleton columns={SKELETON_COLUMNS} rows={5} />
+            ) : rows.length === 0 ? (
+              <TableEmpty colSpan={COLUMN_COUNT} title={emptyTitle} hint={emptyHint} actions={clearSearch} />
+            ) : (
+              rows.map((admin) => (
+                <Tr key={admin.id} selected={admin.id === url.id} onActivate={() => openRow(admin)}>
+                  <Td><AdminCell admin={admin} self={isSelf(admin, currentAdminId)} /></Td>
+                  <Td><EmailCell admin={admin} /></Td>
+                  <Td><AccessCell admin={admin} /></Td>
+                  <Td><SignInCell value={admin.last_login_at} /></Td>
+                  <Td><StatusCell admin={admin} /></Td>
+                  <Td align="right">{actionsFor(admin, true)}</Td>
+                </Tr>
+              ))
+            )}
+          </TBody>
+        </Table>
+      </CardBody>
+    </Card>
+  );
 
-  const openDelete = (admin: AdminUser) => { setDeleteTarget(admin); setDeleteInput(''); setDeleteError(''); };
+  const mobile = (
+    <MobileDataList<AdminRow>
+      ariaLabel="Admin accounts"
+      items={rows}
+      getKey={(admin) => admin.id}
+      loading={foreground}
+      initialLoading={showSkeleton}
+      busy={tableBusy}
+      error={listError ? listError.message : null}
+      errorTitle="Admin accounts could not be loaded"
+      onRetry={retry}
+      skeletonRows={5}
+      empty={{ title: emptyTitle, hint: emptyHint, actions: clearSearch }}
+      sortOptions={MOBILE_SORT}
+      sort={sort}
+      onSortChange={setSort}
+      renderRow={(admin) => ({
+        primary: isSelf(admin, currentAdminId) ? `${adminHandle(admin)} · You` : adminHandle(admin),
+        secondary: admin.role_title || 'No role title',
+        status: <StatusCell admin={admin} />,
+        meta: `${admin.email ?? 'No email'} · ${signInText(admin.last_login_at)}`,
+        flag: !admin.email && !admin.deleted_at ? 'warning' : null,
+        flagLabel: 'No email, so this admin cannot sign in',
+        onClick: () => openRow(admin),
+        actions: actionsFor(admin, false),
+      })}
+    />
+  );
 
-  const activeCount = admins.filter((a) => a.is_active && !a.deleted_at).length;
+  const panelFocus = rowFocus(url.id);
 
   return (
     <div>
       <PageHeader
-        title="Admin Accounts"
-        subtitle="Provision console operators, scope their page access, and revoke when needed."
+        title={TITLE}
+        subtitle={SUBTITLE}
         actions={
-          <Button variant="primary" size="sm" onClick={openCreate}>+ Create Admin</Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<RotateCw size={14} aria-hidden />}
+              loading={list.isRefreshing}
+              onClick={retry}
+            >
+              Refresh
+            </Button>
+            <Button
+              ref={createButtonRef}
+              variant="primary"
+              size="sm"
+              leftIcon={<UserPlus size={14} aria-hidden />}
+              aria-haspopup="dialog"
+              onClick={startCreate}
+            >
+              New admin
+            </Button>
+          </>
         }
       />
 
-      <StatStrip items={[
-        { label: 'Total accounts', value: admins.length.toLocaleString() },
-        { label: 'Active', value: activeCount.toLocaleString() },
-      ]} />
+      <StatStrip
+        aria-label="Admin account totals"
+        items={[
+          { label: 'Active', value: stats.active.toLocaleString('en-NG'), loading: showSkeleton },
+          { label: 'Inactive', value: stats.inactive.toLocaleString('en-NG'), loading: showSkeleton },
+          {
+            label: 'Super admins',
+            value: stats.superAdmins.toLocaleString('en-NG'),
+            hint: `${stats.activeSuperAdmins.toLocaleString('en-NG')} active`,
+            loading: showSkeleton,
+          },
+          {
+            label: 'Hold critical actions',
+            value: stats.critical.toLocaleString('en-NG'),
+            hint: 'Active admins, not counting super admins',
+            loading: showSkeleton,
+          },
+        ]}
+      />
 
-      {isMobile ? (
-        <AdminAccountsMobile
-          admins={admins}
-          loading={loading}
-          onEdit={openEdit}
-          onToggle={handleToggleActive}
-          onDelete={openDelete}
+      <div className={s.tabsRow}>
+        <Tabs<StatusTab> aria-label="Account status" value={url.tab} onChange={changeTab} items={tabItems} />
+      </div>
+
+      <FilterBar
+        aria-label="Filter admin accounts"
+        search={
+          <SearchInput
+            aria-label="Search admin accounts"
+            placeholder="Username, email or role title"
+            value={query}
+            onChange={setQuery}
+          />
+        }
+        onClear={() => setQuery('')}
+        active={searching}
+      />
+
+      {staleNotice}
+
+      <div ref={listRegionRef} className={s.listRegion} tabIndex={-1} role="region" aria-label="Admin account list">
+        <ResponsiveView desktop={desktop} mobile={mobile} />
+      </div>
+
+      {creating ? (
+        <AdminEditor
+          key="create"
+          mode="create"
+          admin={null}
+          readFresh={readFresh}
+          applyAdmin={applyAdmin}
+          refreshList={refreshQuietly}
+          onClose={closePanel}
+          returnFocusTo={() => createButtonRef.current}
         />
-      ) : (
-        <Card>
-          <CardBody flush>
-            <Table flush>
-              <THead>
-                <Tr>
-                  <Th>Username</Th>
-                  <Th>Email</Th>
-                  <Th>Role Title</Th>
-                  <Th>Assigned Pages</Th>
-                  <Th>Last Login</Th>
-                  <Th>Status</Th>
-                  <Th align="right">Actions</Th>
-                </Tr>
-              </THead>
-              <TBody>
-                {loading ? (
-                  <TableSkeleton colSpan={7} />
-                ) : admins.length === 0 ? (
-                  <TableEmpty colSpan={7}>No admin accounts yet</TableEmpty>
-                ) : admins.map((admin) => (
-                  <Tr key={admin.id}>
-                    <Td emphasis="primary">
-                      {admin.username}
-                      {admin.deleted_at && <span style={{ color: 'var(--tone-danger-fg)', fontWeight: 500, fontSize: 'var(--text-xs)' }}> (deleted admin)</span>}
-                    </Td>
-                    <Td style={{ color: admin.email ? undefined : 'var(--tone-danger-fg)' }} emphasis={admin.email ? 'secondary' : undefined}>
-                      {admin.email || '— (no alerts)'}
-                    </Td>
-                    <Td>{admin.role_title}</Td>
-                    <Td emphasis="secondary" style={{ maxWidth: 200 }}>{formatPages(admin.page_permissions)}</Td>
-                    <Td emphasis="secondary" mono>{admin.last_login_at ? new Date(admin.last_login_at).toLocaleDateString() : 'Never'}</Td>
-                    <Td>
-                      <StatusDot status={admin.is_active ? 'Active' : 'Inactive'} tone={admin.is_active ? 'success' : 'neutral'} />
-                    </Td>
-                    <Td align="right">
-                      <AdminActions admin={admin} onEdit={openEdit} onToggle={handleToggleActive} onDelete={openDelete} />
-                    </Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-          </CardBody>
-        </Card>
-      )}
-
-      <SidePanel
-        open={!!panelMode}
-        onClose={closePanel}
-        title={panelMode === 'create' ? 'Create Admin Account' : 'Edit Admin Account'}
-        footer={
-          <Button variant="primary" onClick={handleSave} disabled={saving} style={{ width: '100%' }}>
-            {saving ? 'Saving...' : panelMode === 'create' ? 'Create Account' : 'Save Changes'}
-          </Button>
-        }
-      >
-        <FieldShell label="Username">
-          <Input value={username} onChange={(e) => setUsername(e.target.value)} disabled={panelMode === 'edit'} />
-        </FieldShell>
-
-        <FieldShell label={<>Email <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--fg-tertiary)' }}>(receives security alerts)</span></>}>
-          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@cardelite.ng" />
-        </FieldShell>
-
-        <FieldShell label={<>Password {panelMode === 'edit' && <span style={{ fontWeight: 400, textTransform: 'none' }}>(leave blank to keep)</span>}</>}>
-          <div style={{ position: 'relative' }}>
-            <Input style={{ paddingRight: 36 }} type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} />
-            <button style={eyeBtn} type="button" onClick={() => setShowPassword(!showPassword)}>
-              <EyeIcon visible={showPassword} />
-            </button>
-          </div>
-        </FieldShell>
-
-        <FieldShell label="Confirm Password">
-          <div style={{ position: 'relative' }}>
-            <Input style={{ paddingRight: 36 }} type={showConfirm ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
-            <button style={eyeBtn} type="button" onClick={() => setShowConfirm(!showConfirm)}>
-              <EyeIcon visible={showConfirm} />
-            </button>
-          </div>
-        </FieldShell>
-
-        <FieldShell label="Role Title">
-          <Input placeholder="e.g. Card Reviewer" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
-        </FieldShell>
-
-        <FieldShell label="Assigned Pages">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-            {ASSIGNABLE_PAGES.map((page) => {
-              const checked = selectedPages.includes(page.key);
-              return (
-                <label key={page.key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <div
-                    style={{
-                      width: 16, height: 16, borderWidth: '1.5px', borderStyle: 'solid',
-                      borderColor: checked ? 'var(--accent-base)' : 'var(--border-default)',
-                      borderRadius: 3, backgroundColor: checked ? 'var(--accent-base)' : 'var(--bg-surface)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer',
-                    }}
-                    onClick={() => togglePage(page.key)}
-                  >
-                    {checked && <span style={{ fontSize: 10, color: 'var(--accent-fg)', fontWeight: 700 }}>✓</span>}
-                  </div>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)' }}>{page.label}</span>
-                </label>
-              );
-            })}
-          </div>
-        </FieldShell>
-
-        {formError && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--tone-danger-fg)', margin: '8px 0' }}>{formError}</p>}
-      </SidePanel>
-
-      <Modal
-        open={!!deleteTarget}
-        onClose={() => { setDeleteTarget(null); setDeleteInput(''); setDeleteError(''); }}
-        title="Delete Admin Account"
-        subtitle={<>This action cannot be undone. Type <strong>DELETE</strong> to confirm.</>}
-        size="sm"
-        footer={
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <Button variant="secondary" onClick={() => { setDeleteTarget(null); setDeleteInput(''); setDeleteError(''); }}>Cancel</Button>
-            <Button variant="danger" disabled={deleteInput !== 'DELETE'} onClick={handleDelete}>Delete</Button>
-          </div>
-        }
-      >
-        <Input placeholder="Type DELETE" value={deleteInput} onChange={(e) => setDeleteInput(e.target.value)} />
-        {deleteError && <p style={{ color: 'var(--tone-danger-fg)', fontSize: 'var(--text-sm)', marginTop: 8 }}>{deleteError}</p>}
-      </Modal>
+      ) : openAdmin ? (
+        capabilitiesFor(openAdmin, currentAdminId).edit ? (
+          <AdminEditor
+            key={`edit:${openAdmin.id}`}
+            mode="edit"
+            admin={openAdmin}
+            readFresh={readFresh}
+            applyAdmin={applyAdmin}
+            refreshList={refreshQuietly}
+            onClose={closePanel}
+            returnFocusTo={panelFocus}
+          />
+        ) : (
+          <AdminDetails
+            key={`view:${openAdmin.id}`}
+            admin={openAdmin}
+            onClose={closePanel}
+            returnFocusTo={panelFocus}
+          />
+        )
+      ) : url.id && !loaded ? (
+        <SidePanel open wide onClose={closePanel} title="Admin account" returnFocusTo={panelFocus}>
+          {blocked && listError ? (
+            <ErrorState
+              compact
+              title="This admin account could not be loaded"
+              message={listError.message}
+              requestId={listError.requestId}
+              onRetry={retry}
+              retrying={foreground}
+            />
+          ) : (
+            <SkeletonLines rows={8} />
+          )}
+        </SidePanel>
+      ) : null}
     </div>
-  );
-}
-
-const eyeBtn: React.CSSProperties = {
-  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-};
-
-function EyeIcon({ visible }: { visible: boolean }) {
-  return visible ? (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx={12} cy={12} r={3} />
-    </svg>
-  ) : (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--fg-tertiary)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-      <line x1={1} y1={1} x2={23} y2={23} />
-    </svg>
   );
 }

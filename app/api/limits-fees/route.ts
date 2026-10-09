@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyAdminJWT, verifyAdminFromRequest } from '../../lib/jwt';
+import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { redactAudit } from '../../lib/redact';
+import { requireSuperAdmin } from '../../lib/guard';
+import { writeAudit, type AuditInput, type AuditSensitivity } from '../../lib/audit';
+import { fail, ok } from '../../lib/api';
 
 const KEYS = [
   'min_withdrawal_amount',
@@ -13,64 +13,185 @@ const KEYS = [
   'large_withdrawal_flag_threshold',
 ];
 
-const CSV_KEYS = new Set<string>([]);
 const ALLOWED = new Set(KEYS);
+const SECURITY_KEYS = new Set(['pin_reset_freeze_hours', 'large_withdrawal_flag_threshold']);
+const ACTION = 'UPDATE_LIMITS_FEES';
+const ENTITY = 'app_config';
+const LOG_PREFIX = 'limits-fees';
+const PUBLIC_CACHE_KEY = 'app_config:public';
+const LOAD_FAILED = 'The settings could not be loaded. Try again.';
+const READ_FAILED = 'The current values could not be read, so nothing was saved. Try again.';
+const NOT_SAVED = 'The new values could not be written to the database. Reload to check the live values before trying again.';
+const EXPECTED_SHAPE = 'expected must map each setting to the value you last saw.';
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
 
-async function getAdmin(_req?: any) {
-  return verifyAdminFromRequest();
+type Values = Record<string, string>;
+type Stored = Map<string, string | null>;
+type StoredRead = { ok: true; stored: Stored } | { ok: false };
+type ExpectedRead = { ok: true; expected: Values | null } | { ok: false; message: string };
+type PatchRead = { ok: true; changes: Values; expected: Values | null } | { ok: false; message: string };
+
+interface ConfigRow {
+  key: string;
+  value: string | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function owns(record: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function invalidValue(key: string, raw: unknown): string | null {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? null : `Invalid value for ${key}`;
+}
+
+function seenValue(raw: unknown): string | null {
+  if (raw === null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+  return null;
+}
+
+function readExpected(raw: unknown, changes: Values): ExpectedRead {
+  if (raw === undefined || raw === null) return { ok: true, expected: null };
+  if (!isRecord(raw)) return { ok: false, message: EXPECTED_SHAPE };
+  const expected: Values = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!owns(changes, key)) continue;
+    const seen = seenValue(value);
+    if (seen === null) return { ok: false, message: EXPECTED_SHAPE };
+    expected[key] = seen;
+  }
+  return { ok: true, expected };
+}
+
+function readPatch(body: unknown): PatchRead {
+  const changes = isRecord(body) ? body.changes : undefined;
+  if (!changes || typeof changes !== 'object') return { ok: false, message: 'No changes' };
+  const requested = changes as Record<string, unknown>;
+  const keys = Object.keys(requested).filter((key) => ALLOWED.has(key));
+  if (keys.length === 0) return { ok: false, message: 'Nothing to update' };
+  const values: Values = {};
+  for (const key of keys) {
+    const problem = invalidValue(key, requested[key]);
+    if (problem) return { ok: false, message: problem };
+    values[key] = String(requested[key]);
+  }
+  const expected = readExpected(isRecord(body) ? body.expected : undefined, values);
+  if (!expected.ok) return expected;
+  return { ok: true, changes: values, expected: expected.expected };
+}
+
+async function readStored(keys: readonly string[]): Promise<StoredRead> {
+  const { data, error } = await supabaseAdmin.from('app_config').select('key, value').in('key', [...keys]);
+  if (error) {
+    console.error(`${LOG_PREFIX} read:`, error.message);
+    return { ok: false };
+  }
+  const stored: Stored = new Map();
+  for (const row of (data ?? []) as ConfigRow[]) {
+    if (typeof row.key === 'string') stored.set(row.key, typeof row.value === 'string' ? row.value : null);
+  }
+  return { ok: true, stored };
+}
+
+async function clearPublicCache(): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.rpc('edge_cache_delete', { p_key: PUBLIC_CACHE_KEY });
+    if (error) console.error(`${LOG_PREFIX} cache clear:`, error.message);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} cache clear:`, error instanceof Error ? error.message : String(error));
+  }
+}
+
+function joinKeys(keys: readonly string[]): string {
+  if (keys.length <= 1) return keys.join('');
+  return `${keys.slice(0, -1).join(', ')} and ${keys[keys.length - 1]}`;
+}
+
+function conflictMessage(keys: readonly string[]): string {
+  const subject = keys.length === 1 ? 'it' : 'them';
+  return `Another admin changed ${joinKeys(keys)} after you loaded ${subject}, so nothing was saved. Reload to see the current values.`;
+}
+
+function sensitivityFor(keys: readonly string[]): AuditSensitivity {
+  return keys.some((key) => SECURITY_KEYS.has(key)) ? 'security' : 'financial';
+}
+
+function auditFields(recorded: boolean) {
+  return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
 }
 
 export async function GET() {
-  const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  const { data, error } = await supabaseAdmin.from('app_config').select('key, value').in('key', KEYS);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const config: Record<string, string> = {};
-  (data || []).forEach((r) => { config[r.key] = r.value; });
-  return NextResponse.json({ config });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+
+  const read = await readStored(KEYS);
+  if (!read.ok) return fail('INTERNAL_ERROR', LOAD_FAILED);
+  return ok({ config: Object.fromEntries(read.stored) });
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await getAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!admin.is_super_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { changes } = await req.json();
-  if (!changes || typeof changes !== 'object') {
-    return NextResponse.json({ error: 'No changes' }, { status: 400 });
+  const body: unknown = await req.json().catch(() => null);
+  const parsed = readPatch(body);
+  if (!parsed.ok) return fail('VALIDATION_ERROR', parsed.message);
+  const { changes, expected } = parsed;
+
+  const read = await readStored(Object.keys(changes));
+  if (!read.ok) return fail('INTERNAL_ERROR', READ_FAILED);
+  const { stored } = read;
+
+  const updates: Values = {};
+  const unchanged: string[] = [];
+  for (const [key, value] of Object.entries(changes)) {
+    if (stored.get(key) === value) unchanged.push(key);
+    else updates[key] = value;
   }
-  const keys = Object.keys(changes).filter((k) => ALLOWED.has(k));
-  if (keys.length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
+  const changed = Object.keys(updates);
 
-  for (const k of keys) {
-    if (CSV_KEYS.has(k)) {
-      const v = changes[k];
-      if (typeof v !== 'string') return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
-      const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
-      if (parts.length === 0 || parts.some((p) => !Number.isFinite(Number(p)) || Number(p) < 0)) {
-        return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
-      }
-    } else {
-      const n = Number(changes[k]);
-      if (!Number.isFinite(n) || n < 0) {
-        return NextResponse.json({ error: `Invalid value for ${k}` }, { status: 400 });
-      }
-    }
+  const conflicted = expected
+    ? changed.filter((key) => owns(expected, key) && (stored.get(key) ?? '') !== expected[key])
+    : [];
+  if (conflicted.length > 0) {
+    return fail('STATE_CONFLICT', conflictMessage(conflicted), {
+      details: { conflicts: conflicted.map((key) => ({ key, current: stored.get(key) ?? null })) },
+    });
   }
 
-  const rows = keys.map((k) => ({ key: k, value: String(changes[k]), updated_at: new Date().toISOString() }));
-  const { error } = await supabaseAdmin.from('app_config').upsert(rows, { onConflict: 'key' });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (changed.length === 0) return ok({ changed, unchanged });
 
-  try {
-    await supabaseAdmin.rpc('edge_cache_delete', { p_key: 'app_config:public' });
-  } catch {}
+  const before: Record<string, string | null> = {};
+  for (const key of changed) before[key] = stored.get(key) ?? null;
+  const audit: AuditInput = {
+    admin,
+    action: ACTION,
+    entity: ENTITY,
+    entity_id: changed.length === 1 ? changed[0] : 'batch',
+    before,
+    after: updates,
+    sensitivity: sensitivityFor(changed),
+  };
 
-  await supabaseAdmin.from('audit_log').insert({
-    admin_id: admin.admin_id, action: 'UPDATE_LIMITS_FEES', entity: 'app_config',
-    entity_id: 'batch', after_value: redactAudit(changes),
-    ip_address: req.headers.get('x-forwarded-for') || 'unknown',
-  });
-  return NextResponse.json({ success: true });
+  const updatedAt = new Date().toISOString();
+  const { error } = await supabaseAdmin
+    .from('app_config')
+    .upsert(changed.map((key) => ({ key, value: updates[key], updated_at: updatedAt })), { onConflict: 'key' });
+  if (error) {
+    console.error(`${LOG_PREFIX} save failed:`, error.message);
+    await writeAudit({ ...audit, result: 'failure', error: error.message });
+    return fail('INTERNAL_ERROR', NOT_SAVED);
+  }
+
+  await clearPublicCache();
+
+  const recorded = await writeAudit({ ...audit, result: 'success' });
+  return ok({ changed, unchanged, ...auditFields(recorded.ok) });
 }

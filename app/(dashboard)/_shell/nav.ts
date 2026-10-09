@@ -1,7 +1,5 @@
-
-
 import {
-  LayoutDashboard, ClipboardList, ArrowDownToLine,
+  LayoutDashboard, ClipboardList, ArrowDownToLine, Flag,
   Users, Activity, ShieldCheck,
   CreditCard, Wrench, BadgePercent,
   Gift, Trophy, TicketPercent, Share2,
@@ -12,11 +10,12 @@ import {
 } from 'lucide-react';
 
 export interface NavLeaf {
-  
   key: string;
+  altKeys?: readonly string[];
   label: string;
   href: string;
   icon: LucideIcon;
+  detailLabel?: string;
 }
 
 export interface NavGroup {
@@ -31,13 +30,14 @@ export const NAV_GROUPS: NavGroup[] = [
       { key: 'dashboard',              label: 'Dashboard',      href: '/dashboard',              icon: LayoutDashboard },
       { key: 'card_queue',             label: 'Card Queue',     href: '/card-queue',             icon: ClipboardList },
       { key: 'withdrawals',            label: 'Withdrawals',    href: '/withdrawals',            icon: ArrowDownToLine },
+      { key: 'flags.read',             label: 'Flagged',        href: '/flagged-transactions',   icon: Flag, altKeys: ['withdrawals'] },
       { key: 'transactions_overview',  label: 'Transactions',   href: '/transactions-overview',  icon: ClipboardList },
     ],
   },
   {
     label: 'People',
     items: [
-      { key: 'users',                  label: 'Users',          href: '/users',                  icon: Users },
+      { key: 'users',                  label: 'Users',          href: '/users',                  icon: Users, detailLabel: 'User details' },
       { key: 'user_activity_monitor',  label: 'Activity Log',   href: '/user-activity-monitor',  icon: Activity },
       { key: 'activity',               label: 'Admin Activity', href: '/activity',               icon: Activity },
       { key: 'admin_accounts',         label: 'Admins',         href: '/admin-accounts',         icon: ShieldCheck },
@@ -55,7 +55,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Rewards',
     items: [
       { key: 'bonuses_rewards',        label: 'Bonuses',        href: '/bonuses-rewards',        icon: Gift },
-
       { key: 'bonuses_rewards',        label: 'Levels',         href: '/bonuses-rewards/levels', icon: Trophy },
       { key: 'coupons',                label: 'Coupons',        href: '/coupons',                icon: TicketPercent },
       { key: 'referral_management',    label: 'Referrals',      href: '/referral-management',    icon: Share2 },
@@ -87,32 +86,105 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export function findBreadcrumb(pathname: string): { group: string; item: string } | null {
-  for (const group of NAV_GROUPS) {
+export interface NavMatch {
+  group: NavGroup;
+  leaf: NavLeaf;
+  exact: boolean;
+}
+
+export function hrefMatches(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export function findNavMatch(pathname: string, groups: readonly NavGroup[] = NAV_GROUPS): NavMatch | null {
+  let best: NavMatch | null = null;
+  for (const group of groups) {
     for (const leaf of group.items) {
-      if (pathname === leaf.href || pathname.startsWith(leaf.href + '/')) {
-        return { group: group.label, item: leaf.label };
-      }
+      if (!hrefMatches(pathname, leaf.href)) continue;
+      if (best && best.leaf.href.length >= leaf.href.length) continue;
+      best = { group, leaf, exact: pathname === leaf.href };
     }
   }
-  return null;
+  return best;
+}
+
+export interface Breadcrumb {
+  group: string;
+  item: string;
+  href: string;
+  detail: string | null;
+}
+
+export function findBreadcrumb(pathname: string): Breadcrumb | null {
+  const match = findNavMatch(pathname);
+  if (!match) return null;
+  return {
+    group: match.group.label,
+    item: match.leaf.label,
+    href: match.leaf.href,
+    detail: !match.exact && match.leaf.detailLabel ? match.leaf.detailLabel : null,
+  };
+}
+
+export interface Crumb {
+  label: string;
+  href?: string;
+  current?: boolean;
+}
+
+export function breadcrumbTrail(pathname: string): Crumb[] {
+  const crumb = findBreadcrumb(pathname);
+  if (!crumb) return [{ label: 'Admin', current: true }];
+  if (!crumb.detail) return [{ label: crumb.group }, { label: crumb.item, current: true }];
+  return [
+    { label: crumb.group },
+    { label: crumb.item, href: crumb.href },
+    { label: crumb.detail, current: true },
+  ];
 }
 
 export function findNavKey(pathname: string): string | null {
-  for (const group of NAV_GROUPS) {
-    for (const leaf of group.items) {
-      if (pathname === leaf.href || pathname.startsWith(leaf.href + '/')) {
-        return leaf.key;
-      }
-    }
-  }
-  return null;
+  return findNavMatch(pathname)?.leaf.key ?? null;
 }
 
-export function filterNavByPermissions(allowedKeys: string[], isSuperAdmin: boolean): NavGroup[] {
+export function navLeafKeys(leaf: NavLeaf): readonly string[] {
+  return leaf.altKeys?.length ? [leaf.key, ...leaf.altKeys] : [leaf.key];
+}
+
+export function navLeafAllowed(leaf: NavLeaf, allowedKeys: Iterable<string>): boolean {
+  const allowed = allowedKeys instanceof Set ? allowedKeys : new Set(allowedKeys);
+  return navLeafKeys(leaf).some((key) => allowed.has(key));
+}
+
+export function filterNavByPermissions(allowedKeys: readonly string[], isSuperAdmin: boolean): NavGroup[] {
   if (isSuperAdmin) return NAV_GROUPS;
   const allowed = new Set(allowedKeys);
   return NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.key)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => navLeafAllowed(i, allowed)) }))
     .filter((g) => g.items.length > 0);
+}
+
+export function isNavPathDenied(pathname: string, allowedKeys: readonly string[], isSuperAdmin: boolean): boolean {
+  if (isSuperAdmin || pathname === '/dashboard') return false;
+  const match = findNavMatch(pathname);
+  return match !== null && !navLeafAllowed(match.leaf, allowedKeys);
+}
+
+export const SIDEBAR_COLLAPSED_COOKIE = 'admin_sidebar_collapsed';
+export const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+export function parseSidebarCollapsed(value: string | null | undefined): boolean | undefined {
+  if (value === '1') return true;
+  if (value === '0') return false;
+  return undefined;
+}
+
+export function serializeSidebarCollapsed(collapsed: boolean, secure = false): string {
+  return [
+    `${SIDEBAR_COLLAPSED_COOKIE}=${collapsed ? '1' : '0'}`,
+    'Path=/',
+    'SameSite=Lax',
+    `Max-Age=${SIDEBAR_COOKIE_MAX_AGE}`,
+    ...(secure ? ['Secure'] : []),
+  ].join('; ');
 }

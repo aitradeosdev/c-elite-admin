@@ -1,307 +1,594 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { BadgePercent, ChevronsDownUp, ChevronsUpDown, RotateCw } from 'lucide-react';
 import {
-  PageHeader, Card, CardBody,
-  Modal, FieldShell, Input, Toggle, Button, SkeletonLines, } from '../../_ui';
+  AccessDenied, Button, Card, EmptyState, ErrorState, FilterBar, LinkButton, Notice, PageHeader, SearchInput, Select,
+  StatStrip, useCan, useConfirm, useResource, useToast,
+  type StatItem,
+} from '../../_ui';
+import { apiRequest } from '../../lib/apiClient';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { BUSINESS_TZ_LABEL, formatBusinessDate, formatBusinessTime } from '../../lib/time';
+import {
+  EMPTY_DRAFT, EMPTY_REVIEW, SHOW_OPTIONS, addTarget, changesByCard, classifyAdd, classifySave, containsRow, draftCount,
+  editActive, editRate, filterCards, filtersActive, groupTitle, issuesByCard, newRangeBody, overlapsFor, rateInputId,
+  rebaseDraft, rebaseNotice, reviewDraft, revertRow, savePayload, settleSave, toAddResponse, toRatesSnapshot,
+  toSaveResponse,
+  type AddOutcome, type AddRangeTarget, type Draft, type NewRangeValues, type PageNotice, type Phase, type RateRow,
+  type RatesSnapshot, type SaveOutcome, type ShowFilter,
+} from './model';
+import { addRangeOptions, discardOptions, leaveOptions, reviewOptions } from './confirmOptions';
+import { RateCardSection, type RateEditor } from './RateList';
+import { PageNoticeView, RatesSkeleton, UnsavedBar } from './RateParts';
+import { AddRangeModal } from './AddRangeModal';
+import { useLeaveGuard } from './useLeaveGuard';
+import s from './page.module.css';
 
-interface Denomination {
-  id: string;
-  range_label: string;
-  min_value: number;
-  max_value: number;
-  rate_naira: number;
-  is_active: boolean;
+const TITLE = 'Rates';
+const SUBTITLE =
+  'Naira paid per unit of card value, by card, country, type and value range. Saved changes apply to new submissions straight away.';
+const EMPTY_SET: ReadonlySet<string> = new Set<string>();
+
+interface FocusRequest {
+  id: string | null;
+  seq: number;
 }
 
-interface CardType {
-  id: string;
-  name: string;
-  denominations: Denomination[];
+interface Settled {
+  snapshot: RatesSnapshot | null;
 }
 
-interface Country {
-  id: string;
-  country_code: string;
-  country_name: string;
-  currency_symbol: string;
-  card_types: CardType[];
+function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
 }
 
-interface Card {
-  id: string;
-  name: string;
-  logo_url: string | null;
-  activeRates: number;
-  countries: Country[];
+function withAll(set: ReadonlySet<string>, ids: Iterable<string>): ReadonlySet<string> {
+  let next: Set<string> | null = null;
+  for (const id of ids) {
+    if ((next ?? set).has(id)) continue;
+    next = next ?? new Set(set);
+    next.add(id);
+  }
+  return next ?? set;
 }
 
-interface Change {
-  id: string;
-  rate_naira: number;
-  is_active: boolean;
+function withoutId(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  if (!set.has(id)) return set;
+  const next = new Set(set);
+  next.delete(id);
+  return next;
+}
+
+function loadedAt(timestamp: number | null): string {
+  return timestamp === null ? '—' : `${formatBusinessTime(new Date(timestamp))} ${BUSINESS_TZ_LABEL}`;
 }
 
 export default function RatesPage() {
-  const [cards, setCards] = useState<Card[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [openCards, setOpenCards] = useState<Set<string>>(new Set());
-  const [openCountries, setOpenCountries] = useState<Set<string>>(new Set());
-  const [openTypes, setOpenTypes] = useState<Set<string>>(new Set());
-  const [changes, setChanges] = useState<Record<string, Change>>({});
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
+  const isMobile = useIsMobile();
+  const canWrite = useCan('rates.write');
+  const canCatalog = useCan('catalog.read');
 
-  const [addDenomTypeId, setAddDenomTypeId] = useState<string | null>(null);
-  const [rangeLabel, setRangeLabel] = useState('');
-  const [minValue, setMinValue] = useState('');
-  const [maxValue, setMaxValue] = useState('');
-  const [rateNaira, setRateNaira] = useState('');
-  const [denomActive, setDenomActive] = useState(true);
-  const [addingDenom, setAddingDenom] = useState(false);
+  const rates = useResource<RatesSnapshot>('rates', (signal) => (
+    apiRequest('/api/rates', { signal, select: toRatesSnapshot })
+  ));
+  const { refresh: refreshRates } = rates;
+  const snapshot = rates.data;
 
-  useEffect(() => { fetchRates(); }, []);
+  const [draft, setDraftState] = useState<Draft>(EMPTY_DRAFT);
+  const [touched, setTouched] = useState<ReadonlySet<string>>(EMPTY_SET);
+  const [kept, setKept] = useState<ReadonlySet<string>>(EMPTY_SET);
+  const [revealAll, setRevealAll] = useState(false);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [open, setOpen] = useState<ReadonlySet<string>>(EMPTY_SET);
+  const [searchText, setSearchText] = useState('');
+  const [query, setQuery] = useState('');
+  const [show, setShow] = useState<ShowFilter>('all');
+  const [notice, setNotice] = useState<PageNotice | null>(null);
+  const [adding, setAdding] = useState<AddRangeTarget | null>(null);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
 
-  const fetchRates = async (silent = false) => {
-    if (!silent) setLoading(true);
-    const res = await fetch('/api/rates');
-    const data = await res.json();
-    setCards(data.cards || []);
-    if (!silent) setLoading(false);
+  const draftRef = useRef<Draft>(EMPTY_DRAFT);
+  const busyRef = useRef(false);
+  const aliveRef = useRef(true);
+  const autoOpenedRef = useRef(false);
+  const handledFocusRef = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  const commitDraft = useCallback((next: Draft) => {
+    draftRef.current = next;
+    setDraftState(next);
+  }, []);
+
+  const updateDraft = useCallback((change: (current: Draft) => Draft) => {
+    commitDraft(change(draftRef.current));
+  }, [commitDraft]);
+
+  const requestFocus = useCallback((id: string | null) => {
+    setFocusRequest((previous) => ({ id, seq: (previous?.seq ?? 0) + 1 }));
+  }, []);
+
+  const review = useMemo(() => (snapshot ? reviewDraft(snapshot, draft) : EMPTY_REVIEW), [snapshot, draft]);
+  const changeCount = useMemo(() => draftCount(draft), [draft]);
+  const shownErrors = useMemo(() => {
+    const shown: Record<string, string> = {};
+    for (const [id, message] of Object.entries(review.errors)) {
+      if (revealAll || touched.has(id)) shown[id] = message;
+    }
+    return shown;
+  }, [review.errors, revealAll, touched]);
+  const cardChanges = useMemo(
+    () => (snapshot ? changesByCard(snapshot, draft) : new Map<string, number>()),
+    [snapshot, draft],
+  );
+  const cardIssues = useMemo(
+    () => (snapshot ? issuesByCard(snapshot, shownErrors) : new Map<string, number>()),
+    [snapshot, shownErrors],
+  );
+  const visible = useMemo(
+    () => (snapshot ? filterCards(snapshot.cards, query, show, draft, kept) : []),
+    [snapshot, query, show, draft, kept],
+  );
+
+  const dirty = canWrite && changeCount > 0;
+  const busy = phase !== 'idle';
+  const issueCount = Object.keys(shownErrors).length;
+  const filtering = filtersActive(query, show) || searchText.trim() !== '';
+
+  useLeaveGuard(dirty, () => (
+    confirm(leaveOptions(draftCount(draftRef.current))).then((decision) => decision !== null)
+  ));
+
+  useEffect(() => {
+    if (!snapshot || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    if (snapshot.cards.length === 1) setOpen((previous) => withAll(previous, [snapshot.cards[0].id]));
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (!focusRequest || busy || handledFocusRef.current === focusRequest.seq) return;
+    handledFocusRef.current = focusRequest.seq;
+    if (focusRequest.id === null) {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      listRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    const element = document.getElementById(rateInputId(focusRequest.id));
+    if (!element) return;
+    element.focus({ preventScroll: true });
+    element.scrollIntoView({ block: 'center' });
+  }, [focusRequest, busy]);
+
+  const revealRow = useCallback((id: string, current: RatesSnapshot) => {
+    const row = current.rows[id];
+    if (!row) return;
+    if (!containsRow(filterCards(current.cards, query, show, draftRef.current), id)) {
+      setSearchText('');
+      setQuery('');
+      setShow('all');
+    }
+    setOpen((previous) => withAll(previous, [row.path.cardId]));
+    setRevealAll(true);
+    requestFocus(id);
+  }, [query, show, requestFocus]);
+
+  const openMatching = useCallback((nextQuery: string, nextShow: ShowFilter) => {
+    if (!snapshot || !filtersActive(nextQuery, nextShow)) return;
+    const matches = filterCards(snapshot.cards, nextQuery, nextShow, draftRef.current);
+    setOpen((previous) => withAll(previous, matches.map((card) => card.id)));
+  }, [snapshot]);
+
+  const applyQuery = useCallback((value: string) => {
+    setQuery(value);
+    openMatching(value, show);
+  }, [openMatching, show]);
+
+  const applyShow = (next: ShowFilter) => {
+    setShow(next);
+    setKept(EMPTY_SET);
+    openMatching(query, next);
   };
 
-  const toggle = (set: Set<string>, id: string): Set<string> => {
-    const next = new Set(set);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
+  const clearFilters = useCallback(() => {
+    setSearchText('');
+    setQuery('');
+    setShow('all');
+    setKept(EMPTY_SET);
+  }, []);
+
+  const toggleCard = useCallback((id: string) => {
+    setOpen((previous) => toggled(previous, id));
+  }, []);
+
+  const editor = useMemo<RateEditor>(() => ({
+    draft,
+    errors: shownErrors,
+    canWrite,
+    isMobile,
+    onRate: (row: RateRow, value: string) => {
+      updateDraft((current) => editRate(current, row, value));
+      setKept((previous) => withAll(previous, [row.id]));
+    },
+    onActive: (row: RateRow, active: boolean) => {
+      updateDraft((current) => editActive(current, row, active));
+      setTouched((previous) => withAll(previous, [row.id]));
+      setKept((previous) => withAll(previous, [row.id]));
+    },
+    onRevert: (row: RateRow) => {
+      updateDraft((current) => revertRow(current, row.id));
+      setTouched((previous) => withoutId(previous, row.id));
+      setKept((previous) => withAll(previous, [row.id]));
+      requestFocus(row.id);
+    },
+    onBlur: (row: RateRow) => setTouched((previous) => withAll(previous, [row.id])),
+    onAdd: (group) => setAdding(addTarget(group)),
+  }), [draft, shownErrors, canWrite, isMobile, updateDraft, requestFocus]);
+
+  const reload = async () => {
+    if (busyRef.current) return;
+    const result = await refreshRates();
+    if (!aliveRef.current || !result) return;
+    if (!result.ok) {
+      if (result.error.status === 403) router.refresh();
+      return;
+    }
+    const rebased = rebaseDraft(draftRef.current, result.data);
+    commitDraft(rebased.draft);
+    const note = rebaseNotice(rebased, true);
+    if (note) setNotice(note);
   };
 
-  const handleRateChange = (denom: Denomination, newRate: string) => {
-    const rate = parseFloat(newRate) || 0;
-    setChanges((prev) => ({
-      ...prev,
-      [denom.id]: { id: denom.id, rate_naira: rate, is_active: prev[denom.id]?.is_active ?? denom.is_active },
-    }));
-  };
-
-  const handleToggleChange = (denom: Denomination) => {
-    setChanges((prev) => ({
-      ...prev,
-      [denom.id]: { id: denom.id, rate_naira: prev[denom.id]?.rate_naira ?? denom.rate_naira, is_active: !(prev[denom.id]?.is_active ?? denom.is_active) },
-    }));
-  };
-
-  const getRate = (denom: Denomination) => changes[denom.id]?.rate_naira ?? denom.rate_naira;
-  const getActive = (denom: Denomination) => changes[denom.id]?.is_active ?? denom.is_active;
-
-  const handleSaveAll = async () => {
-    const changeList = Object.values(changes);
-    if (changeList.length === 0) { setToast('No changes to save.'); setTimeout(() => setToast(''), 3000); return; }
-    setSaving(true);
-    const res = await fetch('/api/rates', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ changes: changeList }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setChanges({});
-      setToast('All changes saved ✓');
-      setTimeout(() => setToast(''), 3000);
-      fetchRates(true);
-    } else {
-      setToast('Failed to save changes.');
-      setTimeout(() => setToast(''), 3000);
+  const runReview = async () => {
+    if (busyRef.current || !snapshot || !canWrite) return;
+    const local = reviewDraft(snapshot, draftRef.current);
+    if (local.firstError) {
+      revealRow(local.firstError, snapshot);
+      return;
+    }
+    if (local.changes.length === 0) return;
+    busyRef.current = true;
+    setPhase('checking');
+    const settled: Settled = { snapshot: null };
+    try {
+      const fresh = await refreshRates();
+      if (!aliveRef.current || !fresh) return;
+      if (!fresh.ok) {
+        if (fresh.error.status !== 401) {
+          toast.show(`The live rates could not be checked, so nothing was saved. ${fresh.error.message}`, 'error');
+        }
+        if (fresh.error.status === 403) router.refresh();
+        return;
+      }
+      const rebased = rebaseDraft(draftRef.current, fresh.data);
+      commitDraft(rebased.draft);
+      setNotice(rebaseNotice(rebased, false));
+      const pending = reviewDraft(fresh.data, rebased.draft);
+      if (pending.firstError) {
+        revealRow(pending.firstError, fresh.data);
+        toast.show('Another admin changed some of these rates while you were editing. Check the highlighted range.', 'warning');
+        return;
+      }
+      if (pending.changes.length === 0) {
+        toast.show('These rates are already live, so nothing needed saving.');
+        requestFocus(null);
+        return;
+      }
+      setPhase('confirming');
+      const decision = await confirm<SaveOutcome>({
+        ...reviewOptions(pending.changes),
+        action: async () => {
+          setPhase('saving');
+          const outcome = classifySave(await apiRequest('/api/rates', {
+            method: 'PATCH',
+            body: savePayload(pending.changes),
+            select: toSaveResponse,
+          }));
+          if (outcome.kind === 'retry') {
+            setPhase('confirming');
+            throw new Error(outcome.message);
+          }
+          if (outcome.kind === 'saved' || outcome.kind === 'partial' || outcome.kind === 'unknown') {
+            const after = await refreshRates();
+            settled.snapshot = after && after.ok ? after.data : null;
+          }
+          return outcome;
+        },
+        returnFocusTo: () => listRef.current,
+      });
+      if (!aliveRef.current) return;
+      const outcome = decision?.value;
+      if (!outcome) return;
+      const settlement = settleSave(draftRef.current, pending.changes, outcome, settled.snapshot);
+      commitDraft(settlement.draft);
+      setKept(EMPTY_SET);
+      if (settlement.notice) setNotice(settlement.notice);
+      for (const note of settlement.toasts) toast.show(note.text, note.tone);
+      if (outcome.kind === 'refused' && outcome.status === 403) router.refresh();
+      if (settlement.cleared) {
+        setTouched(EMPTY_SET);
+        setRevealAll(false);
+        requestFocus(null);
+      }
+    } finally {
+      busyRef.current = false;
+      if (aliveRef.current) setPhase('idle');
     }
   };
 
-  const handleAddDenom = async () => {
-    if (!rangeLabel || !minValue || !maxValue || !rateNaira) return;
-    setAddingDenom(true);
-    await fetch('/api/rates', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        card_type_id: addDenomTypeId,
-        range_label: rangeLabel,
-        min_value: parseFloat(minValue),
-        max_value: parseFloat(maxValue),
-        rate_naira: parseFloat(rateNaira),
-        is_active: denomActive,
-      }),
-    });
-    setAddingDenom(false);
-    setAddDenomTypeId(null);
-    setRangeLabel(''); setMinValue(''); setMaxValue(''); setRateNaira(''); setDenomActive(true);
-    fetchRates(true);
+  const runDiscard = async () => {
+    if (busyRef.current) return;
+    const total = draftCount(draftRef.current);
+    if (total === 0) return;
+    const decision = await confirm(discardOptions(total));
+    if (!decision || !aliveRef.current || busyRef.current) return;
+    commitDraft(EMPTY_DRAFT);
+    setTouched(EMPTY_SET);
+    setKept(EMPTY_SET);
+    setRevealAll(false);
+    setNotice(null);
+    requestFocus(null);
   };
 
-  const hasChanges = Object.keys(changes).length > 0;
+  const submitRange = async (target: AddRangeTarget, values: NewRangeValues): Promise<boolean> => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    const settled: Settled = { snapshot: null };
+    try {
+      const decision = await confirm<AddOutcome>({
+        ...addRangeOptions(target, values, overlapsFor(target, values.min, values.max)),
+        action: async () => {
+          const outcome = classifyAdd(await apiRequest('/api/rates', {
+            method: 'POST',
+            body: newRangeBody(target, values),
+            select: toAddResponse,
+          }));
+          if (outcome.kind === 'retry') throw new Error(outcome.message);
+          if (outcome.kind === 'added' || outcome.kind === 'unknown' || (outcome.kind === 'refused' && outcome.status === 404)) {
+            const after = await refreshRates();
+            settled.snapshot = after && after.ok ? after.data : null;
+          }
+          return outcome;
+        },
+      });
+      if (!aliveRef.current) return false;
+      const outcome = decision?.value;
+      if (!outcome) return false;
+      if (settled.snapshot) {
+        const rebased = rebaseDraft(draftRef.current, settled.snapshot);
+        commitDraft(rebased.draft);
+        const note = rebaseNotice(rebased, true);
+        if (note) setNotice(note);
+      }
+      switch (outcome.kind) {
+        case 'added':
+          toast.show(`Added ${values.label} to ${target.path.cardName} · ${groupTitle(target.path)}.`, 'success');
+          if (outcome.warning) toast.show(outcome.warning, 'warning');
+          setOpen((previous) => withAll(previous, [target.path.cardId]));
+          return true;
+        case 'unknown':
+          toast.show(
+            'No answer came back, so the range may or may not have been added. Check the list before adding it again.',
+            'error',
+          );
+          return true;
+        case 'refused':
+          toast.show(outcome.message, 'error');
+          if (outcome.status === 403) router.refresh();
+          return outcome.status === 404;
+        case 'expired':
+        case 'retry':
+          return false;
+      }
+    } finally {
+      busyRef.current = false;
+    }
+  };
 
-  const saveButton = (
-    <Button variant="primary" size="sm" onClick={handleSaveAll} disabled={saving} loading={saving}>
-      {saving ? 'Saving…' : `Save All Changes${hasChanges ? ` (${Object.keys(changes).length})` : ''}`}
-    </Button>
-  );
+  if (rates.error?.status === 403 && !snapshot) {
+    return (
+      <div className={s.page}>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <AccessDenied required={['rates.read']} />
+      </div>
+    );
+  }
+
+  const updatedAt = snapshot ? rates.lastUpdatedAt : null;
+  const loading = rates.isInitialLoading;
+  const stats: StatItem[] = [
+    { label: 'Cards', value: snapshot ? snapshot.totals.cards.toLocaleString('en-NG') : '—', loading },
+    { label: 'Active ranges', value: snapshot ? snapshot.totals.active.toLocaleString('en-NG') : '—', loading },
+    { label: 'Switched off', value: snapshot ? snapshot.totals.inactive.toLocaleString('en-NG') : '—', loading },
+    {
+      label: 'Last refreshed',
+      value: loadedAt(updatedAt),
+      hint: updatedAt === null ? undefined : formatBusinessDate(new Date(updatedAt)),
+      mono: true,
+      loading,
+    },
+  ];
+  const visibleIds = visible.map((card) => card.id);
+  const allOpen = visibleIds.length > 0 && visibleIds.every((id) => open.has(id));
+  const showOptions = SHOW_OPTIONS.filter((option) => canWrite || option.value !== 'changed');
+
+  let body: ReactNode;
+  if (!snapshot) {
+    body = rates.error ? (
+      <Card>
+        <ErrorState
+          compact
+          title="The rates could not be loaded"
+          message={rates.error.message}
+          requestId={rates.error.requestId}
+          onRetry={() => void refreshRates()}
+          retrying={rates.isInitialLoading || rates.isRefreshing}
+        />
+      </Card>
+    ) : (
+      <RatesSkeleton />
+    );
+  } else if (snapshot.cards.length === 0) {
+    body = (
+      <EmptyState
+        icon={<BadgePercent size={20} strokeWidth={1.75} aria-hidden />}
+        title="No active cards"
+        hint="Rates are set per card, country and type. Add a card, or switch one on, in Cards."
+        actions={canCatalog ? <LinkButton href="/cards" variant="secondary" size="sm">Open Cards</LinkButton> : undefined}
+      />
+    );
+  } else if (visible.length === 0) {
+    body = (
+      <EmptyState
+        title="No ranges match these filters"
+        hint="Try a different search, or show all ranges."
+        actions={<Button type="button" variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>}
+      />
+    );
+  } else {
+    body = (
+      <Card className={s.brandList}>
+        {visible.map((card) => (
+          <RateCardSection
+            key={card.id}
+            card={card}
+            expanded={open.has(card.id)}
+            changes={cardChanges.get(card.id) ?? 0}
+            issues={cardIssues.get(card.id) ?? 0}
+            editor={editor}
+            onToggle={toggleCard}
+          />
+        ))}
+      </Card>
+    );
+  }
 
   return (
-    <div>
+    <div className={dirty ? `${s.page} ${s.dirty}` : s.page}>
       <PageHeader
-        title="Rates"
-        subtitle="Manage gift-card buy rates by card, country, type and denomination."
-        actions={saveButton}
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            leftIcon={<RotateCw size={14} aria-hidden />}
+            loading={rates.isRefreshing && !busy}
+            disabled={busy || loading}
+            onClick={() => void reload()}
+          >
+            Refresh
+          </Button>
+        }
       />
 
-      {loading ? (
-        <Card>
-          <CardBody>
-            <SkeletonLines />
-          </CardBody>
-        </Card>
-      ) : cards.length === 0 ? (
-        <Card>
-          <CardBody>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>No active cards found. Add cards first.</p>
-          </CardBody>
-        </Card>
-      ) : (
-        <Card>
-          <CardBody flush>
-            {cards.map((card) => {
-              const cardOpen = openCards.has(card.id);
-              return (
-                <div key={card.id} style={styles.cardBlock}>
-                  <div style={styles.level1Row} onClick={() => setOpenCards(toggle(openCards, card.id))}>
-                    <div style={styles.level1Left}>
-                      {card.logo_url && <img src={card.logo_url} alt={card.name} style={styles.logo} />}
-                      <span style={styles.level1Name}>{card.name}</span>
-                      <span style={styles.metaBadge}>{card.activeRates} active rates</span>
-                    </div>
-                    <ChevronDown size={15} style={{ ...styles.chevron, transform: cardOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-                  </div>
+      {rates.error && snapshot ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          meta={updatedAt === null ? undefined : `Showing rates loaded at ${loadedAt(updatedAt)}.`}
+          actions={<Button type="button" variant="ghost" size="sm" onClick={() => void reload()}>Try again</Button>}
+        >
+          The rates could not be refreshed. {rates.error.message}
+        </Notice>
+      ) : null}
 
-                  {cardOpen && card.countries.map((country) => {
-                    const countryOpen = openCountries.has(country.id);
-                    return (
-                      <div key={country.id} style={styles.level2Block}>
-                        <div style={styles.level2Row} onClick={() => setOpenCountries(toggle(openCountries, country.id))}>
-                          <div style={styles.level2Left}>
-                            <span style={styles.level2Name}>{country.country_name}</span>
-                            <span style={styles.currencyBadge}>{country.currency_symbol}</span>
-                          </div>
-                          <ChevronDown size={14} style={{ ...styles.chevron, transform: countryOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-                        </div>
+      {notice ? <PageNoticeView notice={notice} onDismiss={() => setNotice(null)} /> : null}
 
-                        {countryOpen && country.card_types.map((type) => {
-                          const typeOpen = openTypes.has(type.id);
-                          return (
-                            <div key={type.id} style={styles.level3Block}>
-                              <div style={styles.level3Row} onClick={() => setOpenTypes(toggle(openTypes, type.id))}>
-                                <span style={styles.level3Name}>{type.name}</span>
-                                <ChevronDown size={13} style={{ ...styles.chevron, transform: typeOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-                              </div>
+      {snapshot && !canWrite ? (
+        <Notice tone="neutral" compact>
+          You can view rates but not change them. Changing rates needs the Draft rate changes permission (rates.write).
+        </Notice>
+      ) : null}
 
-                              {typeOpen && (
-                                <div style={styles.level4Block}>
-                                  {type.denominations.map((denom) => (
-                                    <div key={denom.id} style={styles.level4Row}>
-                                      <span style={styles.rangeLabel}>{denom.range_label}</span>
-                                      <Input
-                                        type="number"
-                                        mono
-                                        style={{ width: 130 }}
-                                        value={getRate(denom)}
-                                        onChange={(e) => handleRateChange(denom, e.target.value)}
-                                      />
-                                      <Toggle checked={getActive(denom)} onChange={() => handleToggleChange(denom)} />
-                                    </div>
-                                  ))}
-                                  <div style={{ paddingTop: 6 }}>
-                                    <Button variant="ghost" size="sm" onClick={() => setAddDenomTypeId(type.id)}>+ Add Range</Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </CardBody>
-        </Card>
-      )}
+      <StatStrip aria-label="Rates summary" items={stats} />
 
-      <Modal
-        open={addDenomTypeId !== null}
-        onClose={() => setAddDenomTypeId(null)}
-        title="Add Denomination Range"
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => setAddDenomTypeId(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleAddDenom}
-              loading={addingDenom}
-              disabled={!rangeLabel || !minValue || !maxValue || !rateNaira || addingDenom}
+      {snapshot && snapshot.cards.length > 0 ? (
+        <FilterBar
+          aria-label="Filter rates"
+          search={
+            <SearchInput
+              aria-label="Search rates"
+              placeholder="Card, country, type or range"
+              value={searchText}
+              onChange={setSearchText}
+              onDebouncedChange={applyQuery}
+            />
+          }
+          filters={
+            <Select
+              inline
+              aria-label="Show"
+              value={show}
+              onChange={(event) => applyShow(event.target.value as ShowFilter)}
             >
-              {addingDenom ? 'Saving…' : 'Save'}
+              {showOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </Select>
+          }
+          onClear={clearFilters}
+          active={filtering}
+          actions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              leftIcon={allOpen ? <ChevronsDownUp size={14} aria-hidden /> : <ChevronsUpDown size={14} aria-hidden />}
+              disabled={visibleIds.length === 0}
+              onClick={() => setOpen(allOpen ? EMPTY_SET : withAll(open, visibleIds))}
+            >
+              {allOpen ? 'Collapse all' : 'Expand all'}
             </Button>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
-          <FieldShell label="Range Label">
-            <Input placeholder="e.g. $25–$99" value={rangeLabel} onChange={(e) => setRangeLabel(e.target.value)} />
-          </FieldShell>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--space-4)' }}>
-            <FieldShell label="Min Value">
-              <Input type="number" mono placeholder="25" value={minValue} onChange={(e) => setMinValue(e.target.value)} />
-            </FieldShell>
-            <FieldShell label="Max Value">
-              <Input type="number" mono placeholder="99" value={maxValue} onChange={(e) => setMaxValue(e.target.value)} />
-            </FieldShell>
-          </div>
-          <FieldShell label="Rate in Naira (per unit)">
-            <Input type="number" mono placeholder="1500" value={rateNaira} onChange={(e) => setRateNaira(e.target.value)} />
-          </FieldShell>
-          <FieldShell label="Active">
-            <Toggle checked={denomActive} onChange={() => setDenomActive(!denomActive)} />
-          </FieldShell>
-        </div>
-      </Modal>
+          }
+        />
+      ) : null}
 
-      {toast && (
-        <div style={{ position: 'fixed', bottom: 24, right: 24, background: 'var(--fg-primary)', color: 'var(--bg-base)', padding: '10px 18px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', fontWeight: 600, zIndex: 51 }}>
-          {toast}
-        </div>
-      )}
+      <div
+        ref={listRef}
+        className={s.list}
+        tabIndex={-1}
+        role="region"
+        aria-label="Rates by card"
+        aria-busy={busy || undefined}
+      >
+        <fieldset className={s.fieldset} disabled={busy}>
+          {body}
+        </fieldset>
+      </div>
+
+      {dirty ? (
+        <UnsavedBar
+          count={changeCount}
+          issues={issueCount}
+          phase={phase}
+          onDiscard={() => void runDiscard()}
+          onReview={() => void runReview()}
+        />
+      ) : null}
+
+      {canWrite && adding ? (
+        <AddRangeModal
+          key={adding.path.typeId}
+          target={adding}
+          onClose={() => setAdding(null)}
+          onSubmit={submitRange}
+        />
+      ) : null}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  cardBlock: { borderBottom: '1px solid var(--border-subtle)' },
-  level1Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', cursor: 'pointer' },
-  level1Left: { display: 'flex', alignItems: 'center', gap: 10 },
-  logo: { width: 32, height: 32, objectFit: 'contain', borderRadius: 4 },
-  level1Name: { fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--fg-primary)' },
-  metaBadge: { fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.04em', color: 'var(--fg-tertiary)' },
-  chevron: { color: 'var(--fg-tertiary)', transition: 'transform 0.2s', flexShrink: 0 },
-  level2Block: { borderTop: '1px solid var(--border-subtle)' },
-  level2Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px 10px 32px', cursor: 'pointer', background: 'var(--bg-subtle)' },
-  level2Left: { display: 'flex', alignItems: 'center', gap: 8 },
-  level2Name: { fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)' },
-  currencyBadge: { border: '1px solid var(--border-default)', borderRadius: 6, padding: '2px 6px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-secondary)' },
-  level3Block: { borderTop: '1px solid var(--border-subtle)' },
-  level3Row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px 9px 48px', cursor: 'pointer' },
-  level3Name: { fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--fg-secondary)' },
-  level4Block: { padding: '4px 16px 10px 64px', borderTop: '1px solid var(--border-subtle)' },
-  level4Row: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' },
-  rangeLabel: { fontSize: 'var(--text-sm)', color: 'var(--fg-secondary)', minWidth: 120 },
-};

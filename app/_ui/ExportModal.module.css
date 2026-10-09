@@ -1,0 +1,116 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.description {
+  color: var(--fg-secondary);
+  overflow-wrap: anywhere;
+}
+
+.window {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.glyph {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: calc(var(--text-sm) * var(--leading-snug));
+  color: var(--fg-tertiary);
+}
+
+.meta {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-secondary);
+}
+
+.noteText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sensitive {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--tone-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-fg);
+}
+
+.sensitive .glyph {
+  color: var(--tone-warning-fg);
+}
+
+.footer {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.spinner {
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.6s; }
+}

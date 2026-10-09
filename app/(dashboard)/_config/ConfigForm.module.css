@@ -1,0 +1,260 @@
+.root {
+  max-width: 880px;
+  min-width: 0;
+}
+
+.form {
+  display: block;
+  min-width: 0;
+}
+
+.form:focus,
+.form:focus-visible {
+  outline: none;
+}
+
+.formWithBar {
+  padding-bottom: calc(var(--config-bar-space, var(--space-16)) + var(--space-8));
+}
+
+.formWithBar :is(input, textarea, select) {
+  scroll-margin-bottom: calc(var(--config-bar-space, var(--space-16)) + var(--space-8));
+}
+
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sectionHeading {
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.body {
+  container-type: inline-size;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5) var(--space-6);
+  align-items: start;
+}
+
+@container (min-width: 560px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.modified {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: var(--space-2);
+  color: var(--tone-warning-fg);
+  white-space: nowrap;
+}
+
+.modifiedDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.toggleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 34px;
+}
+
+.toggleState {
+  font-size: var(--text-md);
+  color: var(--fg-secondary);
+}
+
+.skeletonField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.bar {
+  position: fixed;
+  left: var(--config-bar-left, var(--space-4));
+  bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  z-index: var(--z-sticky);
+  width: var(--config-bar-width, calc(100% - var(--space-8)));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: bar-enter var(--dur-slow) var(--ease-out);
+}
+
+.barStatus {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  color: var(--fg-primary);
+}
+
+.barDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tone-warning-fg);
+}
+
+.barIssues {
+  color: var(--tone-danger-fg);
+}
+
+.barActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.spinner {
+  position: relative;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+}
+
+.spinner::before,
+.spinner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid currentColor;
+  border-radius: var(--radius-pill);
+}
+
+.spinner::before {
+  opacity: 0.3;
+}
+
+.spinner::after {
+  clip-path: inset(0 0 50% 50%);
+  animation: spin 0.7s linear infinite;
+}
+
+.diff {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-2);
+  max-width: 100%;
+}
+
+.diffFrom {
+  color: var(--fg-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: var(--fg-disabled);
+}
+
+.diffArrow {
+  color: var(--fg-tertiary);
+}
+
+.diffTo {
+  color: var(--fg-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.emptyValue {
+  font-family: var(--font-sans);
+  font-style: italic;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes bar-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 560px) {
+  .bar {
+    padding: var(--space-3);
+  }
+
+  .barStatus {
+    width: 100%;
+  }
+
+  .barActions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .barActions > * {
+    flex: 1;
+  }
+
+  .diff {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+  }
+
+  .spinner::after {
+    animation-duration: 1.6s;
+  }
+}

@@ -1,0 +1,17 @@
+.view { min-width: 0; }
+
+@media (max-width: 768px) {
+  .atMobile.desktop { display: none; }
+}
+
+@media not all and (max-width: 768px) {
+  .atMobile.mobile { display: none; }
+}
+
+@media not all and (min-width: 1200px) {
+  .atDesktop.desktop { display: none; }
+}
+
+@media (min-width: 1200px) {
+  .atDesktop.mobile { display: none; }
+}
