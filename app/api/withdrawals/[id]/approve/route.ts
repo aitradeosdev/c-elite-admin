@@ -1,8 +1,7 @@
 import type { NextRequest } from 'next/server';
-import { cookies, headers } from 'next/headers';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { requireAdmin } from '../../../../lib/guard';
-import { verifyAdminJWT } from '../../../../lib/jwt';
+import { sessionTokenFromRequest } from '../../../../lib/jwt';
 import { writeAudit } from '../../../../lib/audit';
 import { ok, fail, isUuid } from '../../../../lib/api';
 import { readPayoutGateway } from '../../../../lib/gateway';
@@ -18,15 +17,6 @@ interface WithdrawalRow {
   fee: number | null;
   user_id: string | null;
   gateway: string | null;
-}
-
-async function forwardedAdminToken(): Promise<string | null> {
-  const requestHeaders = await headers();
-  if (requestHeaders.get('x-client') === 'mobile-admin') {
-    const bearer = requestHeaders.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-    if (bearer && (await verifyAdminJWT(bearer))) return bearer;
-  }
-  return (await cookies()).get('admin_token')?.value || null;
 }
 
 async function currentStatus(id: string): Promise<string | null> {
@@ -59,7 +49,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     });
   }
 
-  const adminToken = await forwardedAdminToken();
+  const { token: adminToken } = await sessionTokenFromRequest();
   if (!adminToken) return fail('AUTH_REQUIRED', 'Your session has expired. Sign in again.');
 
   const auditBase = {

@@ -1,6 +1,8 @@
 export type ApiErrorCode =
   | 'AUTH_REQUIRED'
   | 'PERMISSION_DENIED'
+  | 'REAUTH_REQUIRED'
+  | 'MFA_REQUIRED'
   | 'RESOURCE_NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'STATE_CONFLICT'
@@ -14,6 +16,8 @@ export type ApiErrorCode =
 export const ERROR_STATUS: Readonly<Record<ApiErrorCode, number>> = {
   AUTH_REQUIRED: 401,
   PERMISSION_DENIED: 403,
+  REAUTH_REQUIRED: 403,
+  MFA_REQUIRED: 403,
   RESOURCE_NOT_FOUND: 404,
   VALIDATION_ERROR: 400,
   STATE_CONFLICT: 409,
@@ -28,6 +32,8 @@ export const ERROR_STATUS: Readonly<Record<ApiErrorCode, number>> = {
 export const ERROR_MESSAGE: Readonly<Record<ApiErrorCode, string>> = {
   AUTH_REQUIRED: 'Your session has expired. Sign in again.',
   PERMISSION_DENIED: 'You do not have permission to do this.',
+  REAUTH_REQUIRED: 'Confirm it is you to continue.',
+  MFA_REQUIRED: 'Set up two-step sign-in first.',
   RESOURCE_NOT_FOUND: 'That record could not be found.',
   VALIDATION_ERROR: 'The request was not valid.',
   STATE_CONFLICT: 'That record has changed. Reload and try again.',
@@ -38,6 +44,42 @@ export const ERROR_MESSAGE: Readonly<Record<ApiErrorCode, string>> = {
   AUDIT_FAILED: 'The action was blocked because it could not be recorded.',
   INTERNAL_ERROR: 'Something went wrong on our side.',
 };
+
+export const MFA_LOCKED_REASON = 'mfa_locked';
+export const STEP_ENDED_REASON = 'challenge_expired';
+
+const WAT_OFFSET_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function instantOf(value: unknown): number {
+  if (typeof value === 'string') return Date.parse(value);
+  if (value instanceof Date) return value.getTime();
+  return Number.NaN;
+}
+
+export function twoStepUnlockText(lockedUntil: unknown, nowMs: number = Date.now()): string | null {
+  const until = instantOf(lockedUntil);
+  if (!Number.isFinite(until) || !Number.isFinite(nowMs)) return null;
+  const at = new Date(Math.ceil(until / MINUTE_MS) * MINUTE_MS + WAT_OFFSET_MS);
+  const today = new Date(nowMs + WAT_OFFSET_MS);
+  const time = `${pad2(at.getUTCHours())}:${pad2(at.getUTCMinutes())} WAT`;
+  const sameDay = at.getUTCFullYear() === today.getUTCFullYear()
+    && at.getUTCMonth() === today.getUTCMonth()
+    && at.getUTCDate() === today.getUTCDate();
+  return sameDay ? time : `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}, ${time}`;
+}
+
+export function twoStepLockedMessage(lockedUntil: unknown, nowMs: number = Date.now()): string {
+  const when = twoStepUnlockText(lockedUntil, nowMs);
+  return when
+    ? `Too many wrong codes. Two-step sign-in is locked until ${when}. Your super administrators have been alerted.`
+    : 'Too many wrong codes. Two-step sign-in is locked for now. Try again later. Your super administrators have been alerted.';
+}
 
 export interface Pagination {
   page: number;

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { requireAdmin } from '../../../lib/guard';
 import { fail, ok } from '../../../lib/api';
+import { SESSION_UNAVAILABLE } from '../../../lib/session';
 
 interface ProfileRow {
   id: string;
@@ -10,6 +11,8 @@ interface ProfileRow {
   is_super_admin: boolean;
   is_active: boolean;
   page_permissions: string[] | null;
+  last_login_at: string | null;
+  created_at: string | null;
 }
 
 export async function GET() {
@@ -18,10 +21,13 @@ export async function GET() {
 
   const { data: row, error } = await supabaseAdmin
     .from('admin_users')
-    .select('id, username, email, role_title, is_super_admin, is_active, page_permissions')
+    .select('id, username, email, role_title, is_super_admin, is_active, page_permissions, last_login_at, created_at')
     .eq('id', guard.admin.admin_id)
     .maybeSingle<ProfileRow>();
-  if (error) console.error('admin profile read failed:', error.message);
+  if (error) {
+    console.error('admin profile read failed:', error.message);
+    return fail('INTERNAL_ERROR', SESSION_UNAVAILABLE);
+  }
   if (!row || !row.is_active) return fail('AUTH_REQUIRED');
 
   return ok({
@@ -32,6 +38,8 @@ export async function GET() {
       role_title: row.role_title,
       is_super_admin: row.is_super_admin,
       page_permissions: row.page_permissions || [],
+      last_login_at: row.last_login_at ?? null,
+      created_at: row.created_at ?? null,
     },
   });
 }

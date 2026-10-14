@@ -141,7 +141,7 @@ export interface SaveResponse {
 
 export type SaveOutcome =
   | { kind: 'saved'; results: RowResult[]; warning: string | null }
-  | { kind: 'partial'; results: RowResult[]; message: string; warning: string | null }
+  | { kind: 'conflict'; results: RowResult[] }
   | { kind: 'unknown'; message: string }
   | { kind: 'refused'; status: number | null; message: string }
   | { kind: 'expired' }
@@ -228,9 +228,10 @@ export type AddOutcome =
   | { kind: 'expired' }
   | { kind: 'retry'; message: string };
 
-const STATUSES: ReadonlySet<string> = new Set(['saved', 'unchanged', 'conflict', 'missing', 'error']);
+const STATUSES: ReadonlySet<string> = new Set(['saved', 'unchanged', 'conflict', 'missing']);
 const NEW_RANGE_FIELDS: readonly NewRangeField[] = ['label', 'min', 'max', 'rate'];
 const NO_IDS: ReadonlySet<string> = new Set<string>();
+const ALREADY_LIVE = 'Someone else already made this change, so there is nothing left to save.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -565,7 +566,7 @@ export function rebaseNotice(result: RebaseResult, includeConflicts: boolean): P
     ...result.alreadyLive.map((note) => ({
       id: note.id,
       title: note.title,
-      detail: 'Someone else already made this change, so there is nothing left to save.',
+      detail: ALREADY_LIVE,
     })),
   ];
   if (items.length === 0) return null;
@@ -708,16 +709,12 @@ export function classifySave(result: ApiResult<SaveResponse>): SaveOutcome {
   if (failure.status === 403) return { kind: 'refused', status: 403, message: failure.message };
   const details = isRecord(failure.details) ? failure.details : null;
   const results = details ? toRowResults(details.results) : null;
-  if (details && results && results.length > 0) {
-    return { kind: 'partial', results, message: failure.message, warning: text(details.warning) };
-  }
+  if (results && results.length > 0) return { kind: 'conflict', results };
   return { kind: 'retry', message: failure.message };
 }
 
-export function failureReason(result: RowResult | undefined): string {
-  if (!result) return 'No result came back for this change.';
+export function failureReason(result: RowResult): string {
   if (result.status === 'missing') return 'This range no longer exists.';
-  if (result.status === 'error') return 'The database did not accept this change.';
   if (result.status === 'conflict') {
     return result.rate === null
       ? 'Someone else changed this range before your save reached it.'
@@ -730,6 +727,14 @@ function savedText(total: number): string {
   return total === 1
     ? 'Saved 1 rate change. New submissions use it now.'
     : `Saved ${total.toLocaleString('en-NG')} rate changes. New submissions use them now.`;
+}
+
+function conflictText(total: number, conflicts: number, staged: number): string {
+  const lead = total === 1
+    ? 'The range changed or was removed after you loaded it.'
+    : `Rate changes are saved together, and ${count(conflicts, 'range', 'ranges')} changed or ${conflicts === 1 ? 'was' : 'were'} removed after you loaded ${conflicts === 1 ? 'it' : 'them'}.`;
+  if (staged === 0) return lead;
+  return `${lead} ${count(staged, 'change is', 'changes are')} still marked as unsaved below. Review and save again.`;
 }
 
 export function settleSave(
@@ -748,38 +753,39 @@ export function settleSave(
       if (!fresh) toasts.push({ text: 'The new rates could not be reloaded. Refresh to see them.', tone: 'warning' });
       return { draft: next, notice: null, toasts, cleared: draftCount(next) === 0 };
     }
-    case 'partial': {
+    case 'conflict': {
       const byId = new Map(outcome.results.map((result) => [result.id, result]));
       const next: Record<string, DraftEntry> = { ...draft };
-      const failed: NoticeItem[] = [];
-      let saved = 0;
+      const items: NoticeItem[] = [];
+      let conflicts = 0;
       for (const change of pending) {
         const result = byId.get(change.id);
-        if (result && (result.status === 'saved' || result.status === 'unchanged')) {
-          delete next[change.id];
-          saved += 1;
-          continue;
-        }
-        const reason = failureReason(result);
-        failed.push({ id: change.id, title: change.title, detail: reason });
         const entry = next[change.id];
-        if (entry) next[change.id] = { ...entry, failure: reason };
+        if (result?.status === 'unchanged') {
+          delete next[change.id];
+          items.push({ id: change.id, title: change.title, detail: ALREADY_LIVE });
+        } else if (result && (result.status === 'conflict' || result.status === 'missing')) {
+          const reason = failureReason(result);
+          conflicts += 1;
+          items.push({ id: change.id, title: change.title, detail: reason });
+          if (entry) next[change.id] = { ...entry, failure: reason };
+        } else if (entry && entry.failure !== null) {
+          next[change.id] = { ...entry, failure: null };
+        }
       }
+      const settled = fresh ? rebaseDraft(next, fresh).draft : next;
+      const staged = pending.filter((change) => isChanged(settled[change.id])).length;
+      const toasts: ToastNote[] = [{ text: 'Nothing was saved. Check the notice above the rates.', tone: 'error' }];
+      if (!fresh) toasts.push({ text: 'The live rates could not be reloaded. Refresh to see them.', tone: 'warning' });
       return {
-        draft: fresh ? rebaseDraft(next, fresh).draft : next,
+        draft: settled,
         notice: {
           tone: 'danger',
-          title: total === 1
-            ? 'The rate change was not saved'
-            : `${failed.length.toLocaleString('en-NG')} of ${count(total, 'rate change', 'rate changes')} not saved`,
-          message: saved > 0
-            ? `${count(saved, 'change was', 'changes were')} saved and ${saved === 1 ? 'is' : 'are'} live. The rest are still marked as unsaved below.`
-            : 'Nothing was saved. Your changes are still marked as unsaved below.',
-          items: failed,
+          title: total === 1 ? 'The rate change was not saved' : `None of the ${changeCountText(total)} were saved`,
+          message: conflictText(total, conflicts, staged),
+          items,
         },
-        toasts: outcome.warning
-          ? [{ text: outcome.message, tone: 'error' }, { text: outcome.warning, tone: 'warning' }]
-          : [{ text: outcome.message, tone: 'error' }],
+        toasts,
         cleared: false,
       };
     }

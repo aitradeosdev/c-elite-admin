@@ -1,6 +1,6 @@
 import type { ApiBody, ApiResult } from '../../lib/apiClient';
 
-export type Tab = 'pending_review' | 'held' | 'processing' | 'success' | 'failed' | 'all';
+export type Tab = 'pending_review' | 'processing' | 'success' | 'failed' | 'all';
 
 export interface TabSpec {
   value: Tab;
@@ -12,20 +12,21 @@ export interface TabSpec {
 
 export const DEFAULT_TAB: Tab = 'pending_review';
 
+const REVIEW_TAB: Tab = 'pending_review';
+
+const REVIEW_STATUSES: readonly string[] = ['pending_review', 'held'];
+
+const TAB_ALIASES: ReadonlyMap<string, Tab> = new Map<string, Tab>([['held', REVIEW_TAB]]);
+
+const FILTER_KEYS = ['status', 'review'];
+
 export const TABS: readonly TabSpec[] = [
   {
-    value: 'pending_review',
+    value: REVIEW_TAB,
     label: 'Review',
-    statuses: ['pending_review'],
-    emptyTitle: 'Nothing is waiting for review',
-    emptyHint: 'Withdrawals that need a decision appear here as soon as they are requested.',
-  },
-  {
-    value: 'held',
-    label: 'Held',
-    statuses: ['held'],
-    emptyTitle: 'No held withdrawals',
-    emptyHint: 'Withdrawals escalated from a risk flag appear here until someone decides them.',
+    statuses: REVIEW_STATUSES,
+    emptyTitle: 'Nothing is waiting for a decision',
+    emptyHint: 'New requests and held withdrawals appear here until someone approves or rejects them.',
   },
   {
     value: 'processing',
@@ -65,7 +66,7 @@ export const REJECT_REASONS = [
   'Gateway unavailable',
 ];
 
-const ACTIONABLE = new Set(['pending_review', 'held']);
+const ACTIONABLE = new Set(REVIEW_STATUSES);
 const OPEN_FLAG = new Set(['pending_review', 'escalated']);
 
 const PROVIDERS: Record<string, string> = {
@@ -211,8 +212,33 @@ export function tabSpec(tab: Tab): TabSpec {
   return TABS.find((spec) => spec.value === tab) ?? TABS[0];
 }
 
+export function parseTab(raw: string | null | undefined): Tab {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  return TABS.find((spec) => spec.value === text)?.value ?? TAB_ALIASES.get(text) ?? DEFAULT_TAB;
+}
+
+export function formatTab(tab: Tab): string | null {
+  return tab === DEFAULT_TAB || !TABS.some((spec) => spec.value === tab) ? null : tab;
+}
+
+export function tabFilter(tab: Tab): Record<string, string> {
+  const spec = tabSpec(tab);
+  if (spec.value === REVIEW_TAB) return { review: '1' };
+  return spec.statuses ? { status: spec.statuses.join(',') } : {};
+}
+
+export function sameTabFilter(previousKey: string, nextKey: string): boolean {
+  const previous = new URLSearchParams(previousKey);
+  const next = new URLSearchParams(nextKey);
+  return FILTER_KEYS.every((key) => previous.get(key) === next.get(key));
+}
+
 export function isActionable(status: string | null | undefined): boolean {
   return ACTIONABLE.has(String(status || ''));
+}
+
+export function isHeld(status: string | null | undefined): boolean {
+  return status === 'held';
 }
 
 export function isOpenFlag(flag: WithdrawalFlag | null | undefined): boolean {

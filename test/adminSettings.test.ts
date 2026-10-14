@@ -4,32 +4,40 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
-import { loadAppModule, render, tagsOf, textOf } from './support/uiHarness.ts';
+import { classesOf, loadAppModule, render, tagsOf, textOf, type Attrs } from './support/uiHarness.ts';
 import type { ApiFailure, ApiResult } from '../app/lib/apiClient.ts';
 import type {
   SaveReceipt, SecretDraft, SettingsEdit, SettingsSnapshot,
 } from '../app/(dashboard)/admin-settings/model.ts';
 import type { SaveRequest, StoredSetting } from '../app/(dashboard)/admin-settings/rules.ts';
+import type { PolicyChange, PolicyState } from '../app/(dashboard)/admin-settings/securityPolicy.ts';
 
 type RulesModule = typeof import('../app/(dashboard)/admin-settings/rules.ts');
 type ModelModule = typeof import('../app/(dashboard)/admin-settings/model.ts');
 type ConfirmModule = typeof import('../app/(dashboard)/admin-settings/confirmOptions.tsx');
 type PartsModule = typeof import('../app/(dashboard)/admin-settings/SettingsParts.tsx');
+type PolicyModule = typeof import('../app/(dashboard)/admin-settings/securityPolicy.ts');
+type PolicyCardModule = typeof import('../app/(dashboard)/admin-settings/SecurityPolicyCard.tsx');
 
 let rules: RulesModule;
 let model: ModelModule;
 let dialogs: ConfirmModule;
 let parts: PartsModule;
+let policy: PolicyModule;
+let policyCard: PolicyCardModule;
 
 before(async () => {
   rules = await loadAppModule<RulesModule>('(dashboard)/admin-settings/rules.ts');
   model = await loadAppModule<ModelModule>('(dashboard)/admin-settings/model.ts');
   dialogs = await loadAppModule<ConfirmModule>('(dashboard)/admin-settings/confirmOptions.tsx');
   parts = await loadAppModule<PartsModule>('(dashboard)/admin-settings/SettingsParts.tsx');
+  policy = await loadAppModule<PolicyModule>('(dashboard)/admin-settings/securityPolicy.ts');
+  policyCard = await loadAppModule<PolicyCardModule>('(dashboard)/admin-settings/SecurityPolicyCard.tsx');
 });
 
 const OWNED_DIR = fileURLToPath(new URL('../app/(dashboard)/admin-settings/', import.meta.url));
 const ROUTE_FILE = fileURLToPath(new URL('../app/api/admin-settings/route.ts', import.meta.url));
+const PAGE_FILE = join(OWNED_DIR, 'page.tsx');
 
 const PREVIOUS_ROUTE_KEYS = [
   'gateway_paystack_enabled', 'gateway_monnify_enabled', 'gateway_novac_enabled', 'active_payment_gateway',
@@ -368,6 +376,19 @@ describe('conflict detection', () => {
       plan({ terms_url: LIVE.terms_url }, LIVE, { expected: { terms_url: 'https://old.example/terms' } }).updates,
       {},
     );
+  });
+
+  test('a conflict names the settings by label, for a stale plan and for a change the database caught', () => {
+    assert.equal(
+      rules.conflictMessage(['terms_url']),
+      'Another admin changed Terms of Use URL after you loaded these settings, so nothing was saved. Reload to see the current values.',
+    );
+    assert.equal(
+      rules.conflictMessage(['chatwoot_identity_key', 'privacy_url', 'emergency_mode']),
+      'Another admin changed Identity validation key, Privacy Policy URL and Emergency mode after you loaded these settings, so nothing was saved. Reload to see the current values.',
+    );
+    const stale = refusal({ terms_url: 'https://a.co/t' }, LIVE, { expected: { terms_url: 'https://old.example/terms' } });
+    assert.equal(stale.message, rules.conflictMessage(['terms_url']));
   });
 });
 
@@ -759,6 +780,333 @@ describe('rendered parts', () => {
   });
 });
 
+const POLICY_NOW = new Date('2026-10-13T09:00:00.000Z');
+const ADA_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
+const OPS_ID = '22222222-3333-4444-8555-666666666666';
+const GRACE_BODY = { mfa_mode: 'all', mfa_grace_ends_at: '2026-10-27T09:05:00.000Z' };
+const REQUIRED_BODY = { mfa_mode: 'all', mfa_grace_ends_at: '2026-10-01T09:00:00.000Z', mfa_required_now: true };
+
+function policyBody(patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    success: true,
+    request_id: 'req_policy',
+    mfa_mode: 'off',
+    mfa_grace_ends_at: null,
+    mfa_required_now: false,
+    updated_at: null,
+    updated_by: null,
+    key_configured: true,
+    actor_mfa_status: 'active',
+    roster: { active: 2, enrolled: 1, missing: [{ id: OPS_ID.toUpperCase(), username: 'ops.lead' }] },
+    ...patch,
+  };
+}
+
+function policyState(patch: Record<string, unknown> = {}): PolicyState {
+  const state = policy.toPolicyState(policyBody(patch));
+  assert.ok(state);
+  return state;
+}
+
+function buttonByText(html: string, label: string): Attrs | undefined {
+  for (const match of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+    if (textOf(match[2]) === label) return tagsOf(`<button${match[1]}>`, 'button')[0];
+  }
+  return undefined;
+}
+
+function hrefs(html: string): string[] {
+  return tagsOf(html, 'a').map((attrs) => (attrs.href ?? '').replace(/&amp;/g, '&'));
+}
+
+describe('two-step requirement model', () => {
+  test('reads the policy, the server key, the acting admin and the roster', () => {
+    assert.deepEqual(policyState({ updated_by: ADA_ID.toUpperCase(), updated_at: '2026-10-12T09:00:00.000Z' }), {
+      mode: 'off',
+      graceEndsAt: null,
+      requiredNow: false,
+      updatedAt: '2026-10-12T09:00:00.000Z',
+      updatedBy: ADA_ID,
+      keyConfigured: true,
+      actorTwoStep: 'active',
+      roster: { active: 2, enrolled: 1, missing: [{ id: OPS_ID, username: 'ops.lead' }] },
+    });
+    assert.equal(policy.toPolicyState(policyBody({ mfa_mode: 'some' })), null);
+    assert.equal(policy.toPolicyState(policyBody({ roster: null })), null);
+    const odd = policyState({
+      actor_mfa_status: 'weird', key_configured: 'yes', roster: { active: '2', enrolled: -1, missing: [{ id: 'nope' }, null] },
+    });
+    assert.equal(odd.actorTwoStep, 'none');
+    assert.equal(odd.keyConfigured, false);
+    assert.deepEqual(odd.roster, { active: 0, enrolled: 0, missing: [] });
+    assert.equal(policyState({ mfa_grace_ends_at: '2026-10-27T09:05:00.000Z' }).graceEndsAt, null);
+  });
+
+  test('the view shows not required, required from a date or required, and the one action that applies', () => {
+    assert.deepEqual(policy.policyView(policyState(), POLICY_NOW), {
+      phase: 'off',
+      statusLabel: 'Not required',
+      statusTone: 'neutral',
+      grace: null,
+      action: 'on',
+      actionLabel: 'Require for all admins…',
+      blocker: null,
+    });
+    const grace = policy.policyView(policyState(GRACE_BODY), POLICY_NOW);
+    assert.deepEqual([grace.phase, grace.statusLabel, grace.statusTone], ['grace', 'Required from 27 Oct', 'warning']);
+    assert.deepEqual([grace.action, grace.actionLabel], ['off', 'Stop requiring it…']);
+    assert.equal(grace.grace?.dateTime, '27 Oct 2026, 10:05 WAT');
+    const required = policy.policyView(policyState(REQUIRED_BODY), POLICY_NOW);
+    assert.deepEqual([required.phase, required.statusLabel, required.statusTone], ['required', 'Required', 'success']);
+    assert.equal(policy.policyView(policyState(GRACE_BODY), new Date('2026-10-28T00:00:00.000Z')).phase, 'required');
+  });
+
+  test('a change waits for the acting admin’s own two-step sign-in and, to turn it on, the server key', () => {
+    assert.equal(policy.policyView(policyState({ actor_mfa_status: 'none' }), POLICY_NOW).blocker, 'two_step');
+    assert.equal(policy.policyView(policyState({ actor_mfa_status: 'pending' }), POLICY_NOW).blocker, 'two_step');
+    assert.equal(policy.policyView(policyState({ key_configured: false }), POLICY_NOW).blocker, 'key');
+    assert.equal(policy.policyView(policyState({ ...GRACE_BODY, key_configured: false }), POLICY_NOW).blocker, null);
+    assert.equal(policy.policyView(policyState({ ...GRACE_BODY, actor_mfa_status: 'none' }), POLICY_NOW).blocker, 'two_step');
+    assert.equal(
+      policy.blockerText('two_step'),
+      'Set up two-step sign-in on your Profile first. You confirm this change with a code from your app.',
+    );
+    assert.equal(policy.blockerText('key'), 'The two-step key is not configured on the server.');
+  });
+
+  test('the roster counts active admins and names the ones without it', () => {
+    assert.equal(policy.rosterText({ active: 2, enrolled: 1, missing: [] }), '1 of 2 active admins use it.');
+    assert.equal(policy.rosterText({ active: 1, enrolled: 0, missing: [] }), '0 of 1 active admin uses it.');
+    assert.equal(policy.rosterText({ active: 3, enrolled: 3, missing: [] }), 'All 3 active admins use it.');
+    assert.equal(policy.rosterText({ active: 1, enrolled: 1, missing: [] }), 'The only active admin uses it.');
+    assert.equal(policy.rosterText({ active: 0, enrolled: 0, missing: [] }), 'There are no active admins.');
+    const names = ['a', 'b', 'c', 'd', 'e'].map((username, index) => ({ id: `${index}`, username }));
+    assert.equal(policy.missingSummary(names), '5 (@a, @b, @c +2 more)');
+    assert.equal(policy.missingSummary([{ id: OPS_ID, username: 'ops.lead' }]), '1 (@ops.lead)');
+    assert.equal(policy.missingSummary([]), 'None');
+    assert.equal(policy.rosterHref(OPS_ID), `/admin-accounts?id=${OPS_ID}&panel=security`);
+  });
+
+  test('a change is sent with the mode and a trimmed reason, and every answer is classified', () => {
+    assert.deepEqual(policy.policyPayload('all', '  Security policy  '), { mfa_mode: 'all', reason: 'Security policy' });
+    const change: PolicyChange = {
+      changed: true, mode: 'all', graceEndsAt: '2026-10-27T09:05:00.000Z', auditRecorded: true, warning: null,
+    };
+    assert.deepEqual(policy.toPolicyChange({
+      success: true, changed: true, mfa_mode: 'all', mfa_grace_ends_at: '2026-10-27T09:05:00.000Z', audit_recorded: true,
+    }), change);
+    assert.equal(policy.toPolicyChange({ success: true, changed: false, mfa_mode: 'off', mfa_grace_ends_at: null })?.auditRecorded, true);
+    assert.equal(policy.toPolicyChange({ success: true }), null);
+    const fail = (patch: Partial<ApiFailure>): ApiResult<PolicyChange> => ({
+      ok: false,
+      error: {
+        kind: 'http', status: 400, code: 'VALIDATION_ERROR', message: 'Give a reason of at least 3 characters.',
+        requestId: null, details: null, outcomeUnknown: false, ...patch,
+      },
+    });
+    assert.deepEqual(policy.classifyPolicyChange({ ok: true, data: change, status: 200, requestId: 'req_1' }), { kind: 'done', change });
+    assert.deepEqual(policy.classifyPolicyChange(fail({ status: 401, code: 'AUTH_REQUIRED' })), { kind: 'expired' });
+    assert.deepEqual(policy.classifyPolicyChange(fail({ status: 403, code: 'REAUTH_REQUIRED' })), {
+      kind: 'reauth', code: 'REAUTH_REQUIRED', message: model.STEP_UP_MESSAGE.REAUTH_REQUIRED,
+    });
+    assert.deepEqual(policy.classifyPolicyChange(fail({ status: 403, code: 'MFA_REQUIRED' })), {
+      kind: 'reauth', code: 'MFA_REQUIRED', message: 'Set up two-step sign-in on your Profile first.',
+    });
+    assert.equal(policy.classifyPolicyChange(fail({ status: 403, code: 'PERMISSION_DENIED' })).kind, 'denied');
+    assert.deepEqual(
+      policy.classifyPolicyChange(fail({
+        status: 409, code: 'STATE_CONFLICT', message: 'Set ADMIN_MFA_ENCRYPTION_KEY before requiring two-step sign-in.',
+      })),
+      { kind: 'conflict', message: 'Set ADMIN_MFA_ENCRYPTION_KEY before requiring two-step sign-in.' },
+    );
+    assert.deepEqual(policy.classifyPolicyChange(fail({})), { kind: 'refused', message: 'Give a reason of at least 3 characters.' });
+    assert.equal(policy.classifyPolicyChange(fail({ status: 500, code: 'INTERNAL_ERROR' })).kind, 'refused');
+    assert.equal(policy.classifyPolicyChange(fail({ status: 500, code: null, outcomeUnknown: true })).kind, 'unknown');
+    assert.equal(policy.classifyPolicyChange(fail({ kind: 'network', status: null, code: null, outcomeUnknown: true })).kind, 'unknown');
+  });
+
+  test('the toasts say what changed', () => {
+    assert.equal(
+      policy.policyChangedText({ changed: true, mode: 'all', graceEndsAt: '2026-10-27T09:05:00.000Z', auditRecorded: true, warning: null }, POLICY_NOW),
+      'Two-step sign-in is now required. Admins without it have until 27 Oct 2026, 10:05 WAT to set it up.',
+    );
+    assert.equal(
+      policy.policyChangedText({ changed: true, mode: 'off', graceEndsAt: null, auditRecorded: true, warning: null }, POLICY_NOW),
+      'Two-step sign-in is no longer required. Admins who use it keep it.',
+    );
+    assert.equal(policy.policyUnchangedText('all'), 'Two-step sign-in was already required. Nothing changed.');
+    assert.equal(policy.policyUnchangedText('off'), 'Two-step sign-in was already not required. Nothing changed.');
+  });
+
+  test('settings saves treat a code prompt or a missing two-step sign-in as their own outcome', () => {
+    assert.deepEqual(model.classifySave(failure({ status: 403, code: 'REAUTH_REQUIRED' })), {
+      kind: 'reauth', message: model.STEP_UP_MESSAGE.REAUTH_REQUIRED,
+    });
+    assert.deepEqual(model.classifySave(failure({ status: 403, code: 'MFA_REQUIRED' })), {
+      kind: 'reauth', message: 'Set up two-step sign-in on your Profile first.',
+    });
+    assert.equal(model.classifySave(failure({ status: 403, code: 'PERMISSION_DENIED' })).kind, 'denied');
+  });
+});
+
+describe('two-step requirement card', () => {
+  const noop = () => {};
+  const card = (props: Record<string, unknown> = {}) => render(createElement(policyCard.SecurityPolicyCard, {
+    headingId: 'policy-heading',
+    state: policyState(),
+    error: null,
+    retrying: false,
+    busy: false,
+    now: POLICY_NOW,
+    onRetry: noop,
+    onChange: noop,
+    ...props,
+  }));
+  const loadFailure: ApiFailure = {
+    kind: 'http', status: 500, code: 'INTERNAL_ERROR', message: 'The two-step requirement could not be loaded. Try again.',
+    requestId: 'req_policy', details: null, outcomeUnknown: false,
+  };
+
+  test('the card is the admin-two-step anchor, with a focusable heading and its subtitle', () => {
+    const html = card();
+    const region = tagsOf(html, 'div').find((attrs) => attrs.id === 'admin-two-step');
+    assert.ok(region);
+    assert.equal(region.role, 'region');
+    assert.equal(region['aria-labelledby'], 'policy-heading');
+    assert.equal(tagsOf(html, 'h2').find((attrs) => attrs.id === 'policy-heading')?.tabindex, '-1');
+    assert.match(
+      textOf(html),
+      /^Two-step sign-in for admins Require an authenticator app code at every admin sign-in, on the web console and in the CardElite Admin app\. Not required/,
+    );
+  });
+
+  test('while loading it shows placeholders, a failed load offers a retry, and a failed refresh keeps the card', () => {
+    assert.match(textOf(card({ state: undefined })), /Loading the two-step requirement…/);
+    const failed = card({ state: undefined, error: loadFailure });
+    assert.match(textOf(failed), /The two-step requirement could not be loaded/);
+    assert.ok(buttonByText(failed, 'Try again'));
+    const stale = card({ error: loadFailure });
+    assert.match(textOf(stale), /The two-step requirement could not be refreshed\./);
+    assert.ok(buttonByText(stale, 'Require for all admins…'));
+  });
+
+  test('off: the roster, the admins without it linked to their Security tab, and the button to require it', () => {
+    const html = card();
+    const text = textOf(html);
+    assert.match(text, /1 of 2 active admins use it\. Not set up yet: @ops\.lead/);
+    assert.ok(hrefs(html).includes(`/admin-accounts?id=${OPS_ID}&panel=security`));
+    const button = buttonByText(html, 'Require for all admins…');
+    assert.ok(button);
+    assert.equal('disabled' in button, false);
+    assert.ok(classesOf(button).includes('primary'));
+    assert.match(text, /Admins get 14 days to set it up\. You confirm with a code from your authenticator app\./);
+    assert.equal(hrefs(html).includes('/profile#two-step-sign-in'), false);
+  });
+
+  test('without the acting admin’s own two-step sign-in, the change is disabled with a way to the Profile', () => {
+    const html = card({ state: policyState({ actor_mfa_status: 'none' }) });
+    const button = buttonByText(html, 'Require for all admins…');
+    assert.ok(button && 'disabled' in button);
+    assert.match(textOf(html), /Set up two-step sign-in on your Profile first\. You confirm this change with a code from your app\./);
+    assert.ok(hrefs(html).includes('/profile#two-step-sign-in'));
+    const stop = buttonByText(card({ state: policyState({ ...GRACE_BODY, actor_mfa_status: 'pending' }) }), 'Stop requiring it…');
+    assert.ok(stop && 'disabled' in stop);
+  });
+
+  test('without the server key, requiring it is disabled and says why', () => {
+    const html = card({ state: policyState({ key_configured: false }) });
+    const button = buttonByText(html, 'Require for all admins…');
+    assert.ok(button && 'disabled' in button);
+    assert.match(textOf(html), /The two-step key is not configured on the server\./);
+    assert.equal(hrefs(html).includes('/profile#two-step-sign-in'), false);
+  });
+
+  test('during the grace period it warns with the date and offers to stop requiring it', () => {
+    const html = card({ state: policyState(GRACE_BODY) });
+    const text = textOf(html);
+    assert.match(text, /Required from 27 Oct Required from 27 Oct 2026/);
+    assert.match(
+      text,
+      /Admins without it are asked to set it up by 27 Oct 2026, 10:05 WAT\. After that they must set it up when they sign in\./,
+    );
+    const stop = buttonByText(html, 'Stop requiring it…');
+    assert.ok(stop);
+    assert.equal('disabled' in stop, false);
+    assert.ok(classesOf(stop).includes('dangerSubtle'));
+  });
+
+  test('once required it says since when, and still offers to stop requiring it', () => {
+    const html = card({ state: policyState(REQUIRED_BODY) });
+    assert.match(textOf(html), /Required since 01 Oct 2026\. Admins without it set it up the next time they sign in\./);
+    assert.ok(buttonByText(html, 'Stop requiring it…'));
+  });
+
+  test('a change in flight shows the button as busy', () => {
+    const button = buttonByText(card({ busy: true }), 'Require for all admins…');
+    assert.ok(button && 'disabled' in button);
+    assert.equal(button['aria-busy'], 'true');
+  });
+});
+
+describe('two-step requirement confirms', () => {
+  test('a reason the route would refuse is caught before the code is spent', () => {
+    assert.equal(policy.reasonProblem('ok'), 'Give a reason of at least 3 characters.');
+    assert.equal(policy.reasonProblem('  ab  '), 'Give a reason of at least 3 characters.');
+    assert.equal(policy.reasonProblem('Rollout paused'), null);
+    const source = readFileSync(new URL('../app/(dashboard)/admin-settings/SecurityPolicyCard.tsx', import.meta.url), 'utf8');
+    const check = source.indexOf('reasonProblem(reason)');
+    assert.ok(check > 0 && check < source.indexOf('await confirmIdentity(credential'));
+  });
+
+  test('requiring it shows the 14-day grace and who is missing, and needs a reason and a code', () => {
+    const options = dialogs.policyOnOptions(policyState(), POLICY_NOW);
+    assert.equal(options.tone, undefined);
+    assert.equal(options.title, 'Require two-step sign-in for every admin?');
+    assert.deepEqual(options.details?.map((detail) => detail.label), ['Two-step sign-in', 'Grace period', 'Admins without it']);
+    assert.equal(textOf(render(createElement('div', null, options.details?.[0].value))), 'From Not required → to Required for every admin');
+    assert.equal(options.details?.[1].value, '14 days, until 27 Oct 2026, 10:00 WAT');
+    assert.equal(options.details?.[2].value, '1 (@ops.lead)');
+    assert.deepEqual(options.consequences, [
+      'Admins without it see a banner asking them to set it up by 27 Oct 2026.',
+      'After that they must set it up when they sign in on the web console before they can use it. The mobile app cannot set it up.',
+      'In the mobile app, admins with it type their password followed by the 6-digit code.',
+      'Admins already signed in stay signed in until their session ends.',
+      'Every admin gets an alert in the mobile app.',
+    ]);
+    assert.equal(options.reason?.required, true);
+    assert.deepEqual(options.reason?.presets, ['Security policy', 'After a security incident', 'Audit or compliance']);
+    assert.deepEqual(options.credential, { kind: 'otp' });
+    assert.equal(options.confirmLabel, 'Require two-step sign-in');
+  });
+
+  test('stopping it is a danger confirm that also needs a reason and a code', () => {
+    const options = dialogs.policyOffOptions(policyState(GRACE_BODY), POLICY_NOW);
+    assert.equal(options.tone, 'danger');
+    assert.equal(options.title, 'Stop requiring two-step sign-in?');
+    assert.equal(options.message, 'Admins who use it keep it. Admins without it can sign in with just their password again.');
+    assert.equal(textOf(render(createElement('div', null, options.details?.[0].value))), 'From Required from 27 Oct → to Not required');
+    assert.deepEqual(options.consequences, [
+      'The banner and the setup step at sign-in stop.',
+      'The other super administrators are alerted.',
+    ]);
+    assert.equal(options.reason?.required, true);
+    assert.deepEqual(options.reason?.presets, ['Turned on by mistake', 'Rollout paused']);
+    assert.deepEqual(options.credential, { kind: 'otp' });
+    assert.equal(options.confirmLabel, 'Stop requiring it');
+    const required = dialogs.policyOffOptions(policyState(REQUIRED_BODY), POLICY_NOW);
+    assert.equal(textOf(render(createElement('div', null, required.details?.[0].value))), 'From Required → to Not required');
+  });
+
+  test('the page names admin sign-in and places the card after emergency mode, outside the settings form', () => {
+    const source = readFileSync(PAGE_FILE, 'utf8');
+    assert.match(source, /payouts, bills, support, admin sign-in and the user app/);
+    const emergency = source.indexOf('<EmergencyCard');
+    const section = source.indexOf('<SecurityPolicySection />');
+    const form = source.indexOf('<form');
+    assert.ok(emergency > 0 && emergency < section && section < form);
+  });
+});
+
 describe('hard rules', () => {
   const sources = () => [
     ...readdirSync(OWNED_DIR).filter((name) => /\.(ts|tsx)$/.test(name)).map((name) => join(OWNED_DIR, name)),
@@ -796,8 +1144,17 @@ describe('hard rules', () => {
     assert.match(source, /requireSuperAdmin\(\)/);
     assert.doesNotMatch(source, /requireAdmin\(|requireAdminAny\(|requireAdminAll\(/);
     assert.match(source, /writeAudit\(/);
-    assert.match(source, /keepSecretsPrivate\(\)/);
     assert.match(source, /from '\.\.\/\.\.\/\(dashboard\)\/admin-settings\/rules'/);
     assert.doesNotMatch(source, /NextResponse\.json\(/);
+  });
+
+  test('every save goes through one compare-and-set call that keeps the secret keys private', () => {
+    const source = readFileSync(ROUTE_FILE, 'utf8');
+    assert.match(source, /changes: plan\.updates,/);
+    assert.match(source, /expected: seenValues\(current, SETTINGS_KEYS\),/);
+    assert.match(source, /privateKeys: SECRET_KEYS,/);
+    assert.doesNotMatch(source, /request\.expected/);
+    assert.doesNotMatch(source, /keepSecretsPrivate|sealSecretRows|\.upsert\(|\.update\(|\.insert\(/);
+    assert.doesNotMatch(source, /outcome\.before/);
   });
 });

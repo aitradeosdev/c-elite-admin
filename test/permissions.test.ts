@@ -57,6 +57,29 @@ describe('catalog integrity', () => {
   });
 });
 
+describe('wallet adjustments', () => {
+  test('wallets.adjust is the single, immediate adjustment permission', () => {
+    const meta = PERMISSION_CATALOG['wallets.adjust'];
+    assert.equal(meta.label, 'Adjust wallets');
+    assert.match(meta.description, /^Credit or debit a user’s wallet\./);
+    assert.match(meta.description, /applies at once, with no second approval/);
+    assert.equal(meta.risk, 'critical');
+  });
+
+  test('wallets.approve_adjustment is kept but says it is not used', () => {
+    assert.equal(isPermission('wallets.approve_adjustment'), true);
+    const meta = PERMISSION_CATALOG['wallets.approve_adjustment'];
+    assert.match(meta.label, /\(not used\)$/);
+    assert.match(meta.description, /^Not used/);
+  });
+
+  test('only an explicit grant or super admin holds wallets.adjust', () => {
+    assert.ok(resolvePermissions(['wallets.adjust'], false).has('wallets.adjust'));
+    assert.ok(resolvePermissions([], true).has('wallets.adjust'));
+    assert.ok(!resolvePermissions(['wallets.approve_adjustment', 'users', 'platform_balance'], false).has('wallets.adjust'));
+  });
+});
+
 describe('legacy expansion', () => {
   test('every legacy target is a real catalog key', () => {
     for (const [legacy, expanded] of Object.entries(LEGACY_PERMISSION_MAP)) {

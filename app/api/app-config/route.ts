@@ -1,16 +1,26 @@
 import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { requireSuperAdmin } from '../../lib/guard';
+import { requireSuperAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, ok } from '../../lib/api';
 import { isSecretConfigKey } from '../../lib/configSecrets';
-import { planConfigWrite, readConfigKeys, readConfigPatch } from '../../(dashboard)/referral-management/appConfigRules';
+import { RACE_CONFLICT_MESSAGE, compareAndSet, inOrder, pick, type ConfigCasConflict } from '../../lib/configCas';
+import {
+  configLabel,
+  conflictMessage,
+  planConfigWrite,
+  readConfigKeys,
+  readConfigPatch,
+  sensitivityFor,
+  type ConfigConflict,
+} from '../../(dashboard)/referral-management/appConfigRules';
 
 const ENTITY = 'app_config';
 const ACTION = 'UPDATE_APP_CONFIG';
 const PUBLIC_CACHE_KEY = 'app_config:public';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
 const NOT_SAVED = 'The settings could not be saved. Nothing was changed.';
+const UNCONFIRMED = 'The save could not be confirmed. Reload to check the current values before trying again.';
 
 const ALLOWED_KEYS = new Set<string>([
   'bill_vtpass_enabled', 'bill_novac_enabled', 'active_bill_provider',
@@ -57,6 +67,26 @@ function auditFields(recorded: boolean) {
   return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
 }
 
+function auditOf(admin: AdminContext, keys: readonly string[]): AuditInput {
+  return {
+    admin,
+    action: ACTION,
+    entity: ENTITY,
+    entity_id: keys.length === 1 ? keys[0] : 'batch',
+    sensitivity: sensitivityFor(keys),
+  };
+}
+
+function conflictResponse(found: readonly ConfigCasConflict[]) {
+  const keys = found.map((conflict) => conflict.key);
+  const conflicts: ConfigConflict[] = found.map((conflict) => ({
+    key: conflict.key,
+    label: configLabel(conflict.key),
+    current: conflict.current,
+  }));
+  return fail('STATE_CONFLICT', keys.length > 0 ? conflictMessage(keys) : RACE_CONFLICT_MESSAGE, { details: { conflicts } });
+}
+
 export async function GET(req: NextRequest) {
   const guard = await requireSuperAdmin();
   if (!guard.ok) return guard.response;
@@ -90,11 +120,12 @@ export async function PATCH(req: NextRequest) {
   const checked = readConfigPatch(body, ALLOWED_KEYS);
   if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
   const { patch } = checked;
+  const requested = Object.keys(patch.changes);
 
   const { data: rows, error: readError } = await supabaseAdmin
     .from('app_config')
     .select('key, value')
-    .in('key', Object.keys(patch.changes));
+    .in('key', requested);
   if (readError) {
     console.error('app config current read:', readError.message);
     return fail('INTERNAL_ERROR', 'The current values could not be read, so nothing was saved.');
@@ -104,36 +135,27 @@ export async function PATCH(req: NextRequest) {
     if (typeof row.key === 'string') current[row.key] = typeof row.value === 'string' ? row.value : null;
   }
 
-  const planned = planConfigWrite(patch, current);
-  if (!planned.ok) {
-    return fail('STATE_CONFLICT', planned.message, { details: { conflicts: planned.conflicts } });
+  const plan = planConfigWrite(patch, current);
+  const attempted = Object.keys(plan.changes).filter((key) => current[key] !== plan.changes[key]);
+  const outcome = await compareAndSet({ changes: plan.changes, expected: plan.expected, privateKeys: null, order: requested });
+  if (outcome.kind === 'conflict') return conflictResponse(outcome.conflicts);
+  if (outcome.kind === 'failed') {
+    console.error('app config save failed:', outcome.message);
+    if (attempted.length > 0) {
+      const before = Object.fromEntries(attempted.map((key) => [key, current[key] ?? null]));
+      await writeAudit({ ...auditOf(admin, attempted), before, after: pick(plan.changes, attempted), result: 'failure', error: outcome.message });
+    }
+    return fail('INTERNAL_ERROR', outcome.outcomeUnknown ? UNCONFIRMED : NOT_SAVED);
   }
-  const { plan } = planned;
-  const changed = Object.keys(plan.updates);
-  if (changed.length === 0) return ok({ changed, unchanged: plan.unchanged });
 
-  const audit: AuditInput = {
-    admin,
-    action: ACTION,
-    entity: ENTITY,
-    entity_id: plan.entityId,
-    before: plan.before,
-    after: plan.after,
-    sensitivity: plan.sensitivity,
-  };
+  const { changed } = outcome;
+  const unchanged = inOrder([...plan.unchanged, ...outcome.unchanged], requested);
+  if (changed.length === 0) return ok({ changed, unchanged });
 
-  const updatedAt = new Date().toISOString();
-  const { error } = await supabaseAdmin
-    .from('app_config')
-    .upsert(changed.map((key) => ({ key, value: plan.updates[key], updated_at: updatedAt })), { onConflict: 'key' });
-  if (error) {
-    console.error('app config save failed:', error.message);
-    await writeAudit({ ...audit, result: 'failure', error: error.message });
-    return fail('INTERNAL_ERROR', NOT_SAVED);
-  }
+  const audit: AuditInput = { ...auditOf(admin, changed), before: pick(outcome.before, changed), after: pick(plan.changes, changed) };
 
   await clearPublicCache();
 
   const recorded = await writeAudit({ ...audit, result: 'success' });
-  return ok({ changed, unchanged: plan.unchanged, ...auditFields(recorded.ok) });
+  return ok({ changed, unchanged, ...auditFields(recorded.ok) });
 }

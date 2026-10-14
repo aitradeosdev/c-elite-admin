@@ -4,10 +4,10 @@ import { requireAdmin } from '../../lib/guard';
 import { ok, isUuid } from '../../lib/api';
 import {
   SEARCH_CARD_CAP, SEARCH_USER_CAP, SearchQueryError, cardNamePattern, couponsFilter, exactUserMatch, executeSearch,
-  flagsFilter, mergeHits, searchesCardNames, submissionsFilter, toCouponItem, toFlagItem, toSubmissionItem,
-  toTransactionItem, toUserItem, toWithdrawalItem, transactionsFilter, userMatchFilter, usersFilter, withdrawalsFilter,
-  type FlagHit, type GroupFailure, type PersonRef, type SearchContext, type SearchItem, type SearchRunners,
-  type SubmissionHit, type TransactionHit, type UserHit, type WithdrawalHit,
+  mergeHits, searchesCardNames, submissionsFilter, toCouponItem, toSubmissionItem, toTransactionItem, toUserItem,
+  toWithdrawalItem, transactionsFilter, userMatchFilter, usersFilter, withdrawalsFilter,
+  type GroupFailure, type PersonRef, type SearchContext, type SearchItem, type SearchRunners, type SubmissionHit,
+  type TransactionHit, type UserHit, type WithdrawalHit,
 } from '../../lib/search';
 import { typeLabel } from '../../(dashboard)/transactions-overview/model';
 import { couponStatus, toCouponRow, type Brand, type CouponRow } from '../../(dashboard)/coupons/model';
@@ -20,7 +20,6 @@ const TRANSACTION_COLUMNS = 'id, type, amount, status, created_at, users(usernam
 const SUBMISSION_COLUMNS =
   'id, payout_naira, status, created_at, cards(name), card_types(name, country_code), users(username, full_name, email)';
 const COUPON_COLUMNS = 'id, code, type, bonus_rate_naira, expiry_date, max_redemptions, use_count, is_active, created_at';
-const FLAG_COLUMNS = 'id, transaction_type, amount, flag_reason, status, created_at, users(username, full_name, email)';
 
 const NEWEST = { ascending: false, nullsFirst: false } as const;
 const BRAND_CAP = 500;
@@ -189,22 +188,6 @@ async function searchCoupons({ intent, limit, signal }: SearchContext): Promise<
   }, today));
 }
 
-async function searchFlags(context: SearchContext, userIds: readonly string[]): Promise<SearchItem[]> {
-  const filter = flagsFilter(context.intent, userIds);
-  if (!filter) return [];
-  const rows = await rowsOf<FlagHit>(
-    supabaseAdmin
-      .from('flagged_transactions')
-      .select(FLAG_COLUMNS)
-      .or(filter)
-      .order('created_at', NEWEST)
-      .order('id', NEWEST)
-      .limit(context.limit)
-      .abortSignal(context.signal),
-  );
-  return rows.map((row) => toFlagItem(row, row.transaction_type ? typeLabel(row.transaction_type) : null));
-}
-
 function createRunners(): SearchRunners {
   let matched: Promise<string[]> | null = null;
   const matchingUserIds = (context: SearchContext): Promise<string[]> => {
@@ -217,7 +200,6 @@ function createRunners(): SearchRunners {
     transactions: async (context) => searchTransactions(context, await matchingUserIds(context)),
     card_submissions: (context) => searchSubmissions(context, matchingUserIds(context)),
     coupons: searchCoupons,
-    flags: async (context) => searchFlags(context, await matchingUserIds(context)),
   };
 }
 

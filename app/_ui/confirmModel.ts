@@ -1,7 +1,16 @@
 export type ConfirmPhase = 'idle' | 'pending' | 'failed';
 
+export type ConfirmCredentialKind = 'otp' | 'password';
+
+export interface ConfirmCredential {
+  kind: ConfirmCredentialKind;
+  label?: string;
+  help?: string;
+}
+
 export interface ConfirmResult<T = unknown> {
   reason: string;
+  credential?: string;
   value?: T;
 }
 
@@ -10,12 +19,14 @@ export interface ConfirmValues {
   acknowledged: boolean;
   reason: string;
   preset: string;
+  credential: string;
 }
 
 export interface ConfirmRules {
   requireTyped?: string;
   acknowledge?: string;
   reason?: { required?: boolean };
+  credential?: { kind: ConfirmCredentialKind };
 }
 
 export interface ConfirmActionSpec {
@@ -47,8 +58,17 @@ export const ACTION_FAILED_MESSAGE =
   'This did not finish, so it may or may not have gone through. Check the current status before you try again.';
 
 export const EMPTY_CONFIRM_VALUES: Readonly<ConfirmValues> = Object.freeze({
-  typed: '', acknowledged: false, reason: '', preset: '',
+  typed: '', acknowledged: false, reason: '', preset: '', credential: '',
 });
+
+export const CREDENTIAL_LABEL: Readonly<Record<ConfirmCredentialKind, string>> = Object.freeze({
+  otp: 'Code from your authenticator app',
+  password: 'Your password',
+});
+
+export const CREDENTIAL_HELP = 'Asked before changes to sign-in security.';
+
+const OTP_CREDENTIAL = /^[0-9]{6}$/;
 
 const PLATFORM_ERROR_NAMES = new Set([
   'AbortError', 'AggregateError', 'EvalError', 'InternalError', 'RangeError', 'ReferenceError', 'SyntaxError',
@@ -59,11 +79,32 @@ export function effectiveReason(values: Pick<ConfirmValues, 'reason' | 'preset'>
   return (values.preset === OTHER_REASON ? values.reason : values.preset || values.reason).trim();
 }
 
+export function credentialReady(kind: ConfirmCredentialKind, value: string): boolean {
+  return kind === 'otp' ? OTP_CREDENTIAL.test(value) : value.length > 0;
+}
+
 export function canConfirm(rules: ConfirmRules, values: ConfirmValues): boolean {
   const typedOk = !rules.requireTyped || values.typed.trim() === rules.requireTyped;
   const acknowledgedOk = !rules.acknowledge || values.acknowledged;
   const reasonOk = !rules.reason?.required || effectiveReason(values).length > 0;
-  return typedOk && acknowledgedOk && reasonOk;
+  const credentialOk = !rules.credential || credentialReady(rules.credential.kind, values.credential ?? '');
+  return typedOk && acknowledgedOk && reasonOk && credentialOk;
+}
+
+export function confirmResult(rules: Pick<ConfirmRules, 'credential'>, values: ConfirmValues): ConfirmResult {
+  const reason = effectiveReason(values);
+  return rules.credential ? { reason, credential: values.credential ?? '' } : { reason };
+}
+
+export function clearCredential(values: ConfirmValues): ConfirmValues {
+  return values.credential ? { ...values, credential: '' } : values;
+}
+
+export function settledResult<T>(result: ConfirmResult<T>): ConfirmResult<T> {
+  if (!('credential' in result)) return result;
+  const settled = { ...result };
+  delete settled.credential;
+  return settled;
 }
 
 export function choosePreset(values: ConfirmValues, preset: string): ConfirmValues {
@@ -129,7 +170,7 @@ export function createConfirmController<O extends ConfirmActionSpec>(): ConfirmC
     }
     outcome.then(
       (value) => {
-        if (session?.id === id) settle({ ...result, value });
+        if (session?.id === id) settle(settledResult({ ...result, value }));
       },
       (error: unknown) => {
         patch(id, 'failed', actionErrorText(error, describe));

@@ -4,15 +4,18 @@ import { requireAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, ok } from '../../lib/api';
 import {
-  assembleRateTree, planRateWrite, readNewRange, readRateChanges, saveVerdict, storedValues,
-  type CardRow, type CountryRow, type RateChangeInput, type RateResult, type StoredDenomination, type TypeRow,
+  NO_CHANGES_MESSAGE, TOO_MANY_CHANGES_MESSAGE, assembleRateTree, conflictMessage, rateChangeProblem, readNewRange,
+  readRateChanges, storedValues,
+  type CardRow, type CountryRow, type RateChangeInput, type RateResult, type RateValues, type StoredDenomination,
+  type TypeRow,
 } from '../../(dashboard)/rates/rateRules';
 
 const PAGE_ROWS = 1000;
 const MAX_PAGES = 100;
-const READ_CHUNK = 100;
-const WRITE_BATCH = 10;
+const AUDIT_BATCH = 10;
 const DENOMINATION_COLUMNS = 'id, card_type_id, range_label, min_value, max_value, rate_naira, is_active';
+const NOT_SAVED = 'The database did not accept the rate changes, so nothing was saved. Try again.';
+const UNCONFIRMED = 'The save could not be confirmed. Reload the rates to check them before trying again.';
 
 interface PageResponse {
   data: unknown[] | null;
@@ -27,10 +30,31 @@ interface TypeContext {
   name: string | null;
 }
 
-interface Applied {
-  result: RateResult;
-  audit: AuditInput | null;
+type RangeContext = Pick<StoredDenomination, 'card_type_id' | 'range_label' | 'min_value' | 'max_value'>;
+
+interface SavedRow {
+  id: string;
+  status: 'saved' | 'unchanged';
+  after: RateValues;
+  before: RateValues;
+  context: RangeContext;
 }
+
+interface ConflictRow {
+  id: string;
+  status: 'conflict' | 'missing';
+  live: RateValues | null;
+}
+
+interface InvalidRow {
+  index: number;
+  id: string | null;
+  reason: string;
+}
+
+type SaveResult =
+  | { applied: true; saved: string[]; unchanged: string[]; results: SavedRow[] }
+  | { applied: false; conflicts: ConflictRow[]; invalid: InvalidRow[]; unchanged: string[] };
 
 async function readAll<T>(
   label: string,
@@ -75,107 +99,144 @@ function auditBase(admin: AdminContext, action: string, entityId: string | null)
   return { admin, action, entity: 'denominations', entity_id: entityId, sensitivity: 'financial' };
 }
 
-function rangeContext(row: StoredDenomination) {
-  return {
-    card_type_id: row.card_type_id,
-    range_label: row.range_label,
-    min_value: row.min_value,
-    max_value: row.max_value,
-  };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function publicResult(id: string, status: RateResult['status'], row: StoredDenomination | null): RateResult {
-  const values = row ? storedValues(row) : null;
+function idList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') return null;
+    ids.push(item);
+  }
+  return ids;
+}
+
+function readEach<T>(value: unknown, read: (row: Record<string, unknown>) => T | null): T[] | null {
+  if (!Array.isArray(value)) return null;
+  const rows: T[] = [];
+  for (const item of value) {
+    const row = isRecord(item) ? read(item) : null;
+    if (row === null) return null;
+    rows.push(row);
+  }
+  return rows;
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function amountOrNull(value: unknown): number | string | null {
+  return typeof value === 'number' || typeof value === 'string' ? value : null;
+}
+
+function savedRow(row: Record<string, unknown>): SavedRow | null {
+  const { id, status, before } = row;
+  if (typeof id !== 'string' || (status !== 'saved' && status !== 'unchanged') || !isRecord(before)) return null;
   return {
     id,
     status,
-    rate_naira: values ? values.rate : null,
-    is_active: values ? values.active : null,
+    after: storedValues(row),
+    before: storedValues(before),
+    context: {
+      card_type_id: textOrNull(row.card_type_id),
+      range_label: textOrNull(row.range_label),
+      min_value: amountOrNull(row.min_value),
+      max_value: amountOrNull(row.max_value),
+    },
   };
 }
 
-async function readCurrent(ids: ReadonlyArray<string>): Promise<Map<string, StoredDenomination> | null> {
-  const current = new Map<string, StoredDenomination>();
-  for (let start = 0; start < ids.length; start += READ_CHUNK) {
-    const { data, error } = await supabaseAdmin
-      .from('denominations')
-      .select(DENOMINATION_COLUMNS)
-      .in('id', ids.slice(start, start + READ_CHUNK));
-    if (error) {
-      console.error('rates current read:', error.message);
-      return null;
-    }
-    for (const row of (data ?? []) as StoredDenomination[]) current.set(row.id, row);
-  }
-  return current;
+function conflictRow(row: Record<string, unknown>): ConflictRow | null {
+  const { id, status } = row;
+  if (typeof id !== 'string' || (status !== 'conflict' && status !== 'missing')) return null;
+  return { id, status, live: status === 'missing' ? null : storedValues(row) };
 }
 
-async function readOne(id: string): Promise<StoredDenomination | null | undefined> {
-  const { data, error } = await supabaseAdmin
-    .from('denominations')
-    .select(DENOMINATION_COLUMNS)
-    .eq('id', id)
-    .maybeSingle<StoredDenomination>();
-  if (error) {
-    console.error('rates row re-read:', error.message);
-    return undefined;
-  }
-  return data ?? null;
+function invalidRow(row: Record<string, unknown>): InvalidRow | null {
+  const { index, id, reason } = row;
+  if (typeof index !== 'number' || !Number.isInteger(index) || typeof reason !== 'string') return null;
+  return { index, id: textOrNull(id), reason };
 }
 
-async function writeGuarded(id: string, update: Record<string, unknown>, current: StoredDenomination) {
-  let query = supabaseAdmin.from('denominations').update(update).eq('id', id);
-  query = current.rate_naira === null ? query.is('rate_naira', null) : query.eq('rate_naira', current.rate_naira);
-  query = current.is_active === null ? query.is('is_active', null) : query.eq('is_active', current.is_active);
-  return query.select(DENOMINATION_COLUMNS);
+function readSaveResult(data: unknown): SaveResult | null {
+  if (!isRecord(data)) return null;
+  const unchanged = idList(data.unchanged);
+  if (!unchanged) return null;
+  if (data.applied === true) {
+    const saved = idList(data.saved);
+    const results = readEach(data.results, savedRow);
+    return saved && results ? { applied: true, saved, unchanged, results } : null;
+  }
+  if (data.applied !== false) return null;
+  const conflicts = readEach(data.conflicts, conflictRow);
+  const invalid = readEach(data.invalid, invalidRow);
+  if (!conflicts || !invalid || conflicts.length + invalid.length === 0) return null;
+  return { applied: false, conflicts, invalid, unchanged };
 }
 
-async function applyChange(admin: AdminContext, change: RateChangeInput, initial: StoredDenomination | null): Promise<Applied> {
-  let current = initial;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (!current) return { result: publicResult(change.id, 'missing', null), audit: null };
-    const plan = planRateWrite(change, current);
-    if (plan.kind === 'conflict') return { result: publicResult(change.id, 'conflict', current), audit: null };
-    if (plan.kind === 'unchanged') return { result: publicResult(change.id, 'unchanged', current), audit: null };
+function rpcChanges(changes: ReadonlyArray<RateChangeInput>) {
+  return changes.map((change) => ({
+    id: change.id,
+    rate_naira: change.rate,
+    is_active: change.active,
+    expected: change.expected ? { rate_naira: change.expected.rate, is_active: change.expected.active } : null,
+  }));
+}
 
-    const values = storedValues(current);
-    const before = { rate_naira: values.rate, is_active: values.active, ...rangeContext(current) };
-    const { data, error } = await writeGuarded(change.id, plan.update, current);
-    if (error) {
-      console.error('rate update:', change.id, error.message);
-      return {
-        result: publicResult(change.id, 'error', current),
-        audit: {
-          ...auditBase(admin, 'UPDATE_RATE', change.id),
-          before,
-          after: plan.update,
-          result: 'failure',
-          error: error.message,
-        },
-      };
-    }
-    const saved = ((data ?? []) as StoredDenomination[])[0];
-    if (saved) {
-      const after = storedValues(saved);
-      return {
-        result: publicResult(change.id, 'saved', saved),
-        audit: {
-          ...auditBase(admin, 'UPDATE_RATE', change.id),
-          before,
-          after: { rate_naira: after.rate, is_active: after.active },
-          result: 'success',
-        },
-      };
-    }
+function requestedUpdate(change: RateChangeInput) {
+  return change.active === null ? { rate_naira: change.rate } : { rate_naira: change.rate, is_active: change.active };
+}
 
-    const live = await readOne(change.id);
-    if (live === undefined) return { result: publicResult(change.id, 'error', current), audit: null };
-    if (change.expected) {
-      return { result: publicResult(change.id, live ? 'conflict' : 'missing', live), audit: null };
+function publicResult(row: SavedRow): RateResult {
+  return { id: row.id, status: row.status, rate_naira: row.after.rate, is_active: row.after.active };
+}
+
+function conflictResults(
+  changes: ReadonlyArray<RateChangeInput>,
+  conflicts: ReadonlyArray<ConflictRow>,
+  unchanged: ReadonlyArray<string>,
+): RateResult[] {
+  const conflictById = new Map(conflicts.map((row) => [row.id, row]));
+  const live = new Set(unchanged);
+  return changes.flatMap((change): RateResult[] => {
+    const conflict = conflictById.get(change.id);
+    if (conflict) {
+      return [{
+        id: change.id,
+        status: conflict.status,
+        rate_naira: conflict.live ? conflict.live.rate : null,
+        is_active: conflict.live ? conflict.live.active : null,
+      }];
     }
-    current = live;
-  }
-  return { result: publicResult(change.id, 'conflict', current), audit: null };
+    if (live.has(change.id)) return [{ id: change.id, status: 'unchanged', rate_naira: change.rate, is_active: change.active }];
+    return [];
+  });
+}
+
+function savedAudit(admin: AdminContext, row: SavedRow): AuditInput {
+  return {
+    ...auditBase(admin, 'UPDATE_RATE', row.id),
+    before: { rate_naira: row.before.rate, is_active: row.before.active, ...row.context },
+    after: { rate_naira: row.after.rate, is_active: row.after.active },
+    result: 'success',
+  };
+}
+
+async function saveFailure(admin: AdminContext, changes: ReadonlyArray<RateChangeInput>, message: string) {
+  if (message === 'Not authorized') return fail('AUTH_REQUIRED');
+  if (message === 'No rate changes provided') return fail('VALIDATION_ERROR', NO_CHANGES_MESSAGE);
+  if (message === 'Too many rate changes') return fail('VALIDATION_ERROR', TOO_MANY_CHANGES_MESSAGE);
+  console.error('admin_save_rates:', message);
+  await inBatches(changes, AUDIT_BATCH, (change) => writeAudit({
+    ...auditBase(admin, 'UPDATE_RATE', change.id),
+    after: requestedUpdate(change),
+    result: 'failure',
+    error: message,
+  }));
+  return fail('INTERNAL_ERROR', NOT_SAVED);
 }
 
 export async function GET() {
@@ -280,38 +341,49 @@ export async function PATCH(req: NextRequest) {
   if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
   const changes = checked.value;
 
-  const current = await readCurrent(changes.map((change) => change.id));
-  if (!current) return fail('INTERNAL_ERROR', 'The current rates could not be read, so nothing was saved. Try again.');
+  const { data, error } = await supabaseAdmin.rpc('admin_save_rates', {
+    p_admin_id: admin.admin_id,
+    p_changes: rpcChanges(changes),
+  });
+  if (error) return saveFailure(admin, changes, error.message);
 
-  const applied = await inBatches(changes, WRITE_BATCH, (change) => applyChange(admin, change, current.get(change.id) ?? null));
-  const audits = applied.flatMap((item) => (item.audit ? [item.audit] : []));
-  const outcomes = await inBatches(audits, WRITE_BATCH, (input) => writeAudit(input));
-  const recorded = outcomes.every((outcome) => outcome.ok);
-  const results = applied.map((item) => item.result);
-  const saved = results.filter((result) => result.status === 'saved').length;
-  const unchanged = results.filter((result) => result.status === 'unchanged').length;
-  const verdict = saveVerdict(results);
+  const result = readSaveResult(data);
+  if (!result) {
+    console.error('admin_save_rates: the result did not have the expected shape.');
+    return fail('INTERNAL_ERROR', UNCONFIRMED);
+  }
 
-  if (!verdict.ok) {
-    return fail(verdict.code, verdict.message, {
+  if (!result.applied) {
+    if (result.invalid.length > 0) {
+      const first = result.invalid[0];
+      return fail('VALIDATION_ERROR', rateChangeProblem(first.reason, first.index + 1, first.id), {
+        details: { invalid: result.invalid },
+      });
+    }
+    const results = conflictResults(changes, result.conflicts, result.unchanged);
+    const conflicts = results.filter((row) => row.status === 'conflict' || row.status === 'missing').length;
+    return fail('STATE_CONFLICT', conflictMessage(changes.length, conflicts), {
       details: {
-        saved,
-        unchanged,
-        failed: results.length - saved - unchanged,
+        saved: 0,
+        unchanged: result.unchanged.length,
+        failed: changes.length - result.unchanged.length,
         results,
-        audit_recorded: recorded,
-        ...(recorded ? {} : { warning: 'Some of the saved changes could not be written to the audit log.' }),
+        audit_recorded: true,
       },
     });
   }
 
+  const written = result.results.filter((row) => row.status === 'saved');
+  const outcomes = await inBatches(written, AUDIT_BATCH, (row) => writeAudit(savedAudit(admin, row)));
+  const recorded = outcomes.every((outcome) => outcome.ok);
+
   return ok({
-    saved,
-    unchanged,
-    results,
+    saved: result.saved.length,
+    unchanged: result.unchanged.length,
+    results: result.results.map(publicResult),
     ...auditFields(
       recorded,
-      saved === 1
+      result.saved.length === 1
         ? 'The rate was saved, but the change could not be written to the audit log.'
         : 'The rates were saved, but some changes could not be written to the audit log.',
     ),

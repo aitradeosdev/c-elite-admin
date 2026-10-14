@@ -1,0 +1,111 @@
+.root {
+  max-width: 880px;
+  min-width: 0;
+}
+
+.sectionHeading {
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.detailRows {
+  display: flex;
+  flex-direction: column;
+}
+
+.roleValue {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.form {
+  display: block;
+  min-width: 0;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  container-type: inline-size;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4) var(--space-6);
+}
+
+.startRow {
+  grid-column: 1;
+}
+
+.passwordField {
+  position: relative;
+}
+
+.passwordField .passwordInput {
+  padding-right: var(--space-10);
+}
+
+.passwordField .passwordToggle {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+
+.rules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.rule,
+.ruleMet {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--fg-tertiary);
+}
+
+.ruleMet {
+  color: var(--tone-success-fg);
+}
+
+.ruleIcon {
+  flex: none;
+  display: inline-flex;
+  padding-top: 2px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@container (min-width: 560px) {
+  .fields,
+  .rules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

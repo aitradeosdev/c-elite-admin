@@ -1,5 +1,9 @@
-import { before, describe, test } from 'node:test';
+import { afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { createElement, type ElementType } from 'react';
 import { loadAppModule, render, tagsOf, textOf } from './support/uiHarness.ts';
 import type { ApiBody, ApiFailure, ApiResult } from '../app/lib/apiClient.ts';
@@ -7,6 +11,7 @@ import type {
   BrandCountry, BuilderData, Install, Template, TemplateField,
 } from '../app/(dashboard)/field-builder/model.ts';
 import type { TemplateCardProps } from '../app/(dashboard)/field-builder/BuilderParts.tsx';
+import type { ReorderRefusal } from '../app/(dashboard)/field-builder/rules.ts';
 
 type RulesModule = typeof import('../app/(dashboard)/field-builder/rules.ts');
 type ModelModule = typeof import('../app/(dashboard)/field-builder/model.ts');
@@ -151,50 +156,6 @@ describe('field-builder rules: text and types', () => {
 });
 
 describe('field-builder rules: ordering', () => {
-  test('planReorder writes only the rows whose position changes', () => {
-    const plan = rules.planReorder(
-      [{ id: T1, sort_order: 0 }, { id: T2, sort_order: 1 }, { id: T3, sort_order: 2 }],
-      [T2, T1, T3],
-    );
-    assert.equal(plan.ok, true);
-    if (!plan.ok) return;
-    assert.deepEqual(plan.order, [T2, T1, T3]);
-    assert.deepEqual(plan.updates, [{ id: T2, sort_order: 0 }, { id: T1, sort_order: 1 }]);
-  });
-
-  test('planReorder renumbers tied or gapped sort orders into 0..n-1', () => {
-    const plan = rules.planReorder(
-      [{ id: T1, sort_order: 0 }, { id: T2, sort_order: 0 }, { id: T3, sort_order: 7 }],
-      [T1, T2, T3],
-    );
-    assert.equal(plan.ok, true);
-    if (!plan.ok) return;
-    assert.deepEqual(plan.updates, [{ id: T2, sort_order: 1 }, { id: T3, sort_order: 2 }]);
-  });
-
-  test('planReorder returns no updates when nothing moved', () => {
-    const plan = rules.planReorder([{ id: T1, sort_order: 0 }, { id: T2, sort_order: 1 }], [T1, T2]);
-    assert.equal(plan.ok, true);
-    if (plan.ok) assert.deepEqual(plan.updates, []);
-  });
-
-  test('planReorder refuses a list that does not match the current set exactly', () => {
-    const current = [{ id: T1, sort_order: 0 }, { id: T2, sort_order: 1 }];
-    assert.deepEqual(rules.planReorder(current, [T1]), { ok: false, reason: 'mismatch' });
-    assert.deepEqual(rules.planReorder(current, [T1, T2, T3]), { ok: false, reason: 'mismatch' });
-    assert.deepEqual(rules.planReorder(current, [T1, T3]), { ok: false, reason: 'mismatch' });
-    assert.deepEqual(rules.planReorder(current, [T1, T1]), { ok: false, reason: 'duplicate' });
-    assert.deepEqual(rules.planReorder(current, []), { ok: false, reason: 'empty' });
-  });
-
-  test('planReorder caps the list length and matches ids without regard to case', () => {
-    const many = Array.from({ length: rules.REORDER_MAX + 1 }, (_, index) => `${index}`);
-    assert.deepEqual(rules.planReorder([], many), { ok: false, reason: 'too_many' });
-    const plan = rules.planReorder([{ id: T1, sort_order: 1 }], [T1.toUpperCase()]);
-    assert.equal(plan.ok, true);
-    if (plan.ok) assert.deepEqual(plan.updates, [{ id: T1, sort_order: 0 }]);
-  });
-
   test('moveId swaps with the neighbour and refuses to move past either end', () => {
     assert.deepEqual(rules.moveId([T1, T2, T3], T2, 'up'), [T2, T1, T3]);
     assert.deepEqual(rules.moveId([T1, T2, T3], T2, 'down'), [T1, T3, T2]);
@@ -613,5 +574,652 @@ describe('field-builder template card markup', () => {
     assert.doesNotMatch(textOf(html), /Choose a country/);
     assert.match(textOf(html), /Live/);
     assert.match(textOf(html), /Off/);
+  });
+});
+
+const ROUTE_STATE = '__fieldBuilderRouteTest';
+const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
+const IMPORTS = /^((?:import|export)\b[^;'"]*?\bfrom\s*|import\s*)['"]([^'"]+)['"]/gm;
+const REQUEST_ID = 'req_fbroute01';
+const USER_AGENT = 'field-builder-route-test';
+const CLIENT_IP = '198.51.100.31';
+const AUDIT_DOWN = 'audit store unavailable';
+const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const SIGNED_OUT = 'Your session has expired. Sign in again.';
+const NOT_SAVED = 'The new order could not be saved.';
+const ORDER_UNCONFIRMED = 'The new order could not be confirmed. Reload to see the current order before trying again.';
+const CARD = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+interface RouteClaims {
+  admin_id: string;
+  username: string;
+  role_title: string;
+  is_super_admin: boolean;
+  page_permissions: string[];
+  token_version: number;
+}
+
+interface RpcError {
+  code: string;
+  message: string;
+  details: string | null;
+  hint: string | null;
+}
+
+interface RpcReply {
+  data: unknown;
+  error: RpcError | null;
+}
+
+interface AuditInsert {
+  data: null;
+  error: { message: string } | null;
+}
+
+interface RouteState {
+  claims: RouteClaims | null;
+  reply: RpcReply;
+  calls: Array<{ name: string; params: unknown }>;
+  tables: string[];
+  audits: Array<Record<string, unknown>>;
+  auditError: string | null;
+  from: (table: string) => { insert: (row: Record<string, unknown>) => Promise<AuditInsert> };
+  rpc: (name: string, params: unknown) => Promise<RpcReply>;
+}
+
+interface BuilderRoute {
+  POST: (req: Request) => Promise<Response>;
+  PATCH: (req: Request) => Promise<Response>;
+}
+
+interface Reply {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+const OWNER: RouteClaims = {
+  admin_id: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+  username: 'owner',
+  role_title: 'Super Admin',
+  is_super_admin: true,
+  page_permissions: [],
+  token_version: 0,
+};
+
+const route: RouteState = {
+  claims: OWNER,
+  reply: { data: null, error: null },
+  calls: [],
+  tables: [],
+  audits: [],
+  auditError: null,
+  from(table) {
+    route.tables.push(table);
+    if (table !== 'audit_log') throw new Error(`this change must not touch ${table} directly`);
+    return {
+      insert: async (row) => {
+        if (route.auditError) return { data: null, error: { message: route.auditError } };
+        route.audits.push(row);
+        return { data: null, error: null };
+      },
+    };
+  },
+  async rpc(name, params) {
+    route.calls.push({ name, params });
+    return route.reply;
+  },
+};
+(globalThis as unknown as Record<string, unknown>)[ROUTE_STATE] = route;
+
+const moduleUrl = (source: string) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const stateRef = `const state = () => globalThis.${ROUTE_STATE};`;
+
+const FILE_STUBS: Readonly<Record<string, string>> = {
+  [resolve(APP_DIR, 'lib', 'supabase.ts')]: moduleUrl(`${stateRef}
+export const supabaseAdmin = {
+  from: (table) => state().from(table),
+  rpc: (name, params) => state().rpc(name, params),
+};`),
+  [resolve(APP_DIR, 'lib', 'jwt.ts')]: moduleUrl(`${stateRef}
+export async function verifyAdminFromRequest() { return state().claims; }`),
+};
+
+const PACKAGE_STUBS: Readonly<Record<string, string>> = {
+  'next/headers': moduleUrl(`
+export async function headers() {
+  return new Headers({ 'x-request-id': '${REQUEST_ID}', 'user-agent': '${USER_AGENT}', 'x-forwarded-for': '${CLIENT_IP}' });
+}
+export async function cookies() { return { get: () => undefined }; }`),
+  'next/server': moduleUrl('export const NextResponse = { json: (body, init) => Response.json(body, init) };'),
+};
+
+const routeBundles = new Map<string, Promise<string>>();
+
+function resolveImport(fromFile: string, specifier: string): string {
+  const base = resolve(dirname(fromFile), specifier);
+  const found = [base, `${base}.ts`, `${base}.tsx`, resolve(base, 'index.ts')]
+    .find((candidate) => /\.tsx?$/.test(candidate) && existsSync(candidate));
+  if (!found) throw new Error(`${fromFile} imports ${specifier}, which does not resolve to a .ts file`);
+  return found;
+}
+
+async function compileRoute(file: string): Promise<string> {
+  const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
+    fileName: file,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  });
+  const targets = new Map<string, string>();
+  for (const [, , specifier] of outputText.matchAll(IMPORTS)) {
+    if (targets.has(specifier)) continue;
+    if (specifier.startsWith('.')) {
+      const target = resolveImport(file, specifier);
+      targets.set(specifier, FILE_STUBS[target] ?? (await bundleRoute(target)));
+    } else if (PACKAGE_STUBS[specifier]) {
+      targets.set(specifier, PACKAGE_STUBS[specifier]);
+    } else {
+      throw new Error(`${file} imports ${specifier}, which this test does not provide`);
+    }
+  }
+  return moduleUrl(outputText.replace(IMPORTS, (match, head: string, specifier: string) => {
+    const target = targets.get(specifier);
+    return target ? `${head}'${target}'` : match;
+  }));
+}
+
+function bundleRoute(file: string): Promise<string> {
+  let pending = routeBundles.get(file);
+  if (!pending) {
+    pending = compileRoute(file);
+    routeBundles.set(file, pending);
+  }
+  return pending;
+}
+
+function rpcError(message: string, code = 'P0001'): RpcError {
+  return { code, message, details: null, hint: null };
+}
+
+function failureBody(message: string, code: string, details?: unknown): Record<string, unknown> {
+  return {
+    success: false,
+    error: message,
+    code,
+    message,
+    request_id: REQUEST_ID,
+    ...(details === undefined ? {} : { details }),
+  };
+}
+
+function auditRow(fields: {
+  action: string;
+  entity: string;
+  entity_id: string | null;
+  before_value: unknown;
+  after_value: unknown;
+  result: string;
+  error?: string;
+  sensitivity: string;
+}): Record<string, unknown> {
+  return {
+    admin_id: OWNER.admin_id,
+    user_id: null,
+    action: fields.action,
+    entity: fields.entity,
+    entity_id: fields.entity_id,
+    before_value: fields.before_value,
+    after_value: fields.after_value,
+    ip_address: CLIENT_IP,
+    admin_role: OWNER.role_title,
+    user_agent: USER_AGENT,
+    request_id: REQUEST_ID,
+    reason: null,
+    result: fields.result,
+    error: fields.error ?? null,
+    sensitivity: fields.sensitivity,
+  };
+}
+
+let builderRoute: BuilderRoute;
+
+function resetRoute(): void {
+  route.claims = OWNER;
+  route.reply = { data: null, error: null };
+  route.calls = [];
+  route.tables = [];
+  route.audits = [];
+  route.auditError = null;
+  mock.method(console, 'error', () => {});
+}
+
+async function send(method: 'POST' | 'PATCH', body: unknown): Promise<Reply> {
+  const request = new Request('http://admin.test/api/field-builder', {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const response = await (method === 'POST' ? builderRoute.POST(request) : builderRoute.PATCH(request));
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}
+
+async function guardReply(method: 'POST' | 'PATCH', body: unknown): Promise<Reply> {
+  route.claims = null;
+  const reply = await send(method, body);
+  route.claims = OWNER;
+  return reply;
+}
+
+describe('field-builder route: reorders through the database functions', () => {
+  before(async () => {
+    builderRoute = (await import(await bundleRoute(resolve(APP_DIR, 'api', 'field-builder', 'route.ts')))) as BuilderRoute;
+  });
+
+  beforeEach(resetRoute);
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  function reordered(changed: boolean, templateId?: string | null) {
+    return {
+      data: {
+        applied: true,
+        changed,
+        ...(templateId === undefined ? {} : { template_id: templateId }),
+        order: [T2, T1, T3],
+        before: [T1, T2, T3],
+        positions: changed ? [{ id: T2, from: 1, to: 0 }, { id: T1, from: 0, to: 1 }] : [],
+      },
+      error: null,
+    };
+  }
+
+  test('card types are reordered by card with every parameter present', async () => {
+    route.reply = reordered(false);
+    await send('PATCH', { type: 'reorder_templates', card_id: CARD.toUpperCase(), ids: [T2.toUpperCase(), T1, T3] });
+    assert.deepEqual(route.calls, [{
+      name: 'admin_reorder_card_type_templates',
+      params: { p_admin_id: OWNER.admin_id, p_card_id: CARD, p_ids: [T2, T1, T3] },
+    }]);
+  });
+
+  test('a saved card type order is audited with the order before and after, against the card', async () => {
+    route.reply = reordered(true);
+    const reply = await send('PATCH', { type: 'reorder_templates', card_id: CARD, ids: [T2, T1, T3] });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, { success: true, request_id: REQUEST_ID, changed: true, audit_recorded: true });
+    assert.deepEqual(route.audits, [auditRow({
+      action: 'REORDER_CARD_TYPE_TEMPLATES',
+      entity: 'card_type_templates',
+      entity_id: CARD,
+      before_value: { order: [T1, T2, T3] },
+      after_value: { order: [T2, T1, T3] },
+      result: 'success',
+      sensitivity: 'normal',
+    })]);
+    assert.deepEqual(route.tables, ['audit_log']);
+  });
+
+  test('an order that is already in place reports no change and writes no audit', async () => {
+    route.reply = reordered(false);
+    const templates = await send('PATCH', { type: 'reorder_templates', card_id: CARD, ids: [T2, T1, T3] });
+    route.reply = reordered(false, T1);
+    const fields = await send('PATCH', { type: 'reorder_fields', template_id: T1, ids: [F2, F1] });
+    for (const reply of [templates, fields]) {
+      assert.equal(reply.status, 200);
+      assert.deepEqual(reply.body, { success: true, request_id: REQUEST_ID, changed: false });
+    }
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('refusals are worded per list: a stale list conflicts and the rest are validation errors on ids', async () => {
+    const refusals: Array<[ReorderRefusal, number, string]> = [
+      ['mismatch', 409, 'STATE_CONFLICT'],
+      ['empty', 400, 'VALIDATION_ERROR'],
+      ['too_many', 400, 'VALIDATION_ERROR'],
+      ['duplicate', 400, 'VALIDATION_ERROR'],
+    ];
+    for (const [reason, status, code] of refusals) {
+      const details = reason === 'mismatch' ? undefined : { field: 'ids' };
+      route.reply = { data: { applied: false, reason, missing: [], extra: [] }, error: null };
+      const templates = await send('PATCH', { type: 'reorder_templates', card_id: CARD, ids: [T1, T2] });
+      assert.equal(templates.status, status, reason);
+      assert.deepEqual(templates.body, failureBody(rules.reorderRefusalText(reason, 'card types'), code, details), reason);
+      route.reply = { data: { applied: false, reason, template_id: T1, missing: [], extra: [] }, error: null };
+      const fields = await send('PATCH', { type: 'reorder_fields', template_id: T1, ids: [F1, F2] });
+      assert.equal(fields.status, status, reason);
+      assert.deepEqual(fields.body, failureBody(rules.reorderRefusalText(reason, 'fields'), code, details), reason);
+    }
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('fields are reordered by the template sent, or by the owner the function derives when none is sent', async () => {
+    route.reply = reordered(false, T1);
+    await send('PATCH', { type: 'reorder_fields', template_id: T1.toUpperCase(), ids: [F2.toUpperCase(), F1] });
+    await send('PATCH', { type: 'reorder_fields', ids: [F2, F1] });
+    await send('PATCH', { type: 'reorder_fields', template_id: null, ids: [F2, F1] });
+    assert.deepEqual(route.calls, [
+      { name: 'admin_reorder_template_fields', params: { p_admin_id: OWNER.admin_id, p_template_id: T1, p_ids: [F2, F1] } },
+      { name: 'admin_reorder_template_fields', params: { p_admin_id: OWNER.admin_id, p_template_id: null, p_ids: [F2, F1] } },
+      { name: 'admin_reorder_template_fields', params: { p_admin_id: OWNER.admin_id, p_template_id: null, p_ids: [F2, F1] } },
+    ]);
+  });
+
+  test('a saved field order is audited against the template the function resolved', async () => {
+    route.reply = {
+      data: { applied: true, changed: true, template_id: T3, order: [F2, F1], before: [F1, F2], positions: [] },
+      error: null,
+    };
+    const reply = await send('PATCH', { type: 'reorder_fields', ids: [F2, F1] });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, { success: true, request_id: REQUEST_ID, changed: true, audit_recorded: true });
+    assert.deepEqual(route.audits, [auditRow({
+      action: 'REORDER_TEMPLATE_FIELDS',
+      entity: 'card_type_template_fields',
+      entity_id: T3,
+      before_value: { order: [F1, F2] },
+      after_value: { order: [F2, F1] },
+      result: 'success',
+      sensitivity: 'normal',
+    })]);
+  });
+
+  test('fields that do not share one card type are a conflict', async () => {
+    route.reply = { data: { applied: false, reason: 'mismatch', template_id: null, missing: [F2], extra: [] }, error: null };
+    const reply = await send('PATCH', { type: 'reorder_fields', ids: [F1, F2] });
+    assert.equal(reply.status, 409);
+    assert.deepEqual(reply.body, failureBody('The fields changed since you loaded them. Reload and try again.', 'STATE_CONFLICT'));
+  });
+
+  test('a saved order whose audit cannot be written still succeeds, with a warning', async () => {
+    route.reply = reordered(true);
+    route.auditError = AUDIT_DOWN;
+    const reply = await send('PATCH', { type: 'reorder_templates', card_id: CARD, ids: [T2, T1, T3] });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, {
+      success: true, request_id: REQUEST_ID, changed: true, audit_recorded: false, warning: AUDIT_WARNING,
+    });
+  });
+
+  test('an admin deactivated after the guard gets the same answer as the guard gives a deactivated admin', async () => {
+    const templateBody = { type: 'reorder_templates', card_id: CARD, ids: [T1, T2] };
+    const fieldBody = { type: 'reorder_fields', template_id: T1, ids: [F1, F2] };
+    const guarded = await guardReply('PATCH', templateBody);
+    assert.deepEqual(guarded.body, failureBody(SIGNED_OUT, 'AUTH_REQUIRED'));
+    route.reply = { data: null, error: rpcError('Not authorized') };
+    assert.deepEqual(await send('PATCH', templateBody), guarded);
+    assert.deepEqual(await send('PATCH', fieldBody), guarded);
+    assert.equal(route.calls.length, 2);
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('any other database error saves nothing, says so, and is audited as a failure', async () => {
+    route.reply = { data: null, error: rpcError('could not serialize access', '40001') };
+    const templates = await send('PATCH', { type: 'reorder_templates', card_id: CARD, ids: [T2, T1] });
+    const fields = await send('PATCH', { type: 'reorder_fields', ids: [F2, F1] });
+    for (const reply of [templates, fields]) {
+      assert.equal(reply.status, 500);
+      assert.deepEqual(reply.body, failureBody(NOT_SAVED, 'INTERNAL_ERROR'));
+    }
+    assert.deepEqual(route.audits, [
+      auditRow({
+        action: 'REORDER_CARD_TYPE_TEMPLATES',
+        entity: 'card_type_templates',
+        entity_id: CARD,
+        before_value: null,
+        after_value: { order: [T2, T1] },
+        result: 'failure',
+        error: 'could not serialize access',
+        sensitivity: 'normal',
+      }),
+      auditRow({
+        action: 'REORDER_TEMPLATE_FIELDS',
+        entity: 'card_type_template_fields',
+        entity_id: null,
+        before_value: null,
+        after_value: { order: [F2, F1] },
+        result: 'failure',
+        error: 'could not serialize access',
+        sensitivity: 'normal',
+      }),
+    ]);
+  });
+
+  test('a result the route does not recognise is reported as unconfirmed and audited as a failure', async () => {
+    const shapes = [
+      null,
+      { applied: false, reason: 'later' },
+      { applied: true, changed: true, order: [T1], before: 'T1' },
+    ];
+    for (const data of shapes) {
+      route.reply = { data, error: null };
+      const reply = await send('PATCH', { type: 'reorder_templates', card_id: CARD, ids: [T1] });
+      assert.equal(reply.status, 500);
+      assert.deepEqual(reply.body, failureBody(ORDER_UNCONFIRMED, 'INTERNAL_ERROR'));
+    }
+    assert.deepEqual(
+      route.audits.map((row) => row.error),
+      Array.from(shapes, () => 'admin_reorder_card_type_templates returned an unexpected result'),
+    );
+  });
+
+  test('requests the route refuses up front never reach the database', async () => {
+    const cases: Array<[Record<string, unknown>, string, string]> = [
+      [{ type: 'reorder_templates', card_id: 'nope', ids: [T1] }, 'Choose the card whose card types you are reordering.', 'card_id'],
+      [{ type: 'reorder_templates', card_id: CARD, ids: [T1, 'nope'] }, 'Send the card types as a list of ids in their new order.', 'ids'],
+      [{ type: 'reorder_fields', ids: 'nope' }, 'Send the fields as a list of ids in their new order.', 'ids'],
+      [{ type: 'reorder_fields', ids: [] }, 'Send the full list of fields in their new order.', 'ids'],
+      [{ type: 'reorder_fields', template_id: 'nope', ids: [F1] }, 'template_id must be the id of a card type.', 'template_id'],
+    ];
+    for (const [body, message, field] of cases) {
+      const reply = await send('PATCH', body);
+      assert.equal(reply.status, 400, message);
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR', { field }), message);
+    }
+    assert.deepEqual(route.calls, []);
+  });
+});
+
+describe('field-builder route: adding a card type to a country through the database function', () => {
+  before(async () => {
+    builderRoute = (await import(await bundleRoute(resolve(APP_DIR, 'api', 'field-builder', 'route.ts')))) as BuilderRoute;
+  });
+
+  beforeEach(resetRoute);
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  const MOBILE_BODY = { type: 'add_country', template_id: T1, country_code: 'GH' };
+
+  function live(outcome: 'already_live' | 'reactivated' | 'created', patch: Record<string, unknown> = {}) {
+    return {
+      data: {
+        applied: true,
+        outcome,
+        id: I1,
+        reactivated: outcome === 'reactivated',
+        already_live: outcome === 'already_live',
+        fields_copied: outcome === 'created' ? 2 : null,
+        previous_is_active: outcome === 'already_live' ? true : outcome === 'reactivated' ? false : null,
+        template_id: T1,
+        template_name: 'E-code',
+        card_id: CARD,
+        country_code: 'GH',
+        country_name: 'Ghana',
+        ...patch,
+      },
+      error: null,
+    };
+  }
+
+  test('the function gets the admin, the card type and the cleaned country code, with every parameter present', async () => {
+    route.reply = live('created');
+    await send('POST', { type: 'add_country', template_id: ` ${T1.toUpperCase()} `, country_code: ' gh ' });
+    assert.deepEqual(route.calls, [{
+      name: 'admin_add_card_type_to_country',
+      params: { p_admin_id: OWNER.admin_id, p_template_id: T1, p_country_code: 'GH' },
+    }]);
+  });
+
+  test('a new country returns the install and the fields copied, and is audited as added', async () => {
+    route.reply = live('created');
+    const reply = await send('POST', MOBILE_BODY);
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, {
+      success: true, request_id: REQUEST_ID, id: I1, reactivated: false, fields_copied: 2, audit_recorded: true,
+    });
+    assert.deepEqual(route.audits, [auditRow({
+      action: 'ADD_CARD_TYPE_TO_COUNTRY',
+      entity: 'card_types',
+      entity_id: I1,
+      before_value: null,
+      after_value: {
+        template_id: T1, template_name: 'E-code', card_id: CARD, country_code: 'GH', is_active: true, fields_copied: 2,
+      },
+      result: 'success',
+      sensitivity: 'financial',
+    })]);
+    assert.deepEqual(route.tables, ['audit_log']);
+  });
+
+  test('a country that was switched off is switched back on and audited with its previous state', async () => {
+    for (const previous of [false, null]) {
+      route.audits = [];
+      route.reply = live('reactivated', { previous_is_active: previous });
+      const reply = await send('POST', MOBILE_BODY);
+      assert.equal(reply.status, 200);
+      assert.deepEqual(reply.body, { success: true, request_id: REQUEST_ID, id: I1, reactivated: true, audit_recorded: true });
+      assert.deepEqual(route.audits, [auditRow({
+        action: 'REACTIVATE_CARD_TYPE_COUNTRY',
+        entity: 'card_types',
+        entity_id: I1,
+        before_value: { is_active: previous },
+        after_value: { is_active: true, template_id: T1, template_name: 'E-code', card_id: CARD, country_code: 'GH' },
+        result: 'success',
+        sensitivity: 'financial',
+      })]);
+    }
+  });
+
+  test('a country where the card type is already live changes nothing and writes no audit', async () => {
+    route.reply = live('already_live');
+    const reply = await send('POST', MOBILE_BODY);
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, { success: true, request_id: REQUEST_ID, id: I1, reactivated: false, already_live: true });
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('a saved country whose audit cannot be written still succeeds, with a warning', async () => {
+    route.auditError = AUDIT_DOWN;
+    route.reply = live('created');
+    const created = await send('POST', MOBILE_BODY);
+    route.reply = live('reactivated');
+    const reactivated = await send('POST', MOBILE_BODY);
+    for (const reply of [created, reactivated]) {
+      assert.equal(reply.status, 200);
+      assert.equal(reply.body.audit_recorded, false);
+      assert.equal(reply.body.warning, AUDIT_WARNING);
+    }
+  });
+
+  test('a card type that no longer exists is not found', async () => {
+    route.reply = { data: { applied: false, outcome: 'template_not_found' }, error: null };
+    const reply = await send('POST', MOBILE_BODY);
+    assert.equal(reply.status, 404);
+    assert.deepEqual(reply.body, failureBody('That card type no longer exists.', 'RESOURCE_NOT_FOUND'));
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('a country that is not active for the card is a conflict, named when the card has it', async () => {
+    const refused = (countryName: string | null) => ({
+      data: {
+        applied: false, outcome: 'country_not_active', template_id: T1, template_name: 'E-code', card_id: CARD,
+        country_code: 'GH', country_name: countryName,
+      },
+      error: null,
+    });
+    route.reply = refused('Ghana');
+    const named = await send('POST', MOBILE_BODY);
+    route.reply = refused(null);
+    const unnamed = await send('POST', MOBILE_BODY);
+    assert.equal(named.status, 409);
+    assert.deepEqual(named.body, failureBody(
+      'Ghana is not an active country for this card. Switch it on in Cards first.',
+      'STATE_CONFLICT',
+      { field: 'country_code' },
+    ));
+    assert.deepEqual(unnamed.body, failureBody(
+      'GH is not an active country for this card. Switch it on in Cards first.',
+      'STATE_CONFLICT',
+      { field: 'country_code' },
+    ));
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('a country code the function rejects asks for a country', async () => {
+    route.reply = { data: null, error: rpcError('Invalid country code') };
+    const reply = await send('POST', MOBILE_BODY);
+    assert.equal(reply.status, 400);
+    assert.deepEqual(reply.body, failureBody('Choose a country.', 'VALIDATION_ERROR', { field: 'country_code' }));
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('an admin deactivated after the guard gets the same answer as the guard gives a deactivated admin', async () => {
+    const guarded = await guardReply('POST', MOBILE_BODY);
+    route.reply = { data: null, error: rpcError('Not authorized') };
+    const reply = await send('POST', MOBILE_BODY);
+    assert.deepEqual(reply, guarded);
+    assert.deepEqual(reply.body, failureBody(SIGNED_OUT, 'AUTH_REQUIRED'));
+    assert.equal(route.calls.length, 1);
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('any other database error adds nothing, says so, and is audited as a failure', async () => {
+    route.reply = { data: null, error: rpcError('deadlock detected', '40P01') };
+    const reply = await send('POST', MOBILE_BODY);
+    assert.equal(reply.status, 500);
+    assert.deepEqual(reply.body, failureBody('The card type could not be added to GH. Nothing changed.', 'INTERNAL_ERROR'));
+    assert.deepEqual(route.audits, [auditRow({
+      action: 'ADD_CARD_TYPE_TO_COUNTRY',
+      entity: 'card_types',
+      entity_id: null,
+      before_value: null,
+      after_value: { template_id: T1, country_code: 'GH' },
+      result: 'failure',
+      error: 'deadlock detected',
+      sensitivity: 'financial',
+    })]);
+  });
+
+  test('a result the route does not recognise is reported as unconfirmed and audited as a failure', async () => {
+    const shapes = [null, { applied: true, outcome: 'created' }, { applied: true, outcome: 'moved', id: I1 }];
+    for (const data of shapes) {
+      route.reply = { data, error: null };
+      const reply = await send('POST', MOBILE_BODY);
+      assert.equal(reply.status, 500);
+      assert.deepEqual(
+        reply.body,
+        failureBody('Adding the card type to GH could not be confirmed. Reload to check before trying again.', 'INTERNAL_ERROR'),
+      );
+    }
+    assert.deepEqual(
+      route.audits.map((row) => row.error),
+      Array.from(shapes, () => 'admin_add_card_type_to_country returned an unexpected result'),
+    );
+  });
+
+  test('requests the route refuses up front never reach the database', async () => {
+    const cases: Array<[Record<string, unknown>, string, string]> = [
+      [{ type: 'add_country', template_id: 'nope', country_code: 'GH' }, 'Choose the card type to add.', 'template_id'],
+      [{ type: 'add_country', template_id: T1, country_code: 'G1' }, 'Choose a country.', 'country_code'],
+      [{ type: 'add_country', template_id: T1 }, 'Choose a country.', 'country_code'],
+    ];
+    for (const [body, message, field] of cases) {
+      const reply = await send('POST', body);
+      assert.equal(reply.status, 400, message);
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR', { field }), message);
+    }
+    assert.deepEqual(route.calls, []);
   });
 });

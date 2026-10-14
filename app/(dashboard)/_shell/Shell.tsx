@@ -6,7 +6,9 @@ import {
 } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Keyboard, LogOut, Menu, Monitor, Moon, PanelLeft, Search, Sun, X } from 'lucide-react';
+import {
+  Keyboard, LogOut, Menu, Monitor, MonitorSmartphone, Moon, PanelLeft, Search, Sun, UserRound, X,
+} from 'lucide-react';
 import { Button } from '../../_ui/Button';
 import { Spinner, ToastProvider, useToast } from '../../_ui/Misc';
 import { ConfirmProvider, useConfirm } from '../../_ui/Confirm';
@@ -15,22 +17,25 @@ import { AccessDenied } from '../../_ui/States';
 import { SessionExpiredHandler } from '../../_ui/SessionExpired';
 import { ThemeSwitcher } from '../../_ui/ThemeSwitcher';
 import { useTheme, type ThemeMode } from '../../_ui/theme';
-import {
-  CommandPalette, KeyboardShortcutsDialog, forgetRecents, recentStorageKey, type PaletteCommand, type PaletteIcon,
-} from '../../_ui/CommandPalette';
+import { CommandPalette, KeyboardShortcutsDialog, type PaletteCommand, type PaletteIcon } from '../../_ui/CommandPalette';
 import { findPageSearchInput, paletteChordHint, useApplePlatform, useHotkeys } from '../../_ui/useHotkeys';
 import { useFocusTrap } from '../../_ui/useFocusTrap';
 import { popOverlay, pushOverlay } from '../../_ui/overlayStack';
 import type { Permission } from '../../lib/permissions';
+import { PROFILE_HREF, PROFILE_LABEL, ProfileLink, profileLinkLabel } from '../profile/ProfileLink';
+import { NO_SECURITY_PROMPT, type ShellSecurity } from '../profile/securityModel';
+import { leaveConsole, useSignOutEverywhere } from '../profile/signOut';
 import {
-  breadcrumbTrail, filterNavByPermissions, findNavMatch, isNavPathDenied, serializeSidebarCollapsed,
+  breadcrumbTrail, filterNavByPermissions, findNavMatch, hrefMatches, isNavPathDenied, serializeSidebarCollapsed,
 } from './nav';
+import { SecurityBanner } from './SecurityBanner';
 import s from './Shell.module.css';
 
 const MOBILE_QUERY = '(max-width: 768px)';
 const TABLET_QUERY = '(768px < width < 1200px)';
 const TIP_HIDE_DELAY = 120;
 const LOGOUT_TIP_ID = 'account-logout';
+const PROFILE_TIP_ID = 'account-profile';
 const SEARCH_PATH = '/api/search';
 
 const SEARCH_GROUP_PERMISSIONS: ReadonlyArray<readonly [string, readonly Permission[]]> = [
@@ -39,7 +44,6 @@ const SEARCH_GROUP_PERMISSIONS: ReadonlyArray<readonly [string, readonly Permiss
   ['transactions', ['transactions.read']],
   ['card_submissions', ['cards.read']],
   ['coupons', ['coupons.read']],
-  ['flags', ['flags.read', 'withdrawals.read']],
 ];
 
 const THEME_COMMANDS: ReadonlyArray<{ mode: ThemeMode; label: string; icon: PaletteIcon }> = [
@@ -49,6 +53,34 @@ const THEME_COMMANDS: ReadonlyArray<{ mode: ThemeMode; label: string; icon: Pale
 ];
 
 const THEME_KEYWORDS: readonly string[] = ['appearance', 'colour', 'color', 'mode'];
+
+export const LOGOUT_CONFIRM = Object.freeze({
+  title: 'Log out of this device?',
+  message:
+    'Your other devices and the CardElite Admin app stay signed in. To sign out everywhere, use Signed-in devices on your Profile.',
+  confirmLabel: 'Log out',
+});
+
+export function accountCommands(onLogout: () => void, onSignOutEverywhere: () => void): PaletteCommand[] {
+  return [
+    {
+      id: 'log-out',
+      label: 'Log out',
+      subtitle: 'This device',
+      keywords: ['sign out', 'logout', 'this device'],
+      icon: LogOut,
+      onSelect: onLogout,
+    },
+    {
+      id: 'sign-out-everywhere',
+      label: 'Sign out everywhere',
+      subtitle: 'Every device, including the mobile app',
+      keywords: ['all devices', 'every device', 'log out everywhere', 'sessions'],
+      icon: MonitorSmartphone,
+      onSelect: onSignOutEverywhere,
+    },
+  ];
+}
 
 function subscribeToQuery(query: string) {
   return (notify: () => void) => {
@@ -220,6 +252,7 @@ export interface ShellProps {
   username: string;
   roleTitle: string;
   initialCollapsed?: boolean;
+  security?: ShellSecurity;
   children: ReactNode;
 }
 
@@ -242,14 +275,10 @@ function useLogout(username: string) {
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (returnFocusTo?: () => HTMLElement | null) => {
     if (busy.current) return;
     busy.current = true;
-    const accepted = await confirm({
-      title: 'Log out?',
-      message: 'This signs you out of the admin console on every device, not just this one.',
-      confirmLabel: 'Log out',
-    });
+    const accepted = await confirm({ ...LOGOUT_CONFIRM, returnFocusTo });
     if (!accepted) {
       busy.current = false;
       return;
@@ -264,15 +293,14 @@ function useLogout(username: string) {
       toast.show('Could not log out. Check your connection and try again.', 'error');
       return;
     }
-    if (username) forgetRecents(recentStorageKey(username));
-    window.location.replace('/login');
+    leaveConsole(username);
   }, [confirm, toast, username]);
 
   return { pending, logout };
 }
 
 function ShellFrame({
-  allowedKeys, isSuperAdmin, username, roleTitle, initialCollapsed, children,
+  allowedKeys, isSuperAdmin, username, roleTitle, initialCollapsed, security = NO_SECURITY_PROMPT, children,
 }: ShellProps) {
   const pathname = usePathname();
   const baseId = useId();
@@ -291,6 +319,10 @@ function ShellFrame({
   const { mode, setMode } = useTheme();
   const { canAny } = usePermissions();
   const { pending: logoutPending, logout } = useLogout(username);
+  const signOutEverywhere = useSignOutEverywhere(username);
+  const logoutHere = useCallback(() => {
+    void logout();
+  }, [logout]);
 
   const drawerOpen = mobile && mobileOpen;
   const collapsed = !mobile && (preference ?? tablet);
@@ -324,16 +356,27 @@ function ShellFrame({
   const returnToSearch = useCallback(() => searchTriggerRef.current, []);
 
   const pageCommands = useMemo<PaletteCommand[]>(
-    () => navGroups.flatMap((group) => group.items.map((item) => ({
-      id: item.href,
-      label: item.label,
-      subtitle: group.label,
-      keywords: [group.label],
-      icon: item.icon,
-      href: item.href,
-      hint: item.href === currentHref ? currentHint : undefined,
-    }))),
-    [navGroups, currentHref, currentHint],
+    () => [
+      ...navGroups.flatMap((group) => group.items.map((item) => ({
+        id: item.href,
+        label: item.label,
+        subtitle: group.label,
+        keywords: [group.label],
+        icon: item.icon,
+        href: item.href,
+        hint: item.href === currentHref ? currentHint : undefined,
+      }))),
+      {
+        id: PROFILE_HREF,
+        label: PROFILE_LABEL,
+        subtitle: 'Your account',
+        keywords: ['account', 'password', 'security', 'me', 'two-step sign-in', 'authenticator', 'signed-in devices'],
+        icon: UserRound,
+        href: PROFILE_HREF,
+        hint: hrefMatches(pathname, PROFILE_HREF) ? 'Current page' : undefined,
+      },
+    ],
+    [navGroups, currentHref, currentHint, pathname],
   );
 
   const actionCommands = useMemo<PaletteCommand[]>(
@@ -353,17 +396,16 @@ function ShellFrame({
         icon: Keyboard,
         onSelect: () => setShortcutsOpen(true),
       },
-      {
-        id: 'sign-out',
-        label: 'Sign out',
-        keywords: ['log out', 'logout'],
-        icon: LogOut,
-        onSelect: () => {
-          void logout();
+      ...accountCommands(
+        () => {
+          void logout(returnToSearch);
         },
-      },
+        () => {
+          void signOutEverywhere(returnToSearch);
+        },
+      ),
     ],
-    [mode, setMode, logout],
+    [mode, setMode, logout, signOutEverywhere, returnToSearch],
   );
 
   useHotkeys({
@@ -409,6 +451,7 @@ function ShellFrame({
 
   const crumbs = breadcrumbTrail(pathname);
   const permissionDenied = isNavPathDenied(pathname, allowedKeys, isSuperAdmin);
+  const onProfile = hrefMatches(pathname, PROFILE_HREF);
   const toggleLabel = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
 
   return (
@@ -492,9 +535,13 @@ function ShellFrame({
             username={username}
             roleTitle={roleTitle}
             pending={logoutPending}
-            onLogout={logout}
+            onLogout={logoutHere}
             tipTrigger={collapsed ? railTip.trigger(LOGOUT_TIP_ID, 'Log out') : undefined}
             showTitle={railTip.activeId !== LOGOUT_TIP_ID}
+            profileCurrent={onProfile}
+            profileTipTrigger={collapsed ? railTip.trigger(PROFILE_TIP_ID, PROFILE_LABEL) : undefined}
+            showProfileTitle={railTip.activeId !== PROFILE_TIP_ID}
+            onNavigate={drawerOpen ? closeDrawer : undefined}
           />
         </div>
       </aside>
@@ -584,6 +631,7 @@ function ShellFrame({
         </header>
 
         <main ref={mainRef} id="main-content" tabIndex={-1} className={s.content}>
+          {onProfile ? null : <SecurityBanner security={security} />}
           {permissionDenied ? <AccessDenied /> : children}
         </main>
       </div>
@@ -610,18 +658,33 @@ export interface SidebarAccountProps {
   onLogout: () => void;
   tipTrigger?: RailTipTriggerProps;
   showTitle: boolean;
+  profileCurrent: boolean;
+  profileTipTrigger?: RailTipTriggerProps;
+  showProfileTitle: boolean;
+  onNavigate?: () => void;
 }
 
-function SidebarAccount({ username, roleTitle, pending, onLogout, tipTrigger, showTitle }: SidebarAccountProps) {
+function SidebarAccount({
+  username, roleTitle, pending, onLogout, tipTrigger, showTitle, profileCurrent, profileTipTrigger, showProfileTitle,
+  onNavigate,
+}: SidebarAccountProps) {
   const initial = (username || '?').charAt(0).toUpperCase();
 
   return (
     <div className={s.sidebarFoot}>
-      <span className={s.userAvatar} aria-hidden="true">{initial}</span>
-      <span className={s.userIdentity}>
-        <span className={s.userName}>{username}</span>
-        <span className={s.userRole}>{roleTitle}</span>
-      </span>
+      <ProfileLink
+        current={profileCurrent}
+        aria-label={profileLinkLabel(username, roleTitle)}
+        title={showProfileTitle ? PROFILE_LABEL : undefined}
+        onClick={onNavigate}
+        {...(profileTipTrigger ?? {})}
+      >
+        <span className={s.userAvatar} aria-hidden="true">{initial}</span>
+        <span className={s.userIdentity}>
+          <span className={s.userName}>{username}</span>
+          <span className={s.userRole}>{roleTitle}</span>
+        </span>
+      </ProfileLink>
       <Button
         variant="ghost"
         size="sm"

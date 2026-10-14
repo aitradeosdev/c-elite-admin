@@ -1,6 +1,14 @@
 'use client';
 
-import { ConfigForm, notAbove, notBelow, type ConfigSection } from '../_config/ConfigForm';
+import { ConfigForm, notAbove, notBelow, type ConfigSection, type ConfigValidator } from '../_config/ConfigForm';
+
+const WHOLE_NAIRA = /^[1-9]\d*$/;
+
+function wholeNaira(next: ConfigValidator): ConfigValidator {
+  return (value, values) => (
+    WHOLE_NAIRA.test(value.trim()) ? next(value, values) : 'Enter whole naira, without decimals or leading zeros.'
+  );
+}
 
 const SECTIONS: ConfigSection[] = [
   {
@@ -58,6 +66,32 @@ const SECTIONS: ConfigSection[] = [
     ],
   },
   {
+    title: 'Wallet Adjustments',
+    description: 'Every admin, including super admins, stays within these limits when crediting or debiting a user wallet.',
+    fields: [
+      {
+        key: 'max_wallet_adjustment_naira',
+        label: 'Per-Adjustment Limit (₦)',
+        hint: 'Largest credit or debit an admin can make in one wallet adjustment. Whole naira only.',
+        input: 'number',
+        min: 1,
+        max: 10_000_000_000,
+        step: 1,
+        validate: wholeNaira(notAbove('max_wallet_adjustment_daily_naira', 'the daily adjustment limit')),
+      },
+      {
+        key: 'max_wallet_adjustment_daily_naira',
+        label: 'Daily Adjustment Limit per Admin (₦)',
+        hint: 'Total of all credits and debits one admin can make in a day (WAT). Whole naira only.',
+        input: 'number',
+        min: 1,
+        max: 10_000_000_000,
+        step: 1,
+        validate: wholeNaira(notBelow('max_wallet_adjustment_naira', 'the per-adjustment limit')),
+      },
+    ],
+  },
+  {
     title: 'Anomaly Detection',
     fields: [
       {
@@ -78,7 +112,7 @@ export default function LimitsFeesPage() {
   return (
     <ConfigForm
       title="Limits & Fees"
-      subtitle="Set withdrawal limits and the auto-flag threshold that gate money movement across the app."
+      subtitle="Set withdrawal limits, wallet adjustment limits and the auto-flag threshold that gate money movement across the app."
       endpoint="/api/limits-fees"
       sections={SECTIONS}
     />

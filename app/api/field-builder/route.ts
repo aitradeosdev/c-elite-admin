@@ -5,8 +5,8 @@ import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, isUuid, ok } from '../../lib/api';
 import {
   cleanText, findDuplicate, isInputType, labelProblem, nameProblem, normalizeCountryCode, parseIdList,
-  parseSortOrder, planReorder, reorderRefusalText, sameCountryCode,
-  type InputType, type Ordered, type SortUpdate,
+  parseSortOrder, reorderRefusalText, sameCountryCode,
+  type InputType, type ReorderRefusal,
 } from '../../(dashboard)/field-builder/rules';
 
 const TEMPLATES = 'card_type_templates';
@@ -14,6 +14,11 @@ const FIELDS = 'card_type_template_fields';
 const INSTALLS = 'card_types';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
 const CHANGED_ELSEWHERE = 'This changed while you were working on it. Reload and try again.';
+const NOT_AUTHORIZED = 'Not authorized';
+const ORDER_UNCONFIRMED = 'The new order could not be confirmed. Reload to see the current order before trying again.';
+const INVALID_COUNTRY_CODE = 'Invalid country code';
+const REORDER_REFUSALS: readonly ReorderRefusal[] = ['empty', 'too_many', 'duplicate', 'mismatch'];
+const LIVE_OUTCOMES: readonly LiveOutcome[] = ['already_live', 'reactivated', 'created'];
 
 type Body = Record<string, unknown>;
 
@@ -69,8 +74,93 @@ interface CountryRow {
   is_active: boolean | null;
 }
 
+type LiveOutcome = 'already_live' | 'reactivated' | 'created';
+
+interface InstallContext {
+  template_id: string | null;
+  template_name: string | null;
+  card_id: string | null;
+  country_code: string | null;
+}
+
+type InstallResult =
+  | { outcome: 'template_not_found' }
+  | { outcome: 'country_not_active'; countryName: string | null }
+  | {
+      outcome: LiveOutcome;
+      id: string;
+      fieldsCopied: number | null;
+      previousIsActive: boolean | null;
+      context: InstallContext;
+    };
+
+type ReorderResult =
+  | { applied: true; changed: boolean; templateId: string | null; order: string[]; before: string[] }
+  | { applied: false; reason: ReorderRefusal };
+
+interface ReorderCall {
+  fn: 'admin_reorder_card_type_templates' | 'admin_reorder_template_fields';
+  params: Record<string, string | string[] | null>;
+  ids: string[];
+  noun: string;
+  entity: string;
+  entityId: string | null;
+  context: string;
+}
+
 function rows<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : [];
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function textOf(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function idsOf(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((id) => typeof id === 'string') ? (value as string[]) : null;
+}
+
+function isRefusal(value: unknown): value is ReorderRefusal {
+  return typeof value === 'string' && (REORDER_REFUSALS as readonly string[]).includes(value);
+}
+
+function isLiveOutcome(value: unknown): value is LiveOutcome {
+  return typeof value === 'string' && (LIVE_OUTCOMES as readonly string[]).includes(value);
+}
+
+function readReorder(data: unknown): ReorderResult | null {
+  const result = recordOf(data);
+  if (!result) return null;
+  if (result.applied === false) return isRefusal(result.reason) ? { applied: false, reason: result.reason } : null;
+  const order = idsOf(result.order);
+  const before = idsOf(result.before);
+  if (result.applied !== true || !order || !before) return null;
+  return { applied: true, changed: result.changed === true, templateId: textOf(result.template_id), order, before };
+}
+
+function readInstall(data: unknown): InstallResult | null {
+  const result = recordOf(data);
+  if (!result) return null;
+  if (result.outcome === 'template_not_found') return { outcome: 'template_not_found' };
+  if (result.outcome === 'country_not_active') return { outcome: 'country_not_active', countryName: textOf(result.country_name) };
+  const id = textOf(result.id);
+  if (!isLiveOutcome(result.outcome) || !id) return null;
+  return {
+    outcome: result.outcome,
+    id,
+    fieldsCopied: typeof result.fields_copied === 'number' ? result.fields_copied : null,
+    previousIsActive: typeof result.previous_is_active === 'boolean' ? result.previous_is_active : null,
+    context: {
+      template_id: textOf(result.template_id),
+      template_name: textOf(result.template_name),
+      card_id: textOf(result.card_id),
+      country_code: textOf(result.country_code),
+    },
+  };
 }
 
 function uuidOf(value: unknown): string | null {
@@ -115,14 +205,6 @@ function auditResult(recorded: boolean) {
 
 function nextSortOrder(items: readonly { sort_order: number | null }[]): number {
   return items.reduce((max, item) => Math.max(max, typeof item.sort_order === 'number' ? item.sort_order : -1), -1) + 1;
-}
-
-async function applySortOrders(table: string, scope: { column: string; value: string }, updates: readonly SortUpdate[]) {
-  const results = await Promise.all(updates.map((update) => (
-    supabaseAdmin.from(table).update({ sort_order: update.sort_order }).eq('id', update.id).eq(scope.column, scope.value)
-  )));
-  const errors = results.map((result) => result.error).filter((error): error is NonNullable<typeof error> => Boolean(error));
-  return { failed: errors.length, error: errors[0]?.message ?? null };
 }
 
 export async function GET(req: NextRequest) {
@@ -412,142 +494,69 @@ async function addToCountry(admin: AdminContext, body: Body) {
   const requested = normalizeCountryCode(body.country_code);
   if (!requested) return invalid('Choose a country.', 'country_code');
 
-  const { data: template, error: templateError } = await supabaseAdmin
-    .from(TEMPLATES)
-    .select('id, card_id, name, sort_order')
-    .eq('id', templateId)
-    .maybeSingle<TemplateRow>();
-  if (templateError) {
-    return serverError('add country template', 'The card type could not be checked, so nothing was added.', templateError);
-  }
-  if (!template) return fail('RESOURCE_NOT_FOUND', 'That card type no longer exists.');
-
-  const [countries, installs] = await Promise.all([
-    supabaseAdmin.from('card_countries').select('country_code, country_name, is_active').eq('card_id', template.card_id),
-    supabaseAdmin
-      .from(INSTALLS)
-      .select('id, country_code, is_active')
-      .eq('card_id', template.card_id)
-      .eq('template_id', templateId),
-  ]);
-  if (countries.error) {
-    return serverError('add country countries', 'The card’s countries could not be checked, so nothing was added.', countries.error);
-  }
-  if (installs.error) {
-    return serverError('add country installs', 'The card type’s countries could not be checked, so nothing was added.', installs.error);
-  }
-
-  const country = rows<CountryRow>(countries.data).find((row) => sameCountryCode(row.country_code, requested));
-  if (!country || country.is_active !== true) {
-    return fail(
-      'STATE_CONFLICT',
-      `${country?.country_name || requested} is not an active country for this card. Switch it on in Cards first.`,
-      { details: { field: 'country_code' } },
-    );
-  }
-  const code = country.country_code || requested;
-  const place = country.country_name || code;
-  const context = { template_id: templateId, template_name: template.name, card_id: template.card_id, country_code: code };
-  const existing = rows<InstallRow>(installs.data).find((row) => sameCountryCode(row.country_code, code));
-
-  if (existing) {
-    if (existing.is_active === true) return ok({ id: existing.id, reactivated: false, already_live: true });
-    const reactivate = { action: 'REACTIVATE_CARD_TYPE_COUNTRY', entity: INSTALLS, entity_id: existing.id, sensitivity: 'financial' as const };
-    const update = supabaseAdmin.from(INSTALLS).update({ is_active: true }).eq('id', existing.id);
-    const { data, error } = await (existing.is_active === null ? update.is('is_active', null) : update.eq('is_active', false)).select('id');
-    if (error) {
-      await audit(admin, { ...reactivate, before: { is_active: existing.is_active }, after: { is_active: true, ...context }, result: 'failure', error: error.message });
-      return serverError('reactivate country', `${template.name} could not be switched back on in ${place}.`, error);
-    }
-    if (rows(data).length === 0) return fail('STATE_CONFLICT', CHANGED_ELSEWHERE);
-    const recorded = await audit(admin, {
-      ...reactivate,
-      before: { is_active: existing.is_active },
-      after: { is_active: true, ...context },
-      result: 'success',
-    });
-    return ok({ id: existing.id, reactivated: true, ...auditResult(recorded.ok) });
-  }
-
-  const { data: templateFields, error: fieldsError } = await supabaseAdmin
-    .from(FIELDS)
-    .select('label, input_type, is_required, sort_order')
-    .eq('template_id', templateId)
-    .order('sort_order', { ascending: true })
-    .order('id', { ascending: true });
-  if (fieldsError) {
-    return serverError('add country fields', 'The card type’s fields could not be read, so nothing was added.', fieldsError);
-  }
-
-  const base = { action: 'ADD_CARD_TYPE_TO_COUNTRY', entity: INSTALLS, sensitivity: 'financial' as const };
-  const { data: created, error: insertError } = await supabaseAdmin
-    .from(INSTALLS)
-    .insert({
-      card_id: template.card_id,
-      country_code: code,
-      name: template.name,
-      template_id: templateId,
-      is_active: false,
-      sort_order: template.sort_order ?? 0,
-    })
-    .select('id')
-    .single<{ id: string }>();
-  if (insertError || !created) {
-    await audit(admin, { ...base, entity_id: null, after: context, result: 'failure', error: insertError?.message ?? 'No row returned' });
-    return serverError('add country insert', `${template.name} could not be added to ${place}. Nothing changed.`, insertError);
-  }
-
-  const copies = rows<Omit<InstallFieldRow, 'card_type_id'>>(templateFields).map((field, index) => ({
-    card_type_id: created.id,
-    label: field.label,
-    input_type: field.input_type,
-    is_required: field.is_required ?? true,
-    sort_order: index,
-  }));
-  if (copies.length > 0) {
-    const { error: copyError } = await supabaseAdmin.from('card_type_fields').insert(copies);
-    if (copyError) {
-      const { error: undoError } = await supabaseAdmin.from(INSTALLS).delete().eq('id', created.id);
-      await audit(admin, {
-        ...base,
-        entity_id: created.id,
-        after: { ...context, is_active: false, removed: !undoError },
-        result: undoError ? 'partial' : 'failure',
-        error: copyError.message,
-      });
-      console.error('field-builder add country copy:', copyError.message, undoError?.message ?? '');
-      return fail(
-        'INTERNAL_ERROR',
-        undoError
-          ? `${template.name} could not be added to ${place}. An incomplete copy was left switched off, so users cannot see it.`
-          : `${template.name} could not be added to ${place}. Nothing changed.`,
-      );
-    }
-  }
-
-  const { error: liveError } = await supabaseAdmin.from(INSTALLS).update({ is_active: true }).eq('id', created.id);
-  if (liveError) {
+  const { data, error } = await supabaseAdmin.rpc('admin_add_card_type_to_country', {
+    p_admin_id: admin.admin_id,
+    p_template_id: templateId,
+    p_country_code: requested,
+  });
+  if (error?.message === NOT_AUTHORIZED) return fail('AUTH_REQUIRED');
+  if (error?.message === INVALID_COUNTRY_CODE) return invalid('Choose a country.', 'country_code');
+  const result = error ? null : readInstall(data);
+  if (!result) {
+    const failure = error ?? { message: 'admin_add_card_type_to_country returned an unexpected result' };
     await audit(admin, {
-      ...base,
-      entity_id: created.id,
-      after: { ...context, is_active: false, fields_copied: copies.length },
-      result: 'partial',
-      error: liveError.message,
+      action: 'ADD_CARD_TYPE_TO_COUNTRY',
+      entity: INSTALLS,
+      entity_id: null,
+      after: { template_id: templateId, country_code: requested },
+      sensitivity: 'financial',
+      result: 'failure',
+      error: failure.message,
     });
     return serverError(
-      'add country activate',
-      `${template.name} was added to ${place} but could not be switched on. It is switched off; switch it on from the list.`,
-      liveError,
+      'add country',
+      error
+        ? `The card type could not be added to ${requested}. Nothing changed.`
+        : `Adding the card type to ${requested} could not be confirmed. Reload to check before trying again.`,
+      failure,
     );
   }
 
-  const recorded = await audit(admin, {
-    ...base,
-    entity_id: created.id,
-    after: { ...context, is_active: true, fields_copied: copies.length },
-    result: 'success',
-  });
-  return ok({ id: created.id, reactivated: false, fields_copied: copies.length, ...auditResult(recorded.ok) });
+  switch (result.outcome) {
+    case 'template_not_found':
+      return fail('RESOURCE_NOT_FOUND', 'That card type no longer exists.');
+    case 'country_not_active':
+      return fail(
+        'STATE_CONFLICT',
+        `${result.countryName || requested} is not an active country for this card. Switch it on in Cards first.`,
+        { details: { field: 'country_code' } },
+      );
+    case 'already_live':
+      return ok({ id: result.id, reactivated: false, already_live: true });
+    case 'reactivated': {
+      const recorded = await audit(admin, {
+        action: 'REACTIVATE_CARD_TYPE_COUNTRY',
+        entity: INSTALLS,
+        entity_id: result.id,
+        before: { is_active: result.previousIsActive },
+        after: { is_active: true, ...result.context },
+        sensitivity: 'financial',
+        result: 'success',
+      });
+      return ok({ id: result.id, reactivated: true, ...auditResult(recorded.ok) });
+    }
+    case 'created': {
+      const recorded = await audit(admin, {
+        action: 'ADD_CARD_TYPE_TO_COUNTRY',
+        entity: INSTALLS,
+        entity_id: result.id,
+        after: { ...result.context, is_active: true, fields_copied: result.fieldsCopied },
+        sensitivity: 'financial',
+        result: 'success',
+      });
+      return ok({ id: result.id, reactivated: false, fields_copied: result.fieldsCopied, ...auditResult(recorded.ok) });
+    }
+  }
 }
 
 export async function PATCH(req: NextRequest) {
@@ -732,46 +741,15 @@ async function reorderTemplates(admin: AdminContext, body: Body) {
   const ids = parseIdList(body.ids);
   if (!ids) return invalid('Send the card types as a list of ids in their new order.', 'ids');
 
-  const { data, error } = await supabaseAdmin
-    .from(TEMPLATES)
-    .select('id, sort_order')
-    .eq('card_id', cardId)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true });
-  if (error) return serverError('reorder templates read', 'The card types could not be read, so the order did not change.', error);
-
-  const current = rows<Ordered>(data);
-  const plan = planReorder(current, ids);
-  if (!plan.ok) {
-    const message = reorderRefusalText(plan.reason, 'card types');
-    return plan.reason === 'mismatch' ? fail('STATE_CONFLICT', message) : invalid(message, 'ids');
-  }
-  if (plan.updates.length === 0) return ok({ changed: false });
-
-  const base = {
-    action: 'REORDER_CARD_TYPE_TEMPLATES',
+  return runReorder(admin, 'REORDER_CARD_TYPE_TEMPLATES', {
+    fn: 'admin_reorder_card_type_templates',
+    params: { p_admin_id: admin.admin_id, p_card_id: cardId, p_ids: ids },
+    ids,
+    noun: 'card types',
     entity: TEMPLATES,
-    entity_id: cardId,
-    before: { order: current.map((row) => row.id) },
-    after: { order: plan.order },
-    sensitivity: 'normal' as const,
-  };
-  const applied = await applySortOrders(TEMPLATES, { column: 'card_id', value: cardId }, plan.updates);
-  if (applied.failed > 0) {
-    const none = applied.failed === plan.updates.length;
-    await audit(admin, { ...base, result: none ? 'failure' : 'partial', error: applied.error });
-    console.error('field-builder reorder templates:', applied.error);
-    return fail(
-      'INTERNAL_ERROR',
-      none
-        ? 'The new order could not be saved.'
-        : 'The new order was only partly saved. Reload to see the current order, then try again.',
-    );
-  }
-
-  const recorded = await audit(admin, { ...base, result: 'success' });
-  return ok({ changed: true, ...auditResult(recorded.ok) });
+    entityId: cardId,
+    context: 'reorder templates',
+  });
 }
 
 async function reorderFields(admin: AdminContext, body: Body) {
@@ -783,53 +761,43 @@ async function reorderFields(admin: AdminContext, body: Body) {
   if (body.template_id !== undefined && body.template_id !== null) {
     templateId = uuidOf(body.template_id);
     if (!templateId) return invalid('template_id must be the id of a card type.', 'template_id');
-  } else {
-    const { data, error } = await supabaseAdmin.from(FIELDS).select('id, template_id').in('id', ids);
-    if (error) return serverError('reorder fields owners', 'The fields could not be read, so the order did not change.', error);
-    const owners = new Set(rows<{ template_id: string | null }>(data).map((row) => row.template_id));
-    const [owner] = Array.from(owners);
-    if (owners.size !== 1 || !owner) return fail('STATE_CONFLICT', reorderRefusalText('mismatch', 'fields'));
-    templateId = owner;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from(FIELDS)
-    .select('id, sort_order')
-    .eq('template_id', templateId)
-    .order('sort_order', { ascending: true })
-    .order('id', { ascending: true });
-  if (error) return serverError('reorder fields read', 'The fields could not be read, so the order did not change.', error);
-
-  const current = rows<Ordered>(data);
-  const plan = planReorder(current, ids);
-  if (!plan.ok) {
-    const message = reorderRefusalText(plan.reason, 'fields');
-    return plan.reason === 'mismatch' ? fail('STATE_CONFLICT', message) : invalid(message, 'ids');
-  }
-  if (plan.updates.length === 0) return ok({ changed: false });
-
-  const base = {
-    action: 'REORDER_TEMPLATE_FIELDS',
+  return runReorder(admin, 'REORDER_TEMPLATE_FIELDS', {
+    fn: 'admin_reorder_template_fields',
+    params: { p_admin_id: admin.admin_id, p_template_id: templateId, p_ids: ids },
+    ids,
+    noun: 'fields',
     entity: FIELDS,
-    entity_id: templateId,
-    before: { order: current.map((row) => row.id) },
-    after: { order: plan.order },
-    sensitivity: 'normal' as const,
-  };
-  const applied = await applySortOrders(FIELDS, { column: 'template_id', value: templateId }, plan.updates);
-  if (applied.failed > 0) {
-    const none = applied.failed === plan.updates.length;
-    await audit(admin, { ...base, result: none ? 'failure' : 'partial', error: applied.error });
-    console.error('field-builder reorder fields:', applied.error);
-    return fail(
-      'INTERNAL_ERROR',
-      none
-        ? 'The new order could not be saved.'
-        : 'The new order was only partly saved. Reload to see the current order, then try again.',
-    );
-  }
+    entityId: templateId,
+    context: 'reorder fields',
+  });
+}
 
-  const recorded = await audit(admin, { ...base, result: 'success' });
+async function runReorder(admin: AdminContext, action: string, call: ReorderCall) {
+  const { data, error } = await supabaseAdmin.rpc(call.fn, call.params);
+  if (error?.message === NOT_AUTHORIZED) return fail('AUTH_REQUIRED');
+  const result = error ? null : readReorder(data);
+  const base = { action, entity: call.entity, sensitivity: 'normal' as const };
+  if (!result) {
+    const message = error?.message ?? `${call.fn} returned an unexpected result`;
+    await audit(admin, { ...base, entity_id: call.entityId, after: { order: call.ids }, result: 'failure', error: message });
+    console.error(`field-builder ${call.context}:`, message);
+    return fail('INTERNAL_ERROR', error ? 'The new order could not be saved.' : ORDER_UNCONFIRMED);
+  }
+  if (!result.applied) {
+    const message = reorderRefusalText(result.reason, call.noun);
+    return result.reason === 'mismatch' ? fail('STATE_CONFLICT', message) : invalid(message, 'ids');
+  }
+  if (!result.changed) return ok({ changed: false });
+
+  const recorded = await audit(admin, {
+    ...base,
+    entity_id: result.templateId ?? call.entityId,
+    before: { order: result.before },
+    after: { order: result.order },
+    result: 'success',
+  });
   return ok({ changed: true, ...auditResult(recorded.ok) });
 }
 

@@ -492,6 +492,84 @@
   flex-direction: column;
 }
 
+.mfaCell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.subWarning,
+.subDanger {
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.subWarning {
+  color: var(--tone-warning-fg);
+}
+
+.subDanger {
+  color: var(--tone-danger-fg);
+}
+
+.statusStack {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+
+.panelTabs {
+  display: flex;
+  min-width: 0;
+  margin-bottom: var(--space-5);
+}
+
+.tabPanel {
+  min-width: 0;
+}
+
+.securityAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+  padding-top: var(--space-1);
+}
+
+.actionHint {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-secondary);
+}
+
+.inlineLink {
+  font-weight: var(--weight-medium);
+  color: var(--fg-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.inlineLink:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+}
+
+.details > .formSection:focus-visible {
+  border-radius: var(--radius-md);
+  outline: 2px solid var(--accent-base);
+  outline-offset: 4px;
+}
+
 @media (max-width: 768px) {
   .fieldGrid {
     grid-template-columns: minmax(0, 1fr);

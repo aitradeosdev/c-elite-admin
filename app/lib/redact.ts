@@ -1,8 +1,8 @@
-
-
 const SENSITIVE_KEYS = new Set<string>([
   'password',
   'password_hash',
+  'current_password',
+  'new_password',
   'pin',
   'pin_hash',
   'secret',
@@ -11,6 +11,16 @@ const SENSITIVE_KEYS = new Set<string>([
   'release_secret',
   'otp',
   'otp_code',
+  'recovery_code',
+  'recovery_codes',
+  'secret_enc',
+  'secret_display',
+  'otpauth_uri',
+  'qr_data_uri',
+  'qr_svg',
+  'code_hash',
+  'token_hash',
+  'challenge',
   'token',
   'refresh_token',
   'api_key',

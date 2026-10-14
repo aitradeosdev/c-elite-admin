@@ -173,8 +173,34 @@ describe('dashboard metrics', () => {
       ['disputedCards', 'ready', '0', false, null, 'No open disputes'],
       ['pendingWithdrawals', 'ready', '2', true, null, 'In review or held'],
       ['pendingWithdrawalValue', 'ready', money.formatNaira(0), false, null, 'Nothing held'],
-      ['openFlags', 'unavailable', '', false, null, 'Awaiting review'],
+      ['openFlags', 'unavailable', '', false, null, 'Flagged withdrawals to review'],
     ]);
+  });
+
+  test('the Open flags tile shows to admins who can open Withdrawals and opens its review tab', () => {
+    const spec = metrics.ACTION_METRICS.find((metric) => metric.statKey === 'openFlags');
+    assert.ok(spec);
+    assert.equal(spec.perm, 'withdrawals.read');
+    assert.equal(spec.href, '/withdrawals?tab=pending_review');
+    const pending = metrics.ACTION_METRICS.find((metric) => metric.statKey === 'pendingWithdrawals');
+    assert.equal(spec.href, pending?.href);
+
+    const waiting = metrics.buildActionTiles({ openFlags: 4 }, new Set<Permission>(['withdrawals.read']), false, NOW)
+      .find((tile) => tile.key === 'openFlags');
+    assert.deepEqual(
+      [waiting?.state, waiting?.value, waiting?.href, waiting?.hint, waiting?.attention],
+      ['ready', '4', '/withdrawals?tab=pending_review', 'Flagged withdrawals to review', true],
+    );
+    const clear = metrics.buildActionTiles({ openFlags: 0 }, new Set<Permission>(['withdrawals.read']), false, NOW)
+      .filter((tile) => tile.key === 'openFlags');
+    assert.deepEqual(clear.map((tile) => [tile.key, tile.hint, tile.attention]), [['openFlags', 'No open flags', false]]);
+    const flagsOnly = metrics.buildActionTiles({ openFlags: 2 }, new Set<Permission>(['flags.read']), false, NOW);
+    assert.equal(flagsOnly.some((tile) => tile.key === 'openFlags'), false);
+    assert.deepEqual(metrics.buildActionTiles({ openFlags: 4 }, new Set<Permission>(['users.read']), false, NOW), []);
+
+    const html = render(createElement(bands.ActionTiles, { tiles: waiting ? [waiting] : [] }));
+    assert.deepEqual(tagsOf(html, 'a').map((attrs) => attrs.href), ['/withdrawals?tab=pending_review']);
+    assert.match(textOf(html), /Open flags 4 Flagged withdrawals to review/);
   });
 });
 

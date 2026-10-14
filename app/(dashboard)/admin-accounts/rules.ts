@@ -7,13 +7,21 @@ import {
   type Permission,
   type PermissionRisk,
 } from '../../lib/permissions';
+import { checkPassword } from '../../lib/passwordPolicy';
+
+export {
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  PASSWORD_RULES,
+  checkPassword,
+  unmetPasswordRules,
+} from '../../lib/passwordPolicy';
+export type { PasswordRule } from '../../lib/passwordPolicy';
 
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 32;
 export const ROLE_TITLE_MIN = 2;
 export const ROLE_TITLE_MAX = 64;
-export const PASSWORD_MIN = 12;
-export const PASSWORD_MAX = 128;
 export const REASON_MAX = 500;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -158,41 +166,6 @@ export function checkGrants(input: unknown): GrantCheck {
     }
   }
   return { ok: true, keys: normalizeGrants(input) };
-}
-
-export type PasswordRule = 'length' | 'lower' | 'upper' | 'digit' | 'symbol';
-
-export const PASSWORD_RULES: ReadonlyArray<{ id: PasswordRule; label: string }> = [
-  { id: 'length', label: `At least ${PASSWORD_MIN} characters` },
-  { id: 'lower', label: 'A lowercase letter' },
-  { id: 'upper', label: 'An uppercase letter' },
-  { id: 'digit', label: 'A number' },
-  { id: 'symbol', label: 'A symbol' },
-];
-
-const PASSWORD_MESSAGES: Readonly<Record<PasswordRule, string>> = {
-  length: `Password must be at least ${PASSWORD_MIN} characters.`,
-  lower: 'Password must include a lowercase letter.',
-  upper: 'Password must include an uppercase letter.',
-  digit: 'Password must include a number.',
-  symbol: 'Password must include a symbol.',
-};
-
-export function unmetPasswordRules(password: string): PasswordRule[] {
-  const unmet: PasswordRule[] = [];
-  if (password.length < PASSWORD_MIN) unmet.push('length');
-  if (!/[a-z]/.test(password)) unmet.push('lower');
-  if (!/[A-Z]/.test(password)) unmet.push('upper');
-  if (!/[0-9]/.test(password)) unmet.push('digit');
-  if (!/[^a-zA-Z0-9]/.test(password)) unmet.push('symbol');
-  return unmet;
-}
-
-export function checkPassword(value: unknown): string | null {
-  if (typeof value !== 'string' || value === '') return 'A password is required.';
-  if (value.length > PASSWORD_MAX) return `Password must be ${PASSWORD_MAX} characters or fewer.`;
-  const unmet = unmetPasswordRules(value);
-  return unmet.length ? PASSWORD_MESSAGES[unmet[0]] : null;
 }
 
 export function checkUsername(value: unknown): string | null {

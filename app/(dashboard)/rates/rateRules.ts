@@ -6,6 +6,8 @@ export const RATE_MAX = 100_000;
 export const AMOUNT_MAX = 100_000_000;
 export const RANGE_LABEL_MAX = 80;
 export const MAX_CHANGES = 500;
+export const NO_CHANGES_MESSAGE = 'No changes provided.';
+export const TOO_MANY_CHANGES_MESSAGE = `Save at most ${MAX_CHANGES} rate changes at a time.`;
 export const LARGE_MOVE = 0.1;
 export const HUGE_MOVE = 0.5;
 
@@ -98,7 +100,7 @@ export interface RateTreeCard {
   activeRates: number;
 }
 
-export type RateResultStatus = 'saved' | 'unchanged' | 'conflict' | 'missing' | 'error';
+export type RateResultStatus = 'saved' | 'unchanged' | 'conflict' | 'missing';
 
 export interface RateResult {
   id: string;
@@ -106,15 +108,6 @@ export interface RateResult {
   rate_naira: number | null;
   is_active: boolean | null;
 }
-
-export type RatePlan =
-  | { kind: 'conflict' }
-  | { kind: 'unchanged' }
-  | { kind: 'write'; update: { rate_naira: number; is_active?: boolean } };
-
-export type SaveVerdict =
-  | { ok: true }
-  | { ok: false; code: 'STATE_CONFLICT' | 'INTERNAL_ERROR'; message: string };
 
 export interface RangeBounds {
   min: number | null;
@@ -246,26 +239,37 @@ function readExpected(value: unknown): RateValues | null | undefined {
   return { rate, active: active === true };
 }
 
+export function rateChangeProblem(issue: string, position: number, id: string | null): string {
+  if (id !== null) {
+    if (issue === 'duplicate_id') return `Range ${id} appears more than once in this save.`;
+    if (issue === 'invalid_rate') return `The rate for range ${id} must be a number from 0 to ${formatNaira(RATE_DB_MAX)}.`;
+    if (issue === 'invalid_active') return `The active setting for range ${id} must be true or false.`;
+    if (issue === 'invalid_expected') return `The expected values sent for range ${id} are not valid.`;
+  }
+  if (issue === 'invalid_id') return `Change ${position} does not name a valid range.`;
+  return `Change ${position} is not a valid rate change.`;
+}
+
 export function readRateChanges(body: unknown): Checked<RateChangeInput[]> {
   const list = isRecord(body) ? body.changes : undefined;
-  if (!Array.isArray(list) || list.length === 0) return refuse('No changes provided.');
-  if (list.length > MAX_CHANGES) return refuse(`Save at most ${MAX_CHANGES} rate changes at a time.`);
+  if (!Array.isArray(list) || list.length === 0) return refuse(NO_CHANGES_MESSAGE);
+  if (list.length > MAX_CHANGES) return refuse(TOO_MANY_CHANGES_MESSAGE);
   const seen = new Set<string>();
   const changes: RateChangeInput[] = [];
   for (let index = 0; index < list.length; index += 1) {
     const item: unknown = list[index];
     const position = index + 1;
-    if (!isRecord(item)) return refuse(`Change ${position} is not a valid rate change.`);
+    if (!isRecord(item)) return refuse(rateChangeProblem('not_an_object', position, null));
     const id = readId(item.id);
-    if (!id) return refuse(`Change ${position} does not name a valid range.`);
-    if (seen.has(id)) return refuse(`Range ${id} appears more than once in this save.`);
+    if (!id) return refuse(rateChangeProblem('invalid_id', position, null));
+    if (seen.has(id)) return refuse(rateChangeProblem('duplicate_id', position, id));
     seen.add(id);
     const rate = readStoredRate(item.rate_naira);
-    if (rate === null) return refuse(`The rate for range ${id} must be a number from 0 to ${formatNaira(RATE_DB_MAX)}.`);
+    if (rate === null) return refuse(rateChangeProblem('invalid_rate', position, id));
     const active = readFlag(item.is_active);
-    if (active === undefined) return refuse(`The active setting for range ${id} must be true or false.`);
+    if (active === undefined) return refuse(rateChangeProblem('invalid_active', position, id));
     const expected = readExpected(item.expected);
-    if (expected === undefined) return refuse(`The expected values sent for range ${id} are not valid.`);
+    if (expected === undefined) return refuse(rateChangeProblem('invalid_expected', position, id));
     changes.push({ id, rate, active, expected });
   }
   return accept(changes);
@@ -297,45 +301,16 @@ export function readNewRange(body: unknown): Checked<NewRangeInput> {
   });
 }
 
-export function storedValues(row: Pick<StoredDenomination, 'rate_naira' | 'is_active'>): RateValues {
+export function storedValues(row: { rate_naira?: unknown; is_active?: unknown }): RateValues {
   return { rate: toAmount(row.rate_naira), active: row.is_active === true };
 }
 
-export function planRateWrite(change: RateChangeInput, current: Pick<StoredDenomination, 'rate_naira' | 'is_active'>): RatePlan {
-  const live = storedValues(current);
-  const sameActive = change.active === null || change.active === live.active;
-  if (sameRate(live.rate, change.rate) && sameActive) return { kind: 'unchanged' };
-  if (change.expected && (!sameRate(live.rate, change.expected.rate) || live.active !== change.expected.active)) {
-    return { kind: 'conflict' };
-  }
-  return {
-    kind: 'write',
-    update: change.active === null ? { rate_naira: change.rate } : { rate_naira: change.rate, is_active: change.active },
-  };
-}
-
-export function saveVerdict(results: readonly RateResult[]): SaveVerdict {
-  const total = results.length;
-  const done = results.filter((result) => result.status === 'saved' || result.status === 'unchanged').length;
-  const conflicts = results.filter((result) => result.status === 'conflict' || result.status === 'missing').length;
-  const errors = results.filter((result) => result.status === 'error').length;
-  if (conflicts === 0 && errors === 0) return { ok: true };
-  const lead = done > 0
-    ? `${done.toLocaleString('en-NG')} of ${plural(total, 'rate change', 'rate changes')} saved; ${(total - done).toLocaleString('en-NG')} not saved.`
-    : total === 1
-      ? 'The rate change was not saved.'
-      : `None of the ${total.toLocaleString('en-NG')} rate changes were saved.`;
-  const parts: string[] = [];
-  if (conflicts > 0) {
-    parts.push(`${plural(conflicts, 'rate', 'rates')} changed or ${conflicts === 1 ? 'was' : 'were'} removed after you loaded ${conflicts === 1 ? 'it' : 'them'}`);
-  }
-  if (errors > 0) parts.push(`${plural(errors, 'change', 'changes')} hit a database error`);
-  const advice = errors > 0 ? 'Reload the rates and try again.' : 'Reload the rates and review them again.';
-  return {
-    ok: false,
-    code: errors > 0 ? 'INTERNAL_ERROR' : 'STATE_CONFLICT',
-    message: `${lead} ${parts.join(' and ')}. ${advice}`,
-  };
+export function conflictMessage(total: number, conflicts: number): string {
+  const cause = `${plural(conflicts, 'rate', 'rates')} changed or ${conflicts === 1 ? 'was' : 'were'} removed after you loaded ${conflicts === 1 ? 'it' : 'them'}`;
+  const lead = total === 1
+    ? `The rate change was not saved. ${cause}.`
+    : `None of the ${plural(total, 'rate change', 'rate changes')} were saved: they are saved together, and ${cause}.`;
+  return `${lead} Reload the rates and review them again.`;
 }
 
 export function rateMove(from: number | null, to: number): number | null {

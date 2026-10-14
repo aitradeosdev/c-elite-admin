@@ -1,4 +1,5 @@
 import { PAYOUT_GATEWAY_KEYS, resolvePayoutGateway, type PayoutGateway } from '../../lib/gateway';
+import { parseNaira, type NairaProblem } from '../../lib/naira';
 import { formatAge } from '../../lib/time';
 import { formatNaira } from '../../_ui/money';
 import type { ApiBody, ApiResult } from '../../lib/apiClient';
@@ -54,8 +55,13 @@ export const AMOUNT_MESSAGES = {
 export const MODE_MESSAGE = 'Choose Static or Live as the balance source.';
 
 const SHOWN_AMOUNT = /^\s*[0-9]+(\.[0-9]+)?\s*$/;
-const PLAIN_AMOUNT = /^\d+(?:\.\d+)?$/;
-const GROUPED_AMOUNT = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
+const AMOUNT_PROBLEMS: Readonly<Record<NairaProblem, string>> = {
+  required: AMOUNT_MESSAGES.required,
+  invalid: AMOUNT_MESSAGES.invalid,
+  negative: AMOUNT_MESSAGES.negative,
+  decimals: AMOUNT_MESSAGES.decimals,
+  too_large: AMOUNT_MESSAGES.tooLarge,
+};
 const CONFIG_KEY_SET: ReadonlySet<string> = new Set(CONFIG_KEYS);
 const GATEWAY_KEY_SET: ReadonlySet<string> = new Set<string>(PAYOUT_GATEWAY_KEYS);
 const READ_KEY_SET: ReadonlySet<string> = new Set(READ_KEYS);
@@ -82,13 +88,16 @@ export interface PatchConflict {
   current: string | null;
 }
 
-export interface PatchPlan {
-  updates: Record<string, string>;
-  changed: WritableKey[];
-  unchanged: WritableKey[];
+export interface ChangeAudit {
   before: Record<string, string | number | null>;
   after: Record<string, string | number | null>;
   entityId: string;
+}
+
+export interface PatchPlan extends ChangeAudit {
+  updates: Record<string, string>;
+  changed: WritableKey[];
+  unchanged: WritableKey[];
 }
 
 export type PatchPlanResult =
@@ -210,26 +219,9 @@ export function displayedBalance(values: StoredValues): number {
 }
 
 export function checkStaticAmount(raw: unknown): AmountCheck {
-  let value: string;
-  if (typeof raw === 'number') {
-    if (!Number.isFinite(raw)) return { ok: false, message: AMOUNT_MESSAGES.invalid };
-    value = String(raw);
-  } else if (typeof raw === 'string') {
-    value = raw.trim().replace(/^₦\s*/, '');
-  } else {
-    return { ok: false, message: raw === null || raw === undefined ? AMOUNT_MESSAGES.required : AMOUNT_MESSAGES.invalid };
-  }
-  if (value === '') return { ok: false, message: AMOUNT_MESSAGES.required };
-  if (/^[-−]/.test(value)) return { ok: false, message: AMOUNT_MESSAGES.negative };
-  if (!PLAIN_AMOUNT.test(value) && !GROUPED_AMOUNT.test(value)) return { ok: false, message: AMOUNT_MESSAGES.invalid };
-  const [whole, fraction = ''] = value.replace(/,/g, '').split('.');
-  if (fraction.length > 2) return { ok: false, message: AMOUNT_MESSAGES.decimals };
-  const units = whole.replace(/^0+(?=\d)/, '');
-  const kobo = fraction.replace(/0+$/, '');
-  const canonical = kobo ? `${units}.${kobo}` : units;
-  const amount = Number(canonical);
-  if (!Number.isFinite(amount) || amount > STATIC_MAX) return { ok: false, message: AMOUNT_MESSAGES.tooLarge };
-  return { ok: true, value: canonical, amount };
+  const parsed = parseNaira(raw, STATIC_MAX);
+  if (!parsed.ok) return { ok: false, message: AMOUNT_PROBLEMS[parsed.problem] };
+  return { ok: true, value: parsed.value, amount: parsed.amount };
 }
 
 export function checkMode(raw: unknown): ModeCheck {
@@ -300,41 +292,22 @@ export function planPatch(current: StoredValues, request: PatchRequest): PatchPl
     };
   }
 
+  return { ok: true, plan: { updates, changed, unchanged, ...changeAudit(current, updates) } };
+}
+
+export function changeAudit(current: StoredValues, updates: Readonly<Record<string, string>>): ChangeAudit {
+  const keys = WRITABLE_KEYS.filter((key) => owns(updates, key));
   const before: Record<string, string | number | null> = {};
   const after: Record<string, string | number | null> = {};
-  for (const key of changed) {
+  for (const key of keys) {
     before[key] = storedOrNull(current[key]);
     after[key] = updates[key];
   }
-  if (changed.length > 0) {
+  if (keys.length > 0) {
     before.displayed_balance = displayedBalance(current);
     after.displayed_balance = displayedBalance({ ...current, ...updates });
   }
-
-  return {
-    ok: true,
-    plan: {
-      updates,
-      changed,
-      unchanged,
-      before,
-      after,
-      entityId: changed.length === 1 ? changed[0] : 'batch',
-    },
-  };
-}
-
-export interface GuardedWrite {
-  key: WritableKey;
-  value: string;
-  exists: boolean;
-  seen: string | null;
-}
-
-export function guardedWrite(current: StoredValues, plan: PatchPlan): GuardedWrite | null {
-  if (plan.changed.length !== 1) return null;
-  const [key] = plan.changed;
-  return { key, value: plan.updates[key], exists: owns(current, key), seen: storedOrNull(current[key]) };
+  return { before, after, entityId: keys.length === 1 ? keys[0] : 'batch' };
 }
 
 export function storedValues(rows: readonly unknown[]): Record<string, string | null> {

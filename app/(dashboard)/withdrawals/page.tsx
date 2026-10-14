@@ -6,8 +6,8 @@ import { Download } from 'lucide-react';
 import {
   AccessDenied, Button, Card, CardBody, DateRangePicker, ErrorState, ExportModal, FilterBar, MaskedValue,
   MobileDataList, Money, Notice, PageHeader, Pagination, Ref, ResponsiveView, RowOpen, SearchInput, SidePanel, StatStrip,
-  StatusDot, TBody, THead, Table, TableEmpty, TableSkeleton, TableState, Tabs, Td, Th, Tr, combineCodecs, enumParam,
-  formatNaira, statusLabel, useCan, useConfirm, usePermissions, useResource, useTableSort, useToast, useUrlState,
+  TBody, THead, Table, TableEmpty, TableSkeleton, TableState, Tabs, Td, Th, Tr, combineCodecs, formatNaira,
+  statusLabel, urlParam, useCan, useConfirm, usePermissions, useResource, useTableSort, useToast, useUrlState,
   uuidParam,
   type DateRangeValue, type ExportFiltersOption, type ExportRangeValue, type TableSkeletonColumn,
 } from '../../_ui';
@@ -16,13 +16,13 @@ import { isUuid } from '../../lib/http';
 import { describeExportWindow, printTable, resolveExportRange } from '../../lib/printExport';
 import { businessDateKey, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
-  DEFAULT_TAB, EMERGENCY_UNCHECKED, REJECT_REASONS, TABS, approvalRefusal, classifyDecision, feeOf, grossOf,
-  isActionable, isFrozen, isOpenFlag, messageOf, netOf, payoutProviderNote, providerLabel, tabSpec, toActionResult,
-  toDetail, toListResult, userHandle, userSummary,
+  EMERGENCY_UNCHECKED, REJECT_REASONS, TABS, approvalRefusal, classifyDecision, feeOf, formatTab, grossOf,
+  isActionable, isFrozen, isOpenFlag, messageOf, netOf, parseTab, payoutProviderNote, providerLabel, sameTabFilter,
+  tabFilter, tabSpec, toActionResult, toDetail, toListResult, userHandle, userSummary,
   type ApiEnvelope, type DetailResult, type ExportResponse, type SettledDecision, type Tab, type Withdrawal,
 } from './model';
 import {
-  DetailBody, DetailSkeleton, EmergencyNotice, FlagBadge, FrozenBadge, OutcomeNotice, type Outcome,
+  DetailBody, DetailSkeleton, EmergencyNotice, FlagBadge, FrozenBadge, OutcomeNotice, WithdrawalStatus, type Outcome,
 } from './WithdrawalParts';
 import s from './page.module.css';
 
@@ -44,7 +44,7 @@ const EXPORT_OFFLINE = 'Could not reach the server, so the export was not create
 const TAB_ITEMS = TABS.map(({ value, label }) => ({ value, label }));
 
 const WITHDRAWALS_URL = combineCodecs({
-  tab: enumParam('tab', TABS.map((spec) => spec.value), DEFAULT_TAB),
+  tab: urlParam<Tab>('tab', { parse: parseTab, format: formatTab }),
   id: uuidParam('id'),
 });
 
@@ -72,10 +72,6 @@ interface ActionOrigin {
 
 function skeletonColumns(canDecide: boolean): readonly TableSkeletonColumn[] {
   return canDecide ? DECIDE_SKELETON_COLUMNS : SKELETON_COLUMNS;
-}
-
-function sameTab(previousKey: string, nextKey: string): boolean {
-  return new URLSearchParams(previousKey).get('status') === new URLSearchParams(nextKey).get('status');
 }
 
 function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
@@ -193,9 +189,7 @@ function WithdrawalsQueue() {
   const spec = tabSpec(tab);
 
   const listQuery = useMemo(() => {
-    const params = new URLSearchParams();
-    const statuses = tabSpec(tab).statuses;
-    if (statuses) params.set('status', statuses.join(','));
+    const params = new URLSearchParams(tabFilter(tab));
     if (query) params.set('search', query);
     if (range.from) params.set('date_from', range.from);
     if (range.to) params.set('date_to', range.to);
@@ -215,7 +209,7 @@ function WithdrawalsQueue() {
       signal,
       select: toListResult,
     }),
-    { pollMs: POLL_MS, keepPreviousData: sameTab },
+    { pollMs: POLL_MS, keepPreviousData: sameTabFilter },
   );
 
   const detail = useResource(
@@ -562,8 +556,7 @@ function WithdrawalsQueue() {
     setExporting(format);
     try {
       const span = resolveExportRange(exportRange, exportFilters);
-      const params = new URLSearchParams();
-      if (spec.statuses) params.set('status', spec.statuses.join(','));
+      const params = new URLSearchParams(tabFilter(tab));
       if (query) params.set('search', query);
       if (span.from) params.set('date_from', span.from);
       if (span.to) params.set('date_to', span.to);
@@ -781,7 +774,7 @@ function WithdrawalsQueue() {
                     </Td>
                     <Td>
                       <div className={s.statusCell}>
-                        <StatusDot status={row.status} />
+                        <WithdrawalStatus status={row.status} />
                         <FlagBadge flag={row.flag} />
                         <FrozenBadge user={row.user} />
                       </div>
@@ -827,7 +820,7 @@ function WithdrawalsQueue() {
             {row.bank_name || 'Unknown bank'} · <MaskedValue value={row.account_number} kind="account" />
           </>
         ),
-        status: <StatusDot status={row.status} />,
+        status: <WithdrawalStatus status={row.status} />,
         meta: `${formatBusinessDateTime(row.created_at)} · ${formatAge(row.created_at)} ago`,
         flag: isFrozen(row.user) ? 'danger' : isOpenFlag(row.flag) ? 'warning' : null,
         flagLabel: isFrozen(row.user)

@@ -279,37 +279,3 @@ export function readReorderIds(raw: unknown): ReorderIds {
   }
   return { ok: true, ids };
 }
-
-export interface SortRow {
-  id: string;
-  sort_order: number | null;
-}
-
-export interface ReorderStep {
-  id: string;
-  from: number | null;
-  to: number;
-}
-
-export interface ReorderPlan {
-  steps: ReorderStep[];
-  missing: string[];
-  extra: string[];
-}
-
-export function planReorder(rows: ReadonlyArray<SortRow>, ids: ReadonlyArray<string>): ReorderPlan {
-  const current = new Map(rows.map((row) => [row.id.toLowerCase(), row.sort_order]));
-  const wanted = new Set(ids);
-  const steps: ReorderStep[] = [];
-  const missing: string[] = [];
-  ids.forEach((id, index) => {
-    if (!current.has(id)) {
-      missing.push(id);
-      return;
-    }
-    const from = current.get(id) ?? null;
-    if (from !== index) steps.push({ id, from, to: index });
-  });
-  const extra = Array.from(current.keys()).filter((id) => !wanted.has(id));
-  return { steps, missing, extra };
-}

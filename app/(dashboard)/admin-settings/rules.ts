@@ -469,7 +469,7 @@ function storedText(raw: StoredValue): string {
   return typeof raw === 'string' ? raw : '';
 }
 
-function conflictMessage(keys: readonly string[]): string {
+export function conflictMessage(keys: readonly string[]): string {
   const labels = joinLabels(keys.map(settingLabel));
   return `Another admin changed ${labels} after you loaded these settings, so nothing was saved. Reload to see the current values.`;
 }

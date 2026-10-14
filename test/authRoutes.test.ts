@@ -1,10 +1,12 @@
 import { afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { twoStepLockedMessage } from '../app/lib/http.ts';
 
 const STATE_KEY = '__cardeliteAuthRoutesTest';
 const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
@@ -19,6 +21,8 @@ const ROUTES = {
 } as const;
 
 const ADMIN_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
+const OTHER_ADMIN_ID = '3c9d1f7a-8b2e-4d6c-9a1f-0e4b7c2d5a83';
+const SID = 'c4e2a9d1-3b5f-4e7a-8c6d-2f1e0a9b8c7d';
 const EMAIL = 'Ops@CardElite.test';
 const USERNAME = 'Ops.Lead';
 const ROLE = 'Operations Lead';
@@ -33,16 +37,21 @@ const FORWARDED_FOR = '203.0.113.50, 198.51.100.7';
 const CLIENT_IP = '198.51.100.7';
 const DUMMY_HASH = 'dummy-hash:not-a-real-password:12';
 const EPOCH = 'Thu, 01 Jan 1970 00:00:00 GMT';
-const MINUTE_MS = 60 * 1000;
-const HOUR_MS = 60 * MINUTE_MS;
+const MFA_KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
+const SEALED = 'oKGio6Slpqeoqaqr1ypPGXD9NYdbVbbhNE716EeUYCCow3tgg0VFxid5ZNE596De';
+const LOCKED_UNTIL = '2026-10-13T14:05:00+00:00';
+const HOUR_MS = 60 * 60 * 1000;
 const LOGIN_COLUMNS =
   'id, username, email, password_hash, role_title, is_super_admin, is_active, page_permissions, theme_preference, token_version';
-const PROFILE_COLUMNS = 'id, username, email, role_title, is_super_admin, is_active, page_permissions';
+const PROFILE_COLUMNS =
+  'id, username, email, role_title, is_super_admin, is_active, page_permissions, last_login_at, created_at';
 const MISSING_FIELDS = 'Email, username and password required';
 const TOO_MANY = 'Too many attempts. Try again later.';
 const INVALID = 'Invalid credentials';
+const SIGN_IN_UNAVAILABLE = 'Sign-in is unavailable right now. Try again shortly.';
+const TWO_STEP_UNAVAILABLE = 'Two-step sign-in is unavailable right now. Try again later.';
+const SESSION_UNAVAILABLE = 'Your session could not be checked. Try again.';
 const BAD_THEME = 'theme must be light | dark | system';
-const ALERT_COLUMN_ERROR = "Could not find the 'admin_id' column of 'admin_alerts' in the schema cache";
 const AUDIT_DOWN = 'audit store unavailable';
 
 const AUDIT_KEYS = [
@@ -54,7 +63,7 @@ interface AccountRow {
   id: string;
   username: string;
   email: string;
-  password_hash: string;
+  password_hash: string | null;
   role_title: string;
   is_super_admin: boolean;
   is_active: boolean;
@@ -80,6 +89,8 @@ interface ProfileRow {
   is_super_admin: boolean;
   is_active: boolean;
   page_permissions: string[] | null;
+  last_login_at: string | null;
+  created_at: string | null;
 }
 
 interface DbError {
@@ -93,13 +104,14 @@ interface DbResult {
   count?: number | null;
 }
 
+type Reply = DbResult | 'throw';
+
 type Filter = [kind: string, column: string, value: unknown];
 
 interface Query {
   table: string;
   op: 'select' | 'insert' | 'update' | null;
   columns: string | null;
-  options: unknown;
   payload: unknown;
   filters: Filter[];
   terminal: 'single' | 'maybeSingle' | null;
@@ -111,25 +123,21 @@ interface RpcCall {
 }
 
 interface Scenario {
-  limits: Record<string, boolean | null>;
-  limitError: string | null;
+  limits: Record<string, Reply>;
   account: AccountRow | null;
   lookupError: DbError | null;
-  recentFailures: number;
-  dailyFailures: number;
+  failureRecord: Reply;
+  open: Reply;
+  mfa: Reply;
+  challenge: Reply;
+  revoke: Reply;
+  bump: Reply;
   auditError: string | null;
-  alert: 'ok' | 'error' | 'throw';
-  deactivateError: string | null;
-  tokenVersion: number | null;
-  tokenReadError: string | null;
-  tokenWriteError: string | null;
+  signError: string | null;
+  compareError: string | null;
   profile: ProfileRow | null;
   profileError: string | null;
   themeError: string | null;
-}
-
-interface CookieJar {
-  get(name: string): { name: string; value: string } | undefined;
 }
 
 interface StubState {
@@ -137,15 +145,16 @@ interface StubState {
   scenario: Scenario;
   queries: Query[];
   rpcs: RpcCall[];
+  timeline: string[];
   compares: Array<[unknown, unknown]>;
-  signed: Array<[unknown, unknown]>;
-  verified: unknown[];
+  signed: unknown[][];
+  verified: unknown[][];
   fromRequestCalls: number;
-  sessions: Record<string, SessionClaims>;
+  checks: Record<string, unknown>;
   requestAdmin: SessionClaims | null;
   issuedToken: string;
   headers: Headers;
-  cookies: CookieJar;
+  cookies: Map<string, string>;
   matches(value: unknown, hash: unknown): boolean;
   db: {
     from(table: string): object;
@@ -209,24 +218,60 @@ const PROFILE: ProfileRow = {
   is_super_admin: false,
   is_active: true,
   page_permissions: ['withdrawals'],
+  last_login_at: '2026-10-11T08:15:00.000Z',
+  created_at: '2026-01-02T09:00:00.000Z',
 };
 
 const LOGIN_BODY = { email: EMAIL, username: USERNAME, password: PASSWORD };
 
+let expiresAt = '';
+let expiresEpoch = 0;
+
+function opened(patch: Record<string, unknown> = {}): Reply {
+  return {
+    data: {
+      ok: true,
+      session_id: SID,
+      token_version: 4,
+      auth_methods: ['pwd'],
+      expires_at: expiresAt,
+      expires_at_epoch: expiresEpoch,
+      ...patch,
+    },
+  };
+}
+
+function activeFactor(patch: Record<string, unknown> = {}): Reply {
+  return {
+    data: {
+      status: 'active',
+      secret_enc: SEALED,
+      key_version: 1,
+      created_at: '2026-10-01T09:00:00+00:00',
+      confirmed_at: '2026-10-01T09:01:00+00:00',
+      last_used_step: 59061240,
+      last_used_at: '2026-10-12T09:00:00+00:00',
+      locked_until: null,
+      recovery_codes_left: 9,
+      ...patch,
+    },
+  };
+}
+
 function baseScenario(): Scenario {
   return {
     limits: {},
-    limitError: null,
     account: { ...ACCOUNT },
     lookupError: null,
-    recentFailures: 0,
-    dailyFailures: 0,
+    failureRecord: { data: { recorded: true, failures_30m: 1, failures_24h: 1, burst_alerted: false, deactivated: false } },
+    open: opened(),
+    mfa: activeFactor(),
+    challenge: { data: { ok: true, challenge_id: '5d6e7f80-9a1b-4c2d-8e3f-405162738495' } },
+    revoke: { data: { revoked: true, client: 'web', push_tokens_released: 0 } },
+    bump: { data: 5 },
     auditError: null,
-    alert: 'ok',
-    deactivateError: null,
-    tokenVersion: 4,
-    tokenReadError: null,
-    tokenWriteError: null,
+    signError: null,
+    compareError: null,
     profile: { ...PROFILE },
     profileError: null,
     themeError: null,
@@ -240,19 +285,20 @@ const state: StubState = {
   scenario: baseScenario(),
   queries: [],
   rpcs: [],
+  timeline: [],
   compares: [],
   signed: [],
   verified: [],
   fromRequestCalls: 0,
-  sessions: {},
+  checks: {},
   requestAdmin: null,
   issuedToken: ISSUED_TOKEN,
   headers: new Headers(),
-  cookies: { get: () => undefined },
+  cookies: new Map(),
   matches: (value, hash) => value === PASSWORD && hash === STORED_HASH,
   db: {
     from: (table) => chain(table),
-    rpc: (name, args) => rateLimit(name, args),
+    rpc: (name, args) => rpc(name, args),
   },
 };
 
@@ -262,25 +308,10 @@ function fault(message: string | null): DbError | null {
   return message ? { message } : null;
 }
 
-function filterValue(query: Query, kind: string, column: string): unknown {
-  return query.filters.find(([k, c]) => k === kind && c === column)?.[2];
-}
-
 function respond(query: Query): DbResult {
   const s = state.scenario;
   const payload = (query.payload ?? {}) as Record<string, unknown>;
   if (query.table === 'audit_log' && query.op === 'insert') return { error: fault(s.auditError) };
-  if (query.table === 'audit_log' && query.op === 'select') {
-    const since = Date.parse(String(filterValue(query, 'gte', 'created_at')));
-    return { count: Date.now() - since < HOUR_MS ? s.recentFailures : s.dailyFailures };
-  }
-  if (query.table === 'admin_alerts' && query.op === 'insert') {
-    if (s.alert === 'throw') throw new Error('admin_alerts unreachable');
-    return { error: s.alert === 'error' ? { message: ALERT_COLUMN_ERROR, code: 'PGRST204' } : null };
-  }
-  if (query.table === 'admin_users' && query.op === 'select' && query.columns === 'token_version') {
-    return s.tokenReadError ? { error: fault(s.tokenReadError) } : { data: { token_version: s.tokenVersion } };
-  }
   if (query.table === 'admin_users' && query.op === 'select' && query.terminal === 'single') {
     if (s.lookupError) return { error: s.lookupError };
     if (s.account) return { data: s.account };
@@ -289,24 +320,28 @@ function respond(query: Query): DbResult {
   if (query.table === 'admin_users' && query.op === 'select' && query.terminal === 'maybeSingle') {
     return s.profileError ? { error: fault(s.profileError) } : { data: s.profile };
   }
-  if (query.table === 'admin_users' && query.op === 'update') {
-    if ('is_active' in payload) return { error: fault(s.deactivateError) };
-    if ('last_login_at' in payload) return { error: null };
-    if ('token_version' in payload) return { error: fault(s.tokenWriteError) };
-    if ('theme_preference' in payload) return { error: fault(s.themeError) };
+  if (query.table === 'admin_users' && query.op === 'update' && 'theme_preference' in payload) {
+    return { error: fault(s.themeError) };
   }
   throw new Error(`unexpected query ${JSON.stringify(query)}`);
 }
 
 function chain(table: string): object {
-  const query: Query = { table, op: null, columns: null, options: null, payload: undefined, filters: [], terminal: null };
+  const query: Query = { table, op: null, columns: null, payload: undefined, filters: [], terminal: null };
   state.queries.push(query);
-  const settle = () => Promise.resolve().then(() => ({ data: null, error: null, count: null, ...respond(query) }));
-  const builder: Record<string, unknown> = {
-    select: (columns: string, options?: unknown) => {
+  const settle = () => Promise.resolve().then(() => {
+    state.timeline.push(`${query.table}:${query.op}`);
+    return { data: null, error: null, count: null, ...respond(query) };
+  });
+  const builder: Record<string, unknown> = {};
+  const filter = (kind: string) => (column: string, value: unknown) => {
+    query.filters.push([kind, column, value]);
+    return builder;
+  };
+  Object.assign(builder, {
+    select: (columns: string) => {
       if (query.op === null) query.op = 'select';
       query.columns = columns;
-      query.options = options ?? null;
       return builder;
     },
     insert: (payload: unknown) => {
@@ -319,14 +354,8 @@ function chain(table: string): object {
       query.payload = payload;
       return builder;
     },
-    eq: (column: string, value: unknown) => {
-      query.filters.push(['eq', column, value]);
-      return builder;
-    },
-    gte: (column: string, value: unknown) => {
-      query.filters.push(['gte', column, value]);
-      return builder;
-    },
+    eq: filter('eq'),
+    is: filter('is'),
     single: () => {
       query.terminal = 'single';
       return builder;
@@ -337,16 +366,27 @@ function chain(table: string): object {
     },
     then: (onFulfilled: (value: unknown) => unknown, onRejected: (reason: unknown) => unknown) =>
       settle().then(onFulfilled, onRejected),
-  };
+  });
   return builder;
 }
 
-function rateLimit(name: string, args: Record<string, unknown>): Promise<DbResult> {
+function settleReply(reply: Reply): Promise<DbResult> {
+  if (reply === 'throw') return Promise.reject(new Error('fetch failed'));
+  return Promise.resolve({ data: null, error: null, ...reply });
+}
+
+function rpc(name: string, args: Record<string, unknown>): Promise<DbResult> {
   state.rpcs.push({ name, args });
-  if (name !== 'check_rate_limit_by_key') return Promise.reject(new Error(`unexpected rpc ${name}`));
-  if (state.scenario.limitError) return Promise.resolve({ data: null, error: { message: state.scenario.limitError } });
-  const verdict = state.scenario.limits[String(args.p_action)];
-  return Promise.resolve({ data: verdict === undefined ? true : verdict, error: null });
+  state.timeline.push(`rpc:${name}`);
+  const s = state.scenario;
+  if (name === 'check_rate_limit_by_key') return settleReply(s.limits[String(args.p_action)] ?? { data: true });
+  if (name === 'admin_record_login_failure') return settleReply(s.failureRecord);
+  if (name === 'admin_session_open') return settleReply(s.open);
+  if (name === 'admin_mfa_get') return settleReply(s.mfa);
+  if (name === 'admin_challenge_create') return settleReply(s.challenge);
+  if (name === 'admin_session_revoke') return settleReply(s.revoke);
+  if (name === 'admin_bump_token_version') return settleReply(s.bump);
+  return Promise.reject(new Error(`unexpected rpc ${name}`));
 }
 
 function moduleUrl(source: string): string {
@@ -361,12 +401,18 @@ const PACKAGE_STUBS: Readonly<Record<string, string>> = {
   'next/server': pathToFileURL(nodeRequire.resolve('next/server')).href,
   'next/headers': stub([
     'export async function headers() { return state().headers; }',
-    'export async function cookies() { return state().cookies; }',
+    'export async function cookies() {',
+    '  return { get: (name) => (state().cookies.has(name) ? { name, value: state().cookies.get(name) } : undefined) };',
+    '}',
   ]),
   bcryptjs: stub([
     'export default {',
     '  hashSync(value, rounds) { state().hashes.push([value, rounds]); return "dummy-hash:" + value + ":" + rounds; },',
-    '  async compare(value, hash) { state().compares.push([value, hash]); return state().matches(value, hash); },',
+    '  async compare(value, hash) {',
+    '    state().compares.push([value, hash]);',
+    '    if (state().scenario.compareError) throw new Error(state().scenario.compareError);',
+    '    return state().matches(value, hash);',
+    '  },',
     '};',
   ]),
 };
@@ -379,13 +425,19 @@ const LIB_STUBS: Readonly<Record<string, string>> = {
     '};',
   ]),
   [resolve(APP_DIR, 'lib', 'jwt.ts')]: stub([
-    'export async function signAdminJWT(payload, expiresIn) { state().signed.push([payload, expiresIn]); return state().issuedToken; }',
-    'export async function verifyAdminJWT(token) {',
-    '  state().verified.push(token);',
-    '  return Object.prototype.hasOwnProperty.call(state().sessions, token) ? state().sessions[token] : null;',
+    'export async function signSessionToken(admin, sid, amr, epoch) {',
+    '  state().signed.push([admin, sid, amr, epoch]);',
+    '  if (state().scenario.signError) throw new Error(state().scenario.signError);',
+    '  return state().issuedToken;',
+    '}',
+    'export async function verifyAdminSession(token, transport) {',
+    '  state().verified.push([token, transport]);',
+    '  return Object.prototype.hasOwnProperty.call(state().checks, token) ? state().checks[token] : { status: "invalid" };',
     '}',
     'export async function verifyAdminFromRequest() { state().fromRequestCalls += 1; return state().requestAdmin; }',
   ]),
+  [resolve(APP_DIR, 'lib', 'mfa.ts')]: pathToFileURL(resolve(APP_DIR, 'lib', 'mfa.ts')).href,
+  [resolve(APP_DIR, 'lib', 'qr.ts')]: pathToFileURL(resolve(APP_DIR, 'lib', 'qr.ts')).href,
 };
 
 const IMPORT_RE = /^((?:import|export)\b[^;'"]*?\bfrom\s*|import\s*)['"]([^'"]+)['"]/gm;
@@ -441,17 +493,21 @@ async function loadRoute<T>(path: string): Promise<T> {
 }
 
 function reset(patch: Partial<Scenario> = {}): void {
+  const expires = Math.floor((Date.now() + 8 * HOUR_MS) / 1000);
+  expiresEpoch = expires;
+  expiresAt = new Date(expires * 1000).toISOString();
   state.scenario = { ...baseScenario(), ...patch };
   state.queries = [];
   state.rpcs = [];
+  state.timeline = [];
   state.compares = [];
   state.signed = [];
   state.verified = [];
   state.fromRequestCalls = 0;
-  state.sessions = {};
+  state.checks = {};
   state.requestAdmin = null;
   state.headers = new Headers();
-  state.cookies = { get: () => undefined };
+  state.cookies = new Map();
   logs.length = 0;
 }
 
@@ -467,9 +523,7 @@ function prepare(extra: Record<string, string | null> = {}, cookie?: string): He
     else headers.set(name, value);
   }
   state.headers = headers;
-  state.cookies = {
-    get: (name) => (name === 'admin_token' && cookie !== undefined ? { name, value: cookie } : undefined),
-  };
+  state.cookies = new Map(cookie === undefined ? [] : [['admin_token', cookie]]);
   return headers;
 }
 
@@ -511,6 +565,10 @@ function queriesOn(table: string, op: Query['op']): Query[] {
 
 function audits(): Array<Record<string, unknown>> {
   return queriesOn('audit_log', 'insert').map((query) => query.payload as Record<string, unknown>);
+}
+
+function callsTo(name: string): Array<Record<string, unknown>> {
+  return state.rpcs.filter((call) => call.name === name).map((call) => call.args);
 }
 
 function pick(row: Record<string, unknown> | undefined, keys: readonly string[]): Record<string, unknown> {
@@ -555,6 +613,10 @@ async function withNodeEnv<T>(value: string, run: () => Promise<T>): Promise<T> 
   }
 }
 
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
 let login: PostRoute;
 let logout: PostRoute;
 let me: ProfileRoute;
@@ -571,6 +633,7 @@ before(async () => {
 
 beforeEach(() => {
   reset();
+  Reflect.set(process.env, 'ADMIN_MFA_ENCRYPTION_KEY', MFA_KEY);
   mock.method(console, 'error', (...args: unknown[]) => {
     logs.push(args.map((arg) => String(arg)).join(' '));
   });
@@ -615,6 +678,12 @@ function assertSignedOutCookies(res: Response): void {
   assert.equal(themeCookie?.attributes.has('httponly'), false);
   assert.equal(themeCookie?.attributes.get('samesite'), 'lax');
   assert.equal(themeCookie?.attributes.get('path'), '/');
+}
+
+function assertNoSession(res: Response): void {
+  assert.deepEqual(res.headers.getSetCookie(), []);
+  assert.deepEqual(state.signed, []);
+  assert.ok(!audits().some((row) => row.action === 'LOGIN'));
 }
 
 describe('POST /api/auth: request validation', () => {
@@ -668,7 +737,7 @@ describe('POST /api/auth: request validation', () => {
 
 describe('POST /api/auth: rate limiting', () => {
   test('the per-IP limit runs first with the existing key, action, limit and window', async () => {
-    reset({ limits: { admin_login: false } });
+    reset({ limits: { admin_login: { data: false } } });
     const res = await signIn();
     assert.equal(res.status, 429);
     assert.deepEqual(await bodyOf(res), {
@@ -685,8 +754,8 @@ describe('POST /api/auth: rate limiting', () => {
     assert.equal(state.compares.length, 0);
   });
 
-  test('the per-account limit keys on the lower-cased username and email as sent', async () => {
-    reset({ limits: { admin_login_account: false } });
+  test('the per-account limit keys on the lower-cased username and email, shared with the mobile app', async () => {
+    reset({ limits: { admin_login_account: { data: false } } });
     const res = await signIn();
     assert.equal(res.status, 429);
     assert.equal((await bodyOf(res)).error, TOO_MANY);
@@ -700,9 +769,9 @@ describe('POST /api/auth: rate limiting', () => {
   });
 
   test('both limits answer identically, so neither reveals which one tripped', async () => {
-    reset({ limits: { admin_login: false } });
+    reset({ limits: { admin_login: { data: false } } });
     const byIp = withoutRequestId(await bodyOf(await signIn()));
-    reset({ limits: { admin_login_account: false } });
+    reset({ limits: { admin_login_account: { data: false } } });
     const byAccount = withoutRequestId(await bodyOf(await signIn()));
     assert.deepEqual(byIp, byAccount);
   });
@@ -714,36 +783,48 @@ describe('POST /api/auth: rate limiting', () => {
       [{ 'x-forwarded-for': null }, 'unknown'],
     ];
     for (const [headers, ip] of cases) {
-      reset({ limits: { admin_login: false } });
+      reset({ limits: { admin_login: { data: false } } });
       await signIn(LOGIN_BODY, headers);
       assert.equal(state.rpcs[0]?.args.p_key, ip);
     }
   });
 
-  test('a rate-limit lookup error lets the attempt through, as before, and is logged without credentials', async () => {
-    reset({ limitError: 'rate limit store unavailable', account: null });
-    const res = await signIn();
-    assert.equal(res.status, 401);
-    assert.equal(state.rpcs.length, 2);
-    assert.equal(queriesOn('admin_users', 'select').length, 1);
-    assert.ok(logs.some((line) => line.includes('rate limit store unavailable')));
-    assertNoSecrets(logs.join('\n'), [PASSWORD, EMAIL, USERNAME]);
+  test('a limit that cannot be checked now fails closed: a concurrent first write is 429, anything else is 500', async () => {
+    const cases: Array<[Reply, number, string]> = [
+      [{ error: { message: 'duplicate key value violates unique constraint "anon_rate_limits_pkey"', code: '23505' } }, 429, TOO_MANY],
+      [{ data: null }, 429, TOO_MANY],
+      [{ error: { message: 'rate limit store unavailable' } }, 500, SIGN_IN_UNAVAILABLE],
+      ['throw', 500, SIGN_IN_UNAVAILABLE],
+    ];
+    for (const action of ['admin_login', 'admin_login_account']) {
+      for (const [reply, status, message] of cases) {
+        reset({ limits: { [action]: reply } });
+        const res = await signIn();
+        assert.equal(res.status, status, `${action} ${JSON.stringify(reply)}`);
+        assert.equal((await bodyOf(res)).error, message);
+        assert.equal(state.queries.length, 0);
+        assert.equal(state.compares.length, 0);
+        assertNoSecrets(logs.join('\n'), [PASSWORD, EMAIL, USERNAME]);
+      }
+    }
   });
 });
 
 describe('POST /api/auth: credentials', () => {
-  test('the account is looked up by username, email and the active flag exactly as sent', async () => {
+  test('the account is looked up by username, email, the active flag and not deleted, exactly as sent', async () => {
     reset({ account: null });
     await signIn();
     const lookups = queriesOn('admin_users', 'select');
     assert.equal(lookups.length, 1);
     assert.equal(lookups[0].columns, LOGIN_COLUMNS);
-    assert.deepEqual(lookups[0].filters, [['eq', 'username', USERNAME], ['eq', 'email', EMAIL], ['eq', 'is_active', true]]);
+    assert.deepEqual(lookups[0].filters, [
+      ['eq', 'username', USERNAME], ['eq', 'email', EMAIL], ['eq', 'is_active', true], ['is', 'deleted_at', null],
+    ]);
     assert.equal(lookups[0].terminal, 'single');
   });
 
   test('an unknown account still runs one bcrypt compare against the dummy hash and records nothing', async () => {
-    reset({ account: null, recentFailures: 50, dailyFailures: 50 });
+    reset({ account: null });
     const res = await signIn();
     assert.equal(res.status, 401);
     assert.deepEqual(await bodyOf(res), {
@@ -754,12 +835,9 @@ describe('POST /api/auth: credentials', () => {
       request_id: REQUEST_ID,
     });
     assert.deepEqual(state.compares, [[PASSWORD, DUMMY_HASH]]);
-    assert.equal(queriesOn('audit_log', 'insert').length, 0);
-    assert.equal(queriesOn('audit_log', 'select').length, 0);
-    assert.equal(queriesOn('admin_alerts', 'insert').length, 0);
-    assert.equal(queriesOn('admin_users', 'update').length, 0);
-    assert.equal(state.signed.length, 0);
-    assert.deepEqual(res.headers.getSetCookie(), []);
+    assert.deepEqual(state.rpcs.map((call) => call.name), ['check_rate_limit_by_key', 'check_rate_limit_by_key']);
+    assert.deepEqual(audits(), []);
+    assertNoSession(res);
     assert.deepEqual(logs, []);
   });
 
@@ -774,13 +852,15 @@ describe('POST /api/auth: credentials', () => {
     assert.deepEqual(state.hashes, hashesAtLoad);
   });
 
-  test('a lookup error fails closed exactly like an unknown account and is logged without credentials', async () => {
+  test('a lookup error is a 500, logged without credentials, never a password check', async () => {
     reset({ lookupError: { message: 'connection terminated', code: '08006' } });
     const res = await signIn();
-    assert.equal(res.status, 401);
-    assert.equal((await bodyOf(res)).error, INVALID);
-    assert.deepEqual(state.compares, [[PASSWORD, DUMMY_HASH]]);
-    assert.equal(audits().length, 0);
+    assert.equal(res.status, 500);
+    assert.deepEqual(withoutRequestId(await bodyOf(res)), {
+      success: false, error: SIGN_IN_UNAVAILABLE, code: 'INTERNAL_ERROR', message: SIGN_IN_UNAVAILABLE,
+    });
+    assert.deepEqual(state.compares, []);
+    assert.deepEqual(audits(), []);
     assert.ok(logs.some((line) => line.includes('connection terminated')));
     assertNoSecrets(logs.join('\n'), [PASSWORD, EMAIL, USERNAME]);
   });
@@ -796,190 +876,131 @@ describe('POST /api/auth: credentials', () => {
     assert.deepEqual(unknown.headers.getSetCookie(), wrong.headers.getSetCookie());
   });
 
-  test('a wrong password compares against the stored hash and records LOGIN_FAILED through the audit writer', async () => {
-    reset();
+  test('a wrong password is recorded once through admin_record_login_failure, which owns the burst alert and the lock', async () => {
     const res = await signInWrong();
     assert.equal(res.status, 401);
+    assert.equal((await bodyOf(res)).error, INVALID);
     assert.deepEqual(state.compares, [[WRONG_PASSWORD, STORED_HASH]]);
-    const rows = audits();
-    assert.equal(rows.length, 1);
-    assert.deepEqual(
-      pick(rows[0], AUDIT_KEYS),
-      auditRow({ action: 'LOGIN_FAILED', result: 'failure', error: 'Password did not match.' }),
-    );
-    assertNoSecrets(JSON.stringify(rows), [WRONG_PASSWORD, PASSWORD, STORED_HASH]);
-    assert.equal(state.signed.length, 0);
-    assert.deepEqual(res.headers.getSetCookie(), []);
-  });
-
-  test('failures are counted for this account over 30 minutes and 24 hours, after the new row is written', async () => {
-    reset();
-    const started = Date.now();
-    await signInWrong();
-    const insertAt = state.queries.findIndex((query) => query.table === 'audit_log' && query.op === 'insert');
-    const counts = queriesOn('audit_log', 'select');
-    assert.equal(counts.length, 2);
-    for (const count of counts) {
-      assert.ok(state.queries.indexOf(count) > insertAt);
-      assert.equal(count.columns, 'id');
-      assert.deepEqual(count.options, { count: 'exact', head: true });
-      assert.deepEqual(count.filters.slice(0, 2), [['eq', 'admin_id', ADMIN_ID], ['eq', 'action', 'LOGIN_FAILED']]);
-      assert.deepEqual(count.filters[2]?.slice(0, 2), ['gte', 'created_at']);
-    }
-    const windows = counts
-      .map((count) => started - Date.parse(String(count.filters[2]?.[2])))
-      .sort((a, b) => a - b);
-    assert.ok(Math.abs(windows[0] - 30 * MINUTE_MS) < 5000, String(windows[0]));
-    assert.ok(Math.abs(windows[1] - 24 * HOUR_MS) < 5000, String(windows[1]));
-  });
-
-  test('below both thresholds nothing else happens', async () => {
-    reset({ recentFailures: 4, dailyFailures: 24 });
-    const res = await signInWrong();
-    assert.equal(res.status, 401);
-    assert.equal(queriesOn('admin_alerts', 'insert').length, 0);
-    assert.equal(queriesOn('admin_users', 'update').length, 0);
-    assert.deepEqual(audits().map((row) => row.action), ['LOGIN_FAILED']);
-  });
-
-  test('five failures in 30 minutes raise the burst alert with the existing payload', async () => {
-    reset({ recentFailures: 5, dailyFailures: 5 });
-    const res = await signInWrong();
-    assert.equal(res.status, 401);
-    assert.equal((await bodyOf(res)).error, INVALID);
-    assert.deepEqual(queriesOn('admin_alerts', 'insert').map((query) => query.payload), [{
-      admin_id: ADMIN_ID,
-      severity: 'high',
-      event_type: 'admin_login_burst',
-      subject: `Repeated failed admin logins for ${EMAIL}`,
-      detail: { admin_id: ADMIN_ID, email: EMAIL, fail_count: 5, ip: CLIENT_IP },
+    assert.deepEqual(callsTo('admin_record_login_failure'), [{
+      p_admin_id: ADMIN_ID, p_client: 'web', p_ip: CLIENT_IP, p_user_agent: USER_AGENT, p_request_id: REQUEST_ID,
     }]);
-    assert.equal(queriesOn('admin_users', 'update').length, 0);
+    assert.deepEqual(audits(), []);
+    assert.deepEqual(callsTo('admin_session_open'), []);
+    assert.deepEqual(queriesOn('admin_users', 'update'), []);
+    assertNoSession(res);
+    assertNoSecrets(JSON.stringify(state.rpcs), [WRONG_PASSWORD, PASSWORD, STORED_HASH]);
   });
 
-  test('a refused or throwing alert insert never changes the answer, and the failure is logged', async () => {
-    for (const alert of ['error', 'throw'] as const) {
-      reset({ recentFailures: 7, alert });
-      const res = await signInWrong();
-      assert.equal(res.status, 401, alert);
-      assert.equal((await bodyOf(res)).error, INVALID, alert);
-      assert.ok(logs.some((line) => line.includes('burst alert')), alert);
-      assertNoSecrets(logs.join('\n'), [WRONG_PASSWORD, PASSWORD]);
+  test('a missing or empty stored hash runs the dummy compare and is recorded as a failed sign-in', async () => {
+    for (const hash of [null, '']) {
+      reset({ account: { ...ACCOUNT, password_hash: hash } });
+      const res = await signIn();
+      assert.equal(res.status, 401, String(hash));
+      assert.equal((await bodyOf(res)).error, INVALID);
+      assert.deepEqual(state.compares, [[PASSWORD, DUMMY_HASH]]);
+      assert.equal(callsTo('admin_record_login_failure').length, 1);
+      assertNoSession(res);
     }
   });
 
-  test('25 failures in 24 hours deactivate the account and record ADMIN_AUTO_DEACTIVATED', async () => {
-    reset({ recentFailures: 5, dailyFailures: 25 });
-    const res = await signInWrong();
+  test('a stored hash bcrypt cannot read counts as a wrong password, and is logged without the password', async () => {
+    reset({ compareError: 'Invalid salt version: xx' });
+    const res = await signIn();
     assert.equal(res.status, 401);
-    assert.equal((await bodyOf(res)).error, INVALID);
-    const updates = queriesOn('admin_users', 'update');
-    assert.deepEqual(updates.map((query) => [query.payload, query.filters]), [[{ is_active: false }, [['eq', 'id', ADMIN_ID]]]]);
-    const alertAt = state.queries.findIndex((query) => query.table === 'admin_alerts');
-    assert.ok(alertAt >= 0 && alertAt < state.queries.indexOf(updates[0]));
-    const rows = audits();
-    assert.deepEqual(rows.map((row) => row.action), ['LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED']);
-    assert.deepEqual(
-      pick(rows[1], AUDIT_KEYS),
-      auditRow({
-        action: 'ADMIN_AUTO_DEACTIVATED',
-        before_value: { is_active: true },
-        after_value: { is_active: false },
-        reason: '25 failed sign-ins in the last 24 hours.',
-      }),
-    );
+    assert.equal(callsTo('admin_record_login_failure').length, 1);
+    assert.ok(logs.some((line) => line.includes('Invalid salt version')));
+    assertNoSecrets(logs.join('\n'), [PASSWORD]);
   });
 
-  test('a deactivation the database refuses is recorded as a failure, and the answer is unchanged', async () => {
-    reset({ dailyFailures: 30, deactivateError: 'permission denied for table admin_users' });
-    const res = await signInWrong();
-    assert.equal(res.status, 401);
-    assert.equal((await bodyOf(res)).error, INVALID);
-    const deactivated = audits().find((row) => row.action === 'ADMIN_AUTO_DEACTIVATED');
-    assert.equal(deactivated?.result, 'failure');
-    assert.equal(deactivated?.error, 'permission denied for table admin_users');
+  test('a failure record that is refused or never arrives is logged and the answer stays the same', async () => {
+    for (const failureRecord of [{ error: { message: 'Invalid session client' } }, 'throw'] as Reply[]) {
+      reset({ failureRecord });
+      const res = await signInWrong();
+      assert.equal(res.status, 401);
+      assert.equal((await bodyOf(res)).error, INVALID);
+      assert.ok(logs.some((line) => line.includes('admin sign-in failure record failed')));
+      assertNoSecrets(logs.join('\n'), [WRONG_PASSWORD, PASSWORD, EMAIL]);
+    }
   });
 });
 
-describe('POST /api/auth: successful sign-in', () => {
-  test('the browser gets the 8-hour session cookie and the theme cookie, never the token in the body', async () => {
-    reset();
+describe('POST /api/auth: signing in without two-step sign-in', () => {
+  test('opens one 8-hour web session and gets the cookie, never the token in the body', async () => {
     const res = await signIn();
     assert.equal(res.status, 200);
-    assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID });
-    assert.equal(res.headers.get('x-request-id'), REQUEST_ID);
+    assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID, step: 'done' });
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(callsTo('admin_session_open'), [{
+      p_admin_id: ADMIN_ID,
+      p_client: 'web',
+      p_auth_methods: ['pwd'],
+      p_ttl_seconds: 28800,
+      p_expected_token_version: 4,
+      p_ip: CLIENT_IP,
+      p_user_agent: USER_AGENT,
+    }]);
     assert.deepEqual(state.signed, [[{
-      admin_id: ADMIN_ID,
+      id: ADMIN_ID,
+      username: USERNAME,
       role_title: ROLE,
       is_super_admin: false,
       page_permissions: ['withdrawals', 'card_queue'],
-      username: USERNAME,
       token_version: 4,
-    }, '8h']]);
+    }, SID, ['pwd'], expiresEpoch]]);
     const cookies = cookiesOf(res);
     assert.deepEqual([...cookies.keys()].sort(), ['admin_theme', 'admin_token']);
     const session = cookies.get('admin_token');
     assert.equal(session?.value, ISSUED_TOKEN);
     assert.equal(session?.attributes.get('httponly'), true);
     assert.equal(session?.attributes.get('samesite'), 'strict');
-    assert.equal(session?.attributes.get('max-age'), '28800');
     assert.equal(session?.attributes.get('path'), '/');
     assert.equal(session?.attributes.has('secure'), false);
+    const maxAge = Number(session?.attributes.get('max-age'));
+    assert.ok(maxAge >= 28798 && maxAge <= 28800, String(maxAge));
     const themeCookie = cookies.get('admin_theme');
     assert.equal(themeCookie?.value, 'dark');
     assert.equal(themeCookie?.attributes.has('httponly'), false);
     assert.equal(themeCookie?.attributes.get('samesite'), 'lax');
     assert.equal(themeCookie?.attributes.get('max-age'), '31536000');
     assert.equal(themeCookie?.attributes.get('path'), '/');
-    assert.equal(themeCookie?.attributes.has('secure'), false);
   });
 
   test('both cookies are Secure in production', async () => {
-    reset();
     const res = await withNodeEnv('production', () => signIn());
     const cookies = cookiesOf(res);
     assert.equal(cookies.get('admin_token')?.attributes.get('secure'), true);
     assert.equal(cookies.get('admin_theme')?.attributes.get('secure'), true);
   });
 
-  test('stamps last_login_at, then records LOGIN through the audit writer without the password or token', async () => {
-    reset();
-    const started = Date.now();
+  test('records LOGIN with the client, methods and session, and leaves last_login_at to the database', async () => {
     await signIn();
-    const stamps = queriesOn('admin_users', 'update');
-    assert.equal(stamps.length, 1);
-    const stampedAt = Date.parse(String((stamps[0].payload as Record<string, unknown>).last_login_at));
-    assert.ok(stampedAt >= started - 1000 && stampedAt <= Date.now() + 1000);
-    assert.deepEqual(stamps[0].filters, [['eq', 'id', ADMIN_ID]]);
+    assert.deepEqual(queriesOn('admin_users', 'update'), []);
     const rows = audits();
     assert.equal(rows.length, 1);
-    assert.deepEqual(pick(rows[0], AUDIT_KEYS), auditRow({ action: 'LOGIN' }));
-    const auditAt = state.queries.findIndex((query) => query.table === 'audit_log' && query.op === 'insert');
-    assert.ok(state.queries.indexOf(stamps[0]) < auditAt);
+    assert.deepEqual(pick(rows[0], AUDIT_KEYS), auditRow({
+      action: 'LOGIN',
+      after_value: { client: 'web', amr: ['pwd'], session_id: SID },
+    }));
+    assert.ok(state.timeline.indexOf('rpc:admin_session_open') < state.timeline.indexOf('audit_log:insert'));
     assertNoSecrets(JSON.stringify(rows), [PASSWORD, STORED_HASH, ISSUED_TOKEN]);
     assertNoSecrets(logs.join('\n'), [PASSWORD, ISSUED_TOKEN]);
   });
 
-  test('the mobile client gets a 24-hour token and the profile in the body, and no cookies', async () => {
-    reset();
+  test('an unknown client address is stored as no address on the session', async () => {
+    await signIn(LOGIN_BODY, { 'x-forwarded-for': null });
+    assert.equal(callsTo('admin_session_open')[0]?.p_ip, null);
+    assert.equal(audits()[0]?.ip_address, 'unknown');
+  });
+
+  test('a request carrying the mobile header still gets the cookie flow and never a token in the body', async () => {
     const res = await signIn(LOGIN_BODY, { 'x-client': 'mobile-admin' });
     assert.equal(res.status, 200);
-    assert.deepEqual(await bodyOf(res), {
-      success: true,
-      request_id: REQUEST_ID,
-      token: ISSUED_TOKEN,
-      admin: {
-        id: ADMIN_ID,
-        username: USERNAME,
-        email: EMAIL,
-        role_title: ROLE,
-        is_super_admin: false,
-        page_permissions: ['withdrawals', 'card_queue'],
-        theme_preference: 'dark',
-      },
-    });
-    assert.equal(state.signed[0]?.[1], '24h');
-    assert.deepEqual(res.headers.getSetCookie(), []);
+    const body = await bodyOf(res);
+    assert.deepEqual(body, { success: true, request_id: REQUEST_ID, step: 'done' });
+    assert.ok(!('token' in body) && !('admin' in body));
+    assert.equal(callsTo('admin_session_open')[0]?.p_client, 'web');
+    assert.equal(callsTo('admin_session_open')[0]?.p_ttl_seconds, 28800);
+    assert.equal(cookiesOf(res).get('admin_token')?.value, ISSUED_TOKEN);
   });
 
   test('the theme falls back to system, and missing permissions and token version to [] and 0', async () => {
@@ -987,18 +1008,43 @@ describe('POST /api/auth: successful sign-in', () => {
       reset({ account: { ...ACCOUNT, theme_preference: preference, page_permissions: null, token_version: null } });
       const res = await signIn();
       assert.equal(cookiesOf(res).get('admin_theme')?.value, 'system', String(preference));
-      assert.deepEqual(state.signed[0]?.[0], {
-        admin_id: ADMIN_ID,
-        role_title: ROLE,
-        is_super_admin: false,
-        page_permissions: [],
-        username: USERNAME,
-        token_version: 0,
-      });
+      assert.equal(callsTo('admin_session_open')[0]?.p_expected_token_version, 0);
+      assert.deepEqual((state.signed[0]?.[0] as Record<string, unknown>).page_permissions, []);
     }
-    reset({ account: { ...ACCOUNT, theme_preference: 'light' } });
-    const mobile = await bodyOf(await signIn(LOGIN_BODY, { 'x-client': 'mobile-admin' }));
-    assert.equal((mobile.admin as Record<string, unknown>).theme_preference, 'light');
+  });
+
+  test('a token that cannot be signed ends the new session and answers 500 with no cookie', async () => {
+    reset({ signError: 'Zero-length key is not supported' });
+    const res = await signIn();
+    assert.equal(res.status, 500);
+    assert.equal((await bodyOf(res)).error, SIGN_IN_UNAVAILABLE);
+    assert.deepEqual(callsTo('admin_session_revoke'), [{
+      p_admin_id: ADMIN_ID, p_sid: SID, p_actor: ADMIN_ID, p_reason: 'sign_in_incomplete',
+    }]);
+    assert.deepEqual(res.headers.getSetCookie(), []);
+    assert.deepEqual(audits(), []);
+    assert.ok(logs.some((line) => line.includes('Zero-length key is not supported')));
+  });
+
+  test('a session store that fails or answers nonsense is a 500, never a 401', async () => {
+    for (const open of [{ error: { message: 'Could not find the function public.admin_session_open', code: 'PGRST202' } }, 'throw', { data: null }, opened({ session_id: 'nope' }), opened({ expires_at_epoch: null })] as Reply[]) {
+      reset({ open });
+      const res = await signIn();
+      assert.equal(res.status, 500, JSON.stringify(open));
+      assert.equal((await bodyOf(res)).error, SIGN_IN_UNAVAILABLE);
+      assertNoSession(res);
+    }
+  });
+
+  test('a session the database refuses for a deactivated admin or a changed version is an ordinary 401', async () => {
+    for (const reason of ['admin_inactive', 'token_version_changed', 'something_new']) {
+      reset({ open: { data: { ok: false, reason } } });
+      const res = await signIn();
+      assert.equal(res.status, 401, reason);
+      assert.equal((await bodyOf(res)).error, INVALID);
+      assert.deepEqual(callsTo('admin_mfa_get'), []);
+      assertNoSession(res);
+    }
   });
 
   test('an audit write failure does not block the sign-in', async () => {
@@ -1009,81 +1055,259 @@ describe('POST /api/auth: successful sign-in', () => {
   });
 });
 
+describe('POST /api/auth: admins with two-step sign-in', () => {
+  function needsCode(patch: Partial<Scenario> = {}): Partial<Scenario> {
+    return { open: { data: { ok: false, reason: 'mfa_required' } }, ...patch };
+  }
+
+  test('a right password opens no session; it starts a five-minute code step bound to an httpOnly cookie', async () => {
+    reset(needsCode());
+    const res = await signIn();
+    assert.equal(res.status, 200);
+    assert.deepEqual(await bodyOf(res), {
+      success: true, request_id: REQUEST_ID, step: 'mfa', methods: ['otp', 'recovery'], username: USERNAME,
+    });
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(callsTo('admin_mfa_get'), [{ p_admin_id: ADMIN_ID }]);
+    const cookies = cookiesOf(res);
+    assert.deepEqual([...cookies.keys()], ['admin_mfa_challenge']);
+    const challenge = cookies.get('admin_mfa_challenge');
+    assert.match(challenge?.value ?? '', /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(challenge?.attributes.get('path'), '/api/auth');
+    assert.equal(challenge?.attributes.get('max-age'), '300');
+    assert.equal(challenge?.attributes.get('httponly'), true);
+    assert.equal(challenge?.attributes.get('samesite'), 'strict');
+    assert.deepEqual(callsTo('admin_challenge_create'), [{
+      p_admin_id: ADMIN_ID,
+      p_purpose: 'mfa_verify',
+      p_token_hash: sha256(challenge?.value ?? ''),
+      p_ip: CLIENT_IP,
+      p_user_agent: USER_AGENT,
+    }]);
+    assert.deepEqual(state.signed, []);
+    assert.deepEqual(audits(), []);
+    assertNoSecrets(JSON.stringify(state.rpcs), [challenge?.value ?? 'missing']);
+  });
+
+  test('the step cookie is Secure in production', async () => {
+    reset(needsCode());
+    const res = await withNodeEnv('production', () => signIn());
+    assert.equal(cookiesOf(res).get('admin_mfa_challenge')?.attributes.get('secure'), true);
+  });
+
+  test('while two-step sign-in is locked the answer says until when, nothing is counted and no step starts', async () => {
+    reset(needsCode({ mfa: activeFactor({ locked_until: LOCKED_UNTIL }) }));
+    const res = await signIn();
+    assert.equal(res.status, 429);
+    const body = await bodyOf(res);
+    assert.equal(body.code, 'RATE_LIMITED');
+    assert.equal(body.error, twoStepLockedMessage(LOCKED_UNTIL));
+    assert.match(String(body.error), /^Too many wrong codes\. Two-step sign-in is locked until .+ WAT\. Your super administrators have been alerted\.$/);
+    assert.deepEqual(body.details, { reason: 'mfa_locked', locked_until: LOCKED_UNTIL });
+    assert.deepEqual(callsTo('admin_challenge_create'), []);
+    assert.deepEqual(callsTo('admin_mfa_record_failure'), []);
+    assert.deepEqual(res.headers.getSetCookie(), []);
+    assert.deepEqual(pick(audits()[0], AUDIT_KEYS), auditRow({
+      action: 'MFA_CHALLENGE_FAILED', result: 'failure', error: 'Two-step sign-in is locked.', after_value: { client: 'web' },
+    }));
+  });
+
+  test('without the encryption key the step fails closed with a 500, and never falls back to the password', async () => {
+    reset(needsCode());
+    Reflect.deleteProperty(process.env, 'ADMIN_MFA_ENCRYPTION_KEY');
+    const res = await signIn();
+    assert.equal(res.status, 500);
+    assert.equal((await bodyOf(res)).error, TWO_STEP_UNAVAILABLE);
+    assert.deepEqual(callsTo('admin_challenge_create'), []);
+    assertNoSession(res);
+    assert.ok(logs.some((line) => line.includes('the encryption key is not configured')));
+  });
+
+  test('a two-step store or step store that fails is a 500, and a refused step is a 401', async () => {
+    const cases: Array<[Partial<Scenario>, number]> = [
+      [needsCode({ mfa: { error: { message: 'connection terminated' } } }), 500],
+      [needsCode({ mfa: 'throw' }), 500],
+      [needsCode({ challenge: { error: { message: 'Invalid challenge token' } } }), 500],
+      [needsCode({ challenge: { data: { ok: false, reason: 'mfa_not_active' } } }), 401],
+      [needsCode({ mfa: { data: { status: 'none' } } }), 401],
+    ];
+    for (const [patch, status] of cases) {
+      reset(patch);
+      const res = await signIn();
+      assert.equal(res.status, status, JSON.stringify(patch));
+      assert.equal((await bodyOf(res)).error, status === 500 ? SIGN_IN_UNAVAILABLE : INVALID);
+      assertNoSession(res);
+    }
+  });
+
+  test('a wrong password for an enrolled admin is the same 401 as for anyone, and starts no step', async () => {
+    reset(needsCode());
+    const res = await signInWrong();
+    assert.equal(res.status, 401);
+    assert.deepEqual(callsTo('admin_session_open'), []);
+    assert.deepEqual(callsTo('admin_mfa_get'), []);
+    assert.deepEqual(res.headers.getSetCookie(), []);
+  });
+});
+
+describe('POST /api/auth: two-step sign-in required but not set up', () => {
+  const required: Partial<Scenario> = { open: { data: { ok: false, reason: 'mfa_enrolment_required' } } };
+
+  test('a right password starts a setup step instead of a session', async () => {
+    reset(required);
+    const res = await signIn();
+    assert.equal(res.status, 200);
+    assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID, step: 'enroll', username: USERNAME });
+    const challenge = cookiesOf(res).get('admin_mfa_challenge');
+    assert.equal(challenge?.attributes.get('path'), '/api/auth');
+    assert.deepEqual(callsTo('admin_challenge_create'), [{
+      p_admin_id: ADMIN_ID,
+      p_purpose: 'mfa_enroll',
+      p_token_hash: sha256(challenge?.value ?? ''),
+      p_ip: CLIENT_IP,
+      p_user_agent: USER_AGENT,
+    }]);
+    assert.deepEqual(callsTo('admin_mfa_get'), []);
+    assert.deepEqual(state.signed, []);
+  });
+
+  test('without the encryption key setup cannot start, so sign-in fails closed', async () => {
+    reset(required);
+    Reflect.deleteProperty(process.env, 'ADMIN_MFA_ENCRYPTION_KEY');
+    const res = await signIn();
+    assert.equal(res.status, 500);
+    assert.equal((await bodyOf(res)).error, TWO_STEP_UNAVAILABLE);
+    assert.deepEqual(callsTo('admin_challenge_create'), []);
+    assertNoSession(res);
+  });
+});
+
 describe('POST /api/auth/logout', () => {
-  test('without a session cookie it still signs out: both cookies cleared, nothing revoked or recorded', async () => {
-    reset();
+  function liveSession(adminId = ADMIN_ID, role = ROLE): unknown {
+    return {
+      status: 'ok',
+      claims: { ...SESSION, admin_id: adminId, role_title: role, sid: SID, amr: ['pwd'] },
+      session: {
+        id: SID, client: 'web', amr: ['pwd'], createdAt: '2026-10-13T08:00:00Z', expiresAt: '2026-10-13T16:00:00Z',
+        reauthAt: null, transport: 'cookie',
+      },
+      mfa: { status: 'none', lockedUntil: null },
+      policy: { mode: 'off', graceEndsAt: null, requiredNow: false },
+    };
+  }
+
+  function legacySession(): unknown {
+    return {
+      status: 'ok',
+      claims: { ...SESSION },
+      session: null,
+      mfa: { status: 'none', lockedUntil: null },
+      policy: { mode: 'off', graceEndsAt: null, requiredNow: false },
+    };
+  }
+
+  test('without a session cookie it still signs out: both cookies cleared, nothing checked, revoked or recorded', async () => {
     const res = await signOut();
     assert.equal(res.status, 200);
     assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID });
     assertSignedOutCookies(res);
     assert.equal(state.queries.length, 0);
+    assert.deepEqual(state.rpcs, []);
     assert.deepEqual(state.verified, []);
   });
 
-  test('an invalid or revoked session cookie is treated the same way', async () => {
-    reset();
-    const res = await signOut({ cookie: 'stale-cookie' });
-    assert.equal(res.status, 200);
-    assert.deepEqual(state.verified, ['stale-cookie']);
-    assert.equal(state.queries.length, 0);
-    assertSignedOutCookies(res);
+  test('an invalid cookie, or one that cannot be checked right now, is cleared without revoking anything', async () => {
+    for (const check of [undefined, { status: 'invalid' }, { status: 'unavailable' }]) {
+      reset();
+      if (check) state.checks['stale-cookie'] = check;
+      const res = await signOut({ cookie: 'stale-cookie' });
+      assert.equal(res.status, 200);
+      assert.deepEqual(state.verified, [['stale-cookie', 'cookie']]);
+      assert.equal(state.queries.length, 0);
+      assert.deepEqual(state.rpcs, []);
+      assertSignedOutCookies(res);
+    }
   });
 
-  test('a valid session bumps token_version by one, records LOGOUT and clears both cookies', async () => {
-    reset({ tokenVersion: 4 });
-    state.sessions[SESSION_COOKIE] = { ...SESSION };
+  test('a session with an id signs out this device only: one revoke, no version bump, LOGOUT for this device', async () => {
+    state.checks[SESSION_COOKIE] = liveSession();
     const res = await signOut({ cookie: SESSION_COOKIE });
     assert.equal(res.status, 200);
     assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID });
-    assert.deepEqual(state.verified, [SESSION_COOKIE]);
-    const reads = queriesOn('admin_users', 'select');
-    assert.deepEqual(reads.map((query) => [query.columns, query.filters, query.terminal]), [
-      ['token_version', [['eq', 'id', ADMIN_ID]], 'single'],
-    ]);
-    assert.deepEqual(queriesOn('admin_users', 'update').map((query) => [query.payload, query.filters]), [
-      [{ token_version: 5 }, [['eq', 'id', ADMIN_ID]]],
-    ]);
+    assert.deepEqual(state.verified, [[SESSION_COOKIE, 'cookie']]);
+    assert.deepEqual(state.rpcs, [{
+      name: 'admin_session_revoke', args: { p_admin_id: ADMIN_ID, p_sid: SID, p_actor: ADMIN_ID, p_reason: 'logout' },
+    }]);
+    assert.deepEqual(callsTo('admin_bump_token_version'), []);
     const rows = audits();
     assert.equal(rows.length, 1);
-    assert.deepEqual(pick(rows[0], AUDIT_KEYS), auditRow({ action: 'LOGOUT' }));
+    assert.deepEqual(pick(rows[0], AUDIT_KEYS), auditRow({
+      action: 'LOGOUT', after_value: { scope: 'this_device', session_id: SID },
+    }));
     assertNoSecrets(JSON.stringify(rows), [SESSION_COOKIE, FORWARDED_FOR]);
+    assertNoSecrets(JSON.stringify(state.rpcs), [SESSION_COOKIE]);
     assertSignedOutCookies(res);
   });
 
-  test('a missing token version counts as 0', async () => {
-    reset({ tokenVersion: null });
-    state.sessions[SESSION_COOKIE] = { ...SESSION };
-    await signOut({ cookie: SESSION_COOKIE });
-    assert.deepEqual(queriesOn('admin_users', 'update').map((query) => query.payload), [{ token_version: 1 }]);
+  test('a cookie from before sessions had ids still signs out everywhere through the version bump', async () => {
+    state.checks[SESSION_COOKIE] = legacySession();
+    const res = await signOut({ cookie: SESSION_COOKIE });
+    assert.equal(res.status, 200);
+    assert.deepEqual(state.rpcs, [{ name: 'admin_bump_token_version', args: { p_target_admin_id: ADMIN_ID } }]);
+    assert.deepEqual(pick(audits()[0], AUDIT_KEYS), auditRow({ action: 'LOGOUT', after_value: { scope: 'everywhere_legacy' } }));
+    assertSignedOutCookies(res);
   });
 
-  test('a revoke the database refuses still signs out and is recorded as partial', async () => {
-    for (const patch of [{ tokenWriteError: 'update refused' }, { tokenReadError: 'read refused' }]) {
+  test('the revoke targets the admin the cookie verifies as, and the audit names that admin', async () => {
+    state.checks[SESSION_COOKIE] = liveSession(OTHER_ADMIN_ID, 'Payout Officer');
+    await signOut({ cookie: SESSION_COOKIE });
+    assert.deepEqual(callsTo('admin_session_revoke'), [{
+      p_admin_id: OTHER_ADMIN_ID, p_sid: SID, p_actor: OTHER_ADMIN_ID, p_reason: 'logout',
+    }]);
+    assert.deepEqual(
+      pick(audits()[0], AUDIT_KEYS),
+      auditRow({
+        action: 'LOGOUT', admin_id: OTHER_ADMIN_ID, entity_id: OTHER_ADMIN_ID, admin_role: 'Payout Officer',
+        after_value: { scope: 'this_device', session_id: SID },
+      }),
+    );
+  });
+
+  test('a revoke or bump the database refuses, or that never arrives, still signs out and is recorded as partial', async () => {
+    const cases: Array<[Partial<Scenario>, () => unknown, string]> = [
+      [{ revoke: { error: { message: 'Not authorized', code: 'P0001' } } }, liveSession, 'Not authorized'],
+      [{ revoke: 'throw' }, liveSession, 'fetch failed'],
+      [{ bump: { error: { message: 'Admin not found', code: 'P0001' } } }, legacySession, 'Admin not found'],
+      [{ bump: 'throw' }, legacySession, 'fetch failed'],
+    ];
+    for (const [patch, check, message] of cases) {
       reset(patch);
-      state.sessions[SESSION_COOKIE] = { ...SESSION };
+      state.checks[SESSION_COOKIE] = check();
       const res = await signOut({ cookie: SESSION_COOKIE });
-      assert.equal(res.status, 200);
+      assert.equal(res.status, 200, message);
+      assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID }, message);
       assertSignedOutCookies(res);
-      const message = patch.tokenWriteError ?? patch.tokenReadError;
-      assert.deepEqual(pick(audits()[0], AUDIT_KEYS), auditRow({ action: 'LOGOUT', result: 'partial', error: message }));
-      assert.ok(logs.some((line) => line.includes(String(message))));
+      assert.equal(audits().length, 1, message);
+      assert.equal(audits()[0].result, 'partial', message);
+      assert.equal(audits()[0].error, message, message);
+      assert.ok(logs.some((line) => line.includes(message)), message);
     }
   });
 
   test('a mobile bearer without the cookie revokes nothing, as before', async () => {
-    reset();
     state.requestAdmin = { ...SESSION };
     const res = await signOut({ headers: { authorization: `Bearer ${SESSION_COOKIE}`, 'x-client': 'mobile-admin' } });
     assert.equal(res.status, 200);
     assert.equal(state.fromRequestCalls, 0);
     assert.deepEqual(state.verified, []);
     assert.equal(state.queries.length, 0);
+    assert.deepEqual(state.rpcs, []);
     assertSignedOutCookies(res);
   });
 
   test('an audit write failure does not block sign-out', async () => {
     reset({ auditError: AUDIT_DOWN });
-    state.sessions[SESSION_COOKIE] = { ...SESSION };
+    state.checks[SESSION_COOKIE] = liveSession();
     const res = await signOut({ cookie: SESSION_COOKIE });
     assert.equal(res.status, 200);
     assertSignedOutCookies(res);
@@ -1092,7 +1316,6 @@ describe('POST /api/auth/logout', () => {
 
 describe('GET /api/auth/me', () => {
   test('no session is a 401 that keeps the error key, never a 403', async () => {
-    reset();
     const res = await readProfile();
     assert.equal(res.status, 401);
     const body = await bodyOf(res);
@@ -1102,7 +1325,7 @@ describe('GET /api/auth/me', () => {
     assert.equal(state.queries.length, 0);
   });
 
-  test('returns exactly the six profile fields from a fresh read of the signed-in admin', async () => {
+  test('returns the six original profile fields plus the sign-in and creation times, from a fresh read', async () => {
     reset({ profile: { ...PROFILE, page_permissions: ['withdrawals', 'users'] } });
     state.requestAdmin = { ...SESSION };
     const res = await readProfile();
@@ -1117,6 +1340,8 @@ describe('GET /api/auth/me', () => {
         role_title: ROLE,
         is_super_admin: false,
         page_permissions: ['withdrawals', 'users'],
+        last_login_at: '2026-10-11T08:15:00.000Z',
+        created_at: '2026-01-02T09:00:00.000Z',
       },
     });
     const reads = queriesOn('admin_users', 'select');
@@ -1125,18 +1350,30 @@ describe('GET /api/auth/me', () => {
     ]);
   });
 
-  test('missing permissions become an empty list', async () => {
-    reset({ profile: { ...PROFILE, page_permissions: null } });
+  test('missing permissions become an empty list, and missing times become null', async () => {
+    reset({ profile: { ...PROFILE, page_permissions: null, last_login_at: null, created_at: null } });
     state.requestAdmin = { ...SESSION };
     const body = await bodyOf(await readProfile());
-    assert.deepEqual((body.admin as Record<string, unknown>).page_permissions, []);
+    const admin = body.admin as Record<string, unknown>;
+    assert.deepEqual(admin.page_permissions, []);
+    assert.equal(admin.last_login_at, null);
+    assert.equal(admin.created_at, null);
   });
 
-  test('a missing, deactivated or unreadable row is a 401', async () => {
+  test('only the signed-in admin is ever read, and no password, hash or token version is returned', async () => {
+    state.requestAdmin = { ...SESSION, admin_id: OTHER_ADMIN_ID };
+    const body = await bodyOf(await readProfile());
+    assert.deepEqual(queriesOn('admin_users', 'select').map((query) => query.filters), [[['eq', 'id', OTHER_ADMIN_ID]]]);
+    assert.deepEqual(Object.keys(body.admin as Record<string, unknown>).sort(), [
+      'created_at', 'email', 'id', 'is_super_admin', 'last_login_at', 'page_permissions', 'role_title', 'username',
+    ]);
+    assert.doesNotMatch(String(queriesOn('admin_users', 'select')[0]?.columns), /password_hash|token_version/);
+  });
+
+  test('a missing or deactivated row is a 401', async () => {
     const cases: Array<Partial<Scenario>> = [
       { profile: null },
       { profile: { ...PROFILE, is_active: false } },
-      { profileError: 'connection terminated' },
     ];
     for (const patch of cases) {
       reset(patch);
@@ -1146,11 +1383,33 @@ describe('GET /api/auth/me', () => {
       assert.equal((await bodyOf(res)).code, 'AUTH_REQUIRED');
     }
   });
+
+  test('an unreadable row is a 500 with the session-check message, never the 401 that signs the admin out', async () => {
+    reset({ profileError: 'connection terminated' });
+    state.requestAdmin = { ...SESSION };
+    const res = await readProfile();
+    assert.equal(res.status, 500);
+    assert.deepEqual(await bodyOf(res), {
+      success: false,
+      error: SESSION_UNAVAILABLE,
+      code: 'INTERNAL_ERROR',
+      message: SESSION_UNAVAILABLE,
+      request_id: REQUEST_ID,
+    });
+    assert.deepEqual(res.headers.getSetCookie(), []);
+    assert.ok(logs.some((line) => line === 'admin profile read failed: connection terminated'), logs.join('\n'));
+  });
+
+  test('the outage message is the shared session-check constant, not a copy', () => {
+    const source = readFileSync(resolve(APP_DIR, ROUTES.me), 'utf8');
+    assert.match(source, /^import \{ SESSION_UNAVAILABLE \} from '\.\.\/\.\.\/\.\.\/lib\/session';$/m);
+    assert.match(source, /return fail\('INTERNAL_ERROR', SESSION_UNAVAILABLE\);/);
+    assert.doesNotMatch(source, /could not be checked/);
+  });
 });
 
 describe('PATCH /api/admin/theme', () => {
   test('no session is a 401 and nothing is written', async () => {
-    reset();
     const res = await saveTheme({ body: { theme: 'dark' } });
     assert.equal(res.status, 401);
     const body = await bodyOf(res);
@@ -1253,22 +1512,23 @@ describe('route sources', () => {
     }
   });
 
-  test('every audit write goes through writeAudit with its existing action name, and responses use the envelope', () => {
+  test('audit rows go through writeAudit or the shared session module, and responses use the envelope', () => {
     for (const [path, source] of sources) {
-      assert.doesNotMatch(source, /from\('audit_log'\)\s*\.insert/, path);
+      assert.doesNotMatch(source, /from\('audit_log'\)/, path);
       assert.doesNotMatch(source, /NextResponse\.json\(/, path);
       assert.doesNotMatch(source, /x-forwarded-for/i, path);
     }
-    const expected: Array<[string, string[]]> = [
-      [ROUTES.login, ['LOGIN', 'LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED']],
-      [ROUTES.logout, ['LOGOUT']],
-      [ROUTES.theme, ['UPDATE_ADMIN_THEME']],
-    ];
-    for (const [path, actions] of expected) {
-      const source = sourceOf(path);
-      assert.match(source, /writeAudit\(/, path);
-      for (const action of actions) assert.match(source, new RegExp(`action: '${action}'`), `${path} ${action}`);
-    }
+    assert.match(sourceOf(ROUTES.logout), /action: 'LOGOUT'/);
+    assert.match(sourceOf(ROUTES.theme), /action: 'UPDATE_ADMIN_THEME'/);
+    assert.match(sourceOf(ROUTES.login), /signedIn\(admin, opened, actorFor\(admin, meta\)\)/);
+  });
+
+  test('the password step leaves the failure policy to the database and has no mobile branch', () => {
+    const source = sourceOf(ROUTES.login);
+    assert.match(source, /'admin_record_login_failure'/);
+    assert.doesNotMatch(source, /x-client|mobile-admin|isMobile|'24h'/);
+    assert.doesNotMatch(source, /emit_admin_alert|admin_login_burst|LOGIN_FAILED|ADMIN_AUTO_DEACTIVAT|last_login_at|is_active: false/);
+    assert.doesNotMatch(source, /signAdminJWT|maxAge|cookies\.set/);
   });
 
   test('sign-in and sign-out need no session, me and theme take any signed-in admin, and nothing answers 403', () => {
@@ -1279,6 +1539,6 @@ describe('route sources', () => {
       assert.match(sourceOf(path), /requireAdmin\(\)/, path);
       assert.doesNotMatch(sourceOf(path), /requireAdmin\(['"]|requireAdminAny|requireAdminAll|requireSuperAdmin/, path);
     }
-    for (const [path, source] of sources) assert.doesNotMatch(source, /PERMISSION_DENIED|status: 403/, path);
+    for (const [path, source] of sources) assert.doesNotMatch(source, /PERMISSION_DENIED|status: 403|REAUTH_REQUIRED|MFA_REQUIRED/, path);
   });
 });

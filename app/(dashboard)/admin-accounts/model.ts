@@ -7,9 +7,12 @@ import {
   type PermissionCategory,
   type PermissionRisk,
 } from '../../lib/permissions';
-import type { ApiBody, ApiResult } from '../../lib/apiClient';
+import type { ApiBody, ApiFailure, ApiResult } from '../../lib/apiClient';
+import { twoStepUnlockText } from '../../lib/http';
+import { graceText, isLockActive, toTwoStepStatus, type TwoStepStatus } from '../../lib/adminSecurity';
+import { combineCodecs, enumParam, uuidParam } from '../../_ui/useUrlState';
 import type { SortState } from '../../_ui/useTableSort';
-import type { Tone } from '../../_ui/Status';
+import type { StatTone, Tone } from '../../_ui/Status';
 import {
   ADDITIONAL_PERMISSIONS,
   GRANTABLE_PAGE_KEYS,
@@ -30,6 +33,16 @@ import {
   type GrantChange,
 } from './rules';
 
+export interface AdminSecurity {
+  mfaStatus: TwoStepStatus;
+  confirmedAt: string | null;
+  lockedUntil: string | null;
+  lastUsedAt: string | null;
+  recoveryCodesLeft: number;
+  liveSessions: number;
+  lastSeenAt: string | null;
+}
+
 export interface AdminRow {
   id: string;
   username: string;
@@ -41,20 +54,68 @@ export interface AdminRow {
   is_super_admin: boolean;
   deleted_at: string | null;
   created_at: string | null;
+  security: AdminSecurity | null;
 }
+
+export type PolicyMode = 'off' | 'all';
+
+export interface SecurityPolicy {
+  mode: PolicyMode;
+  graceEndsAt: string | null;
+  requiredNow: boolean;
+}
+
+export const POLICY_OFF: SecurityPolicy = Object.freeze({ mode: 'off', graceEndsAt: null, requiredNow: false });
 
 export interface AdminList {
   admins: AdminRow[];
   currentAdminId: string | null;
+  policy: SecurityPolicy;
+  actorTwoStep: TwoStepStatus | null;
+  securityLoaded: boolean;
 }
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
-export function toAdminRow(raw: unknown): AdminRow | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const row = raw as Record<string, unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function countOf(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function isTwoStepStatus(value: unknown): value is TwoStepStatus {
+  return value === 'none' || value === 'pending' || value === 'active';
+}
+
+function toAdminSecurity(row: Record<string, unknown>): AdminSecurity | null {
+  if (!isTwoStepStatus(row.mfa_status)) return null;
+  return {
+    mfaStatus: toTwoStepStatus(row.mfa_status),
+    confirmedAt: text(row.mfa_confirmed_at),
+    lockedUntil: text(row.mfa_locked_until),
+    lastUsedAt: text(row.mfa_last_used_at),
+    recoveryCodesLeft: countOf(row.recovery_codes_left),
+    liveSessions: countOf(row.live_sessions),
+    lastSeenAt: text(row.last_seen_at),
+  };
+}
+
+export function toSecurityPolicy(raw: unknown): SecurityPolicy {
+  if (!isRecord(raw)) return POLICY_OFF;
+  const mode: PolicyMode = raw.mfa_mode === 'all' ? 'all' : 'off';
+  return {
+    mode,
+    graceEndsAt: mode === 'all' ? text(raw.mfa_grace_ends_at) : null,
+    requiredNow: mode === 'all' && raw.mfa_required_now === true,
+  };
+}
+
+export function toAdminRow(row: unknown): AdminRow | null {
+  if (!isRecord(row)) return null;
   const id = text(row.id);
   if (!id) return null;
   return {
@@ -68,6 +129,7 @@ export function toAdminRow(raw: unknown): AdminRow | null {
     is_super_admin: row.is_super_admin === true,
     deleted_at: text(row.deleted_at),
     created_at: text(row.created_at),
+    security: toAdminSecurity(row),
   };
 }
 
@@ -75,16 +137,23 @@ export function toAdminList(body: ApiBody): AdminList | null {
   if (!Array.isArray(body.admins)) return null;
   const admins = body.admins.map(toAdminRow).filter((row): row is AdminRow => row !== null);
   const current = text(body.current_admin_id);
-  return { admins, currentAdminId: current ? current.toLowerCase() : null };
+  const security = isRecord(body.security) ? body.security : null;
+  return {
+    admins,
+    currentAdminId: current ? current.toLowerCase() : null,
+    policy: toSecurityPolicy(security),
+    actorTwoStep: security && isTwoStepStatus(security.actor_mfa_status) ? security.actor_mfa_status : null,
+    securityLoaded: security?.status_loaded === true,
+  };
 }
 
 export function withAdmin(list: AdminList | undefined, admin: AdminRow): AdminList | undefined {
   if (!list) return list;
   const index = list.admins.findIndex((row) => row.id === admin.id);
-  const admins = index === -1
-    ? [...list.admins, admin]
-    : list.admins.map((row, at) => (at === index ? admin : row));
-  return { ...list, admins };
+  if (index === -1) return { ...list, admins: [...list.admins, admin] };
+  const previous = list.admins[index];
+  const merged = admin.security === null && previous.security !== null ? { ...admin, security: previous.security } : admin;
+  return { ...list, admins: list.admins.map((row, at) => (at === index ? merged : row)) };
 }
 
 export function adminHandle(admin: { username: string } | null | undefined): string {
@@ -168,9 +237,12 @@ export interface AdminCapabilities {
   deactivate: boolean;
   reactivate: boolean;
   remove: boolean;
+  resetMfa: boolean;
 }
 
-const NO_CAPABILITIES: AdminCapabilities = { edit: false, revoke: false, deactivate: false, reactivate: false, remove: false };
+const NO_CAPABILITIES: AdminCapabilities = {
+  edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: false,
+};
 
 export function isSelf(admin: AdminRow, currentAdminId: string | null): boolean {
   return currentAdminId !== null && admin.id === currentAdminId;
@@ -185,11 +257,157 @@ export function capabilitiesFor(admin: AdminRow, currentAdminId: string | null):
     deactivate: admin.is_active && !self,
     reactivate: !admin.is_active,
     remove: !admin.is_active && !admin.is_super_admin,
+    resetMfa: !self && admin.security?.mfaStatus === 'active',
   };
 }
 
 export function hasRowActions(capabilities: AdminCapabilities): boolean {
-  return capabilities.revoke || capabilities.deactivate || capabilities.reactivate || capabilities.remove;
+  return capabilities.revoke || capabilities.deactivate || capabilities.reactivate || capabilities.remove
+    || capabilities.resetMfa;
+}
+
+export const ACTOR_TWO_STEP_FIRST = 'Set up two-step sign-in on your Profile first.';
+export const OWN_RESET_TEXT = 'You cannot reset your own two-step sign-in. Another super administrator has to do it.';
+export const PROFILE_HREF = '/profile';
+export const PROFILE_TWO_STEP_HREF = '/profile#two-step-sign-in';
+export const TWO_STEP_SETTINGS_HREF = '/admin-settings#admin-two-step';
+
+export function actorCanReset(actorTwoStep: TwoStepStatus | null): boolean {
+  return actorTwoStep === 'active';
+}
+
+export function resetBlockedText(admin: AdminRow, self: boolean): string {
+  const handle = adminHandle(admin);
+  if (admin.deleted_at) return `${handle} was deleted, so nothing was changed.`;
+  if (self) return OWN_RESET_TEXT;
+  if (!admin.security) return 'Two-step sign-in could not be checked, so nothing was changed. Refresh and try again.';
+  return `${handle} does not use two-step sign-in now, so there is nothing to reset.`;
+}
+
+export type PolicyRequirement =
+  | { kind: 'none' }
+  | { kind: 'grace'; shortDate: string; date: string; dateTime: string }
+  | { kind: 'required' };
+
+export function policyRequirement(policy: SecurityPolicy, now: Date = new Date()): PolicyRequirement {
+  if (policy.mode !== 'all') return { kind: 'none' };
+  const grace = graceText(policy.graceEndsAt, now);
+  if (policy.requiredNow || !grace || grace.overdue) return { kind: 'required' };
+  return { kind: 'grace', shortDate: grace.shortDate, date: grace.date, dateTime: grace.dateTime };
+}
+
+export type MfaCellState =
+  | { kind: 'deleted' }
+  | { kind: 'unknown' }
+  | { kind: 'on'; codesLeft: number }
+  | { kind: 'locked'; until: string | null }
+  | { kind: 'pending' }
+  | { kind: 'off'; due: 'none' }
+  | { kind: 'off'; due: 'grace'; date: string }
+  | { kind: 'off'; due: 'required' };
+
+export function mfaCellState(admin: AdminRow, policy: SecurityPolicy, now: Date = new Date()): MfaCellState {
+  if (admin.deleted_at) return { kind: 'deleted' };
+  const security = admin.security;
+  if (!security) return { kind: 'unknown' };
+  if (security.mfaStatus === 'active') {
+    return isLockActive(security.lockedUntil, now)
+      ? { kind: 'locked', until: twoStepUnlockText(security.lockedUntil, now.getTime()) }
+      : { kind: 'on', codesLeft: security.recoveryCodesLeft };
+  }
+  if (security.mfaStatus === 'pending') return { kind: 'pending' };
+  if (!admin.is_active) return { kind: 'off', due: 'none' };
+  const requirement = policyRequirement(policy, now);
+  if (requirement.kind === 'grace') return { kind: 'off', due: 'grace', date: requirement.shortDate };
+  if (requirement.kind === 'required') return { kind: 'off', due: 'required' };
+  return { kind: 'off', due: 'none' };
+}
+
+export function codesLeftLabel(count: number): string {
+  if (!Number.isFinite(count) || count <= 0) return 'No recovery codes left';
+  return count === 1 ? '1 recovery code' : `${Math.floor(count).toLocaleString('en-NG')} recovery codes`;
+}
+
+export interface TwoStepStats {
+  active: number;
+  enrolled: number;
+  missing: number;
+  known: boolean;
+}
+
+export function twoStepStats(admins: readonly AdminRow[]): TwoStepStats {
+  let active = 0;
+  let enrolled = 0;
+  let known = true;
+  for (const admin of admins) {
+    if (admin.deleted_at || !admin.is_active) continue;
+    active += 1;
+    if (!admin.security) known = false;
+    else if (admin.security.mfaStatus === 'active') enrolled += 1;
+  }
+  return { active, enrolled, missing: active - enrolled, known };
+}
+
+export interface TwoStepStat {
+  value: string;
+  hint: string;
+  tone: StatTone | undefined;
+  unavailable: boolean;
+}
+
+export const TWO_STEP_STAT_UNAVAILABLE = 'Two-step sign-in status could not be loaded.';
+
+export function twoStepStat(
+  stats: TwoStepStats,
+  policy: SecurityPolicy,
+  loaded: boolean,
+  now: Date = new Date(),
+): TwoStepStat {
+  const requirement = policyRequirement(policy, now);
+  const hint = requirement.kind === 'grace'
+    ? `active admins · required from ${requirement.shortDate}`
+    : requirement.kind === 'required'
+      ? 'active admins · required now'
+      : 'active admins';
+  const tone: StatTone | undefined = stats.missing > 0 && requirement.kind !== 'none'
+    ? requirement.kind === 'required' ? 'danger' : 'warning'
+    : undefined;
+  return {
+    value: `${stats.enrolled.toLocaleString('en-NG')} of ${stats.active.toLocaleString('en-NG')}`,
+    hint,
+    tone,
+    unavailable: !loaded || !stats.known,
+  };
+}
+
+export const ADMIN_PANELS = ['account', 'security'] as const;
+
+export type AdminPanel = (typeof ADMIN_PANELS)[number];
+
+export const ADMINS_URL = combineCodecs({
+  tab: enumParam('status', STATUS_TAB_VALUES, 'all'),
+  id: uuidParam('id'),
+  panel: enumParam('panel', ADMIN_PANELS, 'account'),
+});
+
+export function hasSecurityPanel(admin: AdminRow): boolean {
+  return !admin.deleted_at;
+}
+
+export function adminSecurityHref(id: string): string {
+  return `/admin-accounts?id=${encodeURIComponent(id)}&panel=security`;
+}
+
+export function adminMfaPath(id: string): string {
+  return `/api/admin-accounts/${encodeURIComponent(id)}/mfa`;
+}
+
+export function adminSessionsPath(id: string): string {
+  return `/api/admin-accounts/${encodeURIComponent(id)}/sessions`;
+}
+
+export function adminSessionPath(id: string, sessionId: string): string {
+  return `${adminSessionsPath(id)}/${encodeURIComponent(sessionId)}`;
 }
 
 export type RowActionKind = 'revoke' | 'deactivate' | 'reactivate' | 'remove';
@@ -333,6 +551,7 @@ export const ENFORCED_ADDITIONAL: readonly Permission[] = [
   'flags.resolve',
   'sensitive_data.download',
   'sensitive_data.share',
+  'wallets.adjust',
 ];
 
 export interface AdditionalGrantSpec {
@@ -682,21 +901,64 @@ export function toMutationResult(body: ApiBody): MutationResult {
   };
 }
 
-export type MutationOutcome =
-  | { kind: 'done'; result: MutationResult }
+export type StepUpCode = 'REAUTH_REQUIRED' | 'MFA_REQUIRED';
+
+export const STEP_UP_MESSAGE: Readonly<Record<StepUpCode, string>> = {
+  REAUTH_REQUIRED: 'Your identity check ran out. Enter a new code from your authenticator app and try again.',
+  MFA_REQUIRED: ACTOR_TWO_STEP_FIRST,
+};
+
+export function stepUpCode(failure: ApiFailure): StepUpCode | null {
+  if (failure.kind !== 'http' || failure.status !== 403) return null;
+  return failure.code === 'REAUTH_REQUIRED' || failure.code === 'MFA_REQUIRED' ? failure.code : null;
+}
+
+export type MutationOutcome<T = MutationResult> =
+  | { kind: 'done'; result: T }
   | { kind: 'unknown'; message: string }
   | { kind: 'stale'; message: string }
   | { kind: 'refused'; message: string }
+  | { kind: 'reauth'; code: StepUpCode; message: string }
   | { kind: 'expired' };
 
-export type MutationAttempt = MutationOutcome | { kind: 'retry'; message: string };
+export type MutationAttempt<T = MutationResult> = MutationOutcome<T> | { kind: 'retry'; message: string };
 
-export function classifyMutation(result: ApiResult<MutationResult>): MutationAttempt {
+export function classifyMutation<T = MutationResult>(result: ApiResult<T>): MutationAttempt<T> {
   if (result.ok) return { kind: 'done', result: result.data };
   const failure = result.error;
   if (failure.status === 401) return { kind: 'expired' };
   if (failure.outcomeUnknown) return { kind: 'unknown', message: failure.message };
+  const stepUp = stepUpCode(failure);
+  if (stepUp) return { kind: 'reauth', code: stepUp, message: STEP_UP_MESSAGE[stepUp] };
   if (failure.status === 403) return { kind: 'refused', message: failure.message };
   if (failure.status === 404 || failure.status === 409) return { kind: 'stale', message: failure.message };
   return { kind: 'retry', message: failure.message };
+}
+
+export interface ResetResult {
+  previousStatus: 'active' | 'pending';
+  sessionsRevoked: number;
+  auditRecorded: boolean;
+  warning: string | null;
+}
+
+export function toResetResult(body: ApiBody): ResetResult | null {
+  if (body.ok !== true) return null;
+  return {
+    previousStatus: body.previous_status === 'pending' ? 'pending' : 'active',
+    sessionsRevoked: countOf(body.sessions_revoked),
+    auditRecorded: body.audit_recorded !== false,
+    warning: text(body.warning),
+  };
+}
+
+export interface DeviceSignOut {
+  revoked: boolean;
+  auditRecorded: boolean;
+  warning: string | null;
+}
+
+export function toDeviceSignOut(body: ApiBody): DeviceSignOut | null {
+  if (typeof body.revoked !== 'boolean') return null;
+  return { revoked: body.revoked, auditRecorded: body.audit_recorded !== false, warning: text(body.warning) };
 }

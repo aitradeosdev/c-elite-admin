@@ -198,14 +198,14 @@ const CATALOG = {
     risk: 'high',
   },
   'wallets.adjust': {
-    label: 'Request wallet adjustments',
-    description: 'Raise a manual credit or debit against a user wallet.',
+    label: 'Adjust wallets',
+    description: 'Credit or debit a user’s wallet. It applies at once, with no second approval.',
     category: 'Financial',
     risk: 'critical',
   },
   'wallets.approve_adjustment': {
-    label: 'Approve wallet adjustments',
-    description: 'Second-approve a wallet adjustment raised by another admin.',
+    label: 'Approve wallet adjustments (not used)',
+    description: 'Not used: wallet adjustments apply at once, with no second approval. The key is kept so stored grants stay valid.',
     category: 'Financial',
     risk: 'critical',
   },

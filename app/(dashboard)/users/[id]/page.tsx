@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useRef } from 'react';
+import { Suspense, useCallback, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Lock, LockOpen, RotateCw } from 'lucide-react';
 import {
@@ -17,9 +17,11 @@ import {
 } from './model';
 import { useUserSection } from './useUserSection';
 import {
-  AccountNotices, NotFoundState, ProfileCard, ProfileKpis, UserDetailSkeleton, UserSubtitle, UserTitle,
+  AccountNotices, AdjustWalletButton, NotFoundState, ProfileCard, ProfileKpis, UserDetailSkeleton, UserSubtitle,
+  UserTitle,
 } from './UserParts';
 import { DevicesPanel, LoginsPanel, TransactionsPanel } from './ActivityPanels';
+import { WalletAdjustPanel } from './WalletAdjustPanel';
 import s from './page.module.css';
 
 const REASON_MAX = 500;
@@ -141,9 +143,17 @@ function UserDetail({ id }: { id: string }) {
   const transactions = useUserSection(id, 'transactions', body, profile.lastUpdatedAt);
   const devices = useUserSection(id, 'devices', body, profile.lastUpdatedAt);
   const logins = useUserSection(id, 'logins', body, profile.lastUpdatedAt);
+  const retryTransactions = transactions.retry;
 
   const actingRef = useRef(false);
   const refreshButtonRef = useRef<HTMLButtonElement>(null);
+  const adjustButtonRef = useRef<HTMLButtonElement>(null);
+  const [adjusting, setAdjusting] = useState(false);
+
+  const afterAdjustment = useCallback(async () => {
+    const result = await refreshProfile();
+    if (!result?.ok) retryTransactions();
+  }, [refreshProfile, retryTransactions]);
 
   const act = useCallback(async (kind: ActionKind) => {
     if (!current || actingRef.current) return;
@@ -224,6 +234,7 @@ function UserDetail({ id }: { id: string }) {
             >
               Refresh
             </Button>
+            <AdjustWalletButton user={user} onOpen={() => setAdjusting(true)} buttonRef={adjustButtonRef} />
             {canAct ? (
               <Button
                 variant={frozen ? 'secondary' : 'dangerSubtle'}
@@ -282,6 +293,16 @@ function UserDetail({ id }: { id: string }) {
           ))}
         </section>
       </div>
+
+      {adjusting ? (
+        <WalletAdjustPanel
+          user={user}
+          onClose={() => setAdjusting(false)}
+          onApplied={() => void afterAdjustment()}
+          onOutcomeUnknown={() => void refreshProfile()}
+          returnFocusTo={() => adjustButtonRef.current ?? refreshButtonRef.current}
+        />
+      ) : null}
     </div>
   );
 }

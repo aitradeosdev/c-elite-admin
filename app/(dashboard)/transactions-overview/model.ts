@@ -137,6 +137,8 @@ const TYPE_LABELS: Readonly<Record<string, string>> = {
   referral_bonus: 'Referral bonus',
   level_bonus: 'Level bonus',
   bonus_redeem: 'Bonus redemption',
+  wallet_credit: 'Wallet credit',
+  wallet_debit: 'Wallet debit',
 };
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {
@@ -230,6 +232,14 @@ export const TYPE_GROUPS: readonly SelectGroup[] = [
       option('referral_bonus', 'Referral bonuses'),
       option('level_bonus', 'Level bonuses'),
       option('bonus_redeem', 'Bonus redemptions'),
+    ],
+  },
+  {
+    label: 'Wallet adjustments',
+    options: [
+      option('wallet_credit,wallet_debit', 'All wallet adjustments'),
+      option('wallet_credit', 'Wallet credits'),
+      option('wallet_debit', 'Wallet debits'),
     ],
   },
 ];

@@ -1,5 +1,9 @@
-import { afterEach, before, describe, test } from 'node:test';
+import { afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { createElement, type ElementType, type ReactElement } from 'react';
 import { classesOf, loadAppModule, render, tagsOf, textOf } from './support/uiHarness.ts';
 import type { ApiResult } from '../app/lib/apiClient.ts';
@@ -301,58 +305,41 @@ describe('POST /api/rates body (mobile contract)', () => {
   });
 });
 
-describe('server write planning', () => {
-  const change = (rate: number, active: boolean | null, expected: { rate: number | null; active: boolean } | null) => ({
-    id: D1, rate, active, expected,
+describe('save messages', () => {
+  test('a refused save says plainly that nothing was saved, never "N of M saved"', () => {
+    assert.equal(
+      rules.conflictMessage(1, 1),
+      'The rate change was not saved. 1 rate changed or was removed after you loaded it. Reload the rates and review them again.',
+    );
+    assert.equal(
+      rules.conflictMessage(3, 1),
+      'None of the 3 rate changes were saved: they are saved together, and 1 rate changed or was removed after you loaded it. Reload the rates and review them again.',
+    );
+    assert.equal(
+      rules.conflictMessage(4, 2),
+      'None of the 4 rate changes were saved: they are saved together, and 2 rates changed or were removed after you loaded them. Reload the rates and review them again.',
+    );
+    for (const total of [1, 2, 3, 500]) {
+      for (const conflicts of [1, 2]) assert.doesNotMatch(rules.conflictMessage(total, conflicts), /\d+ of \d+/);
+    }
   });
 
-  test('writes with or without is_active, refuses a stale expectation and skips no-ops', () => {
-    const current = { rate_naira: 1500, is_active: true };
-    assert.deepEqual(rules.planRateWrite(change(1550, true, { rate: 1500, active: true }), current), {
-      kind: 'write', update: { rate_naira: 1550, is_active: true },
-    });
-    assert.deepEqual(rules.planRateWrite(change(1550, null, null), current), { kind: 'write', update: { rate_naira: 1550 } });
-    assert.deepEqual(rules.planRateWrite(change(1550, true, { rate: 1400, active: true }), current), { kind: 'conflict' });
-    assert.deepEqual(rules.planRateWrite(change(1550, true, { rate: 1500, active: false }), current), { kind: 'conflict' });
-    assert.deepEqual(rules.planRateWrite(change(1500, true, null), current), { kind: 'unchanged' });
-    assert.deepEqual(rules.planRateWrite(change(1500, true, { rate: 1400, active: true }), current), { kind: 'unchanged' });
-    assert.deepEqual(rules.planRateWrite(change(1500, null, null), { rate_naira: '1500.00', is_active: true }), { kind: 'unchanged' });
+  test('each refusal reason from the database reads like the matching body check', () => {
+    assert.equal(rules.rateChangeProblem('not_an_object', 1, null), 'Change 1 is not a valid rate change.');
+    assert.equal(rules.rateChangeProblem('invalid_id', 2, 'nope'), 'Change 2 does not name a valid range.');
+    assert.equal(rules.rateChangeProblem('invalid_id', 2, null), 'Change 2 does not name a valid range.');
+    assert.equal(rules.rateChangeProblem('duplicate_id', 3, D1), `Range ${D1} appears more than once in this save.`);
+    assert.equal(rules.rateChangeProblem('invalid_rate', 1, D1), `The rate for range ${D1} must be a number from 0 to ₦99,999,999.99.`);
+    assert.equal(rules.rateChangeProblem('invalid_active', 1, D1), `The active setting for range ${D1} must be true or false.`);
+    assert.equal(rules.rateChangeProblem('invalid_expected', 1, D1), `The expected values sent for range ${D1} are not valid.`);
+    assert.equal(rules.rateChangeProblem('invalid_rate', 4, null), 'Change 4 is not a valid rate change.');
+    assert.equal(rules.rateChangeProblem('a_new_reason', 5, D1), 'Change 5 is not a valid rate change.');
   });
 
-  test('a null is_active in the database is treated as switched off', () => {
-    assert.deepEqual(rules.planRateWrite(change(1500, false, { rate: 1500, active: false }), { rate_naira: 1500, is_active: null }), {
-      kind: 'unchanged',
-    });
-    assert.deepEqual(rules.planRateWrite(change(1500, true, { rate: 1500, active: false }), { rate_naira: 1500, is_active: null }), {
-      kind: 'write', update: { rate_naira: 1500, is_active: true },
-    });
-  });
-
-  test('saveVerdict never reports a partial save as success', () => {
-    const result = (status: 'saved' | 'unchanged' | 'conflict' | 'missing' | 'error') => ({
-      id: D1, status, rate_naira: null, is_active: null,
-    });
-    assert.deepEqual(rules.saveVerdict([result('saved'), result('unchanged')]), { ok: true });
-    assert.deepEqual(rules.saveVerdict([result('saved'), result('conflict')]), {
-      ok: false,
-      code: 'STATE_CONFLICT',
-      message: '1 of 2 rate changes saved; 1 not saved. 1 rate changed or was removed after you loaded it. Reload the rates and review them again.',
-    });
-    assert.deepEqual(rules.saveVerdict([result('conflict')]), {
-      ok: false,
-      code: 'STATE_CONFLICT',
-      message: 'The rate change was not saved. 1 rate changed or was removed after you loaded it. Reload the rates and review them again.',
-    });
-    assert.deepEqual(rules.saveVerdict([result('missing'), result('missing'), result('saved')]), {
-      ok: false,
-      code: 'STATE_CONFLICT',
-      message: '1 of 3 rate changes saved; 2 not saved. 2 rates changed or were removed after you loaded them. Reload the rates and review them again.',
-    });
-    assert.deepEqual(rules.saveVerdict([result('error'), result('conflict'), result('missing')]), {
-      ok: false,
-      code: 'INTERNAL_ERROR',
-      message: 'None of the 3 rate changes were saved. 2 rates changed or were removed after you loaded them and 1 change hit a database error. Reload the rates and try again.',
-    });
+  test('stored values read as numbers, and a missing flag means switched off', () => {
+    assert.deepEqual(rules.storedValues({ rate_naira: '1500.00', is_active: null }), { rate: 1500, active: false });
+    assert.deepEqual(rules.storedValues({ rate_naira: 1550, is_active: true }), { rate: 1550, active: true });
+    assert.deepEqual(rules.storedValues({}), { rate: null, active: false });
   });
 });
 
@@ -609,22 +596,36 @@ describe('save outcomes', () => {
     const conflict = 'The rate change was not saved.';
     respond(() => json({
       success: false, error: conflict, code: 'STATE_CONFLICT', message: conflict,
-      details: { results: [{ id: D1, status: 'conflict', rate_naira: 1600, is_active: true }] },
+      details: {
+        saved: 0,
+        unchanged: 1,
+        failed: 2,
+        results: [
+          { id: D1, status: 'conflict', rate_naira: 1600, is_active: true },
+          { id: D2, status: 'unchanged', rate_naira: 1550, is_active: true },
+          { id: D3, status: 'missing', rate_naira: null, is_active: null },
+        ],
+        audit_recorded: true,
+      },
     }, 409));
     assert.deepEqual(model.classifySave(await patch()), {
-      kind: 'partial', results: [{ id: D1, status: 'conflict', rate: 1600, active: true }], message: conflict, warning: null,
+      kind: 'conflict',
+      results: [
+        { id: D1, status: 'conflict', rate: 1600, active: true },
+        { id: D2, status: 'unchanged', rate: 1550, active: true },
+        { id: D3, status: 'missing', rate: null, active: null },
+      ],
     });
 
     respond(() => json({
-      success: false, error: conflict, code: 'INTERNAL_ERROR', message: conflict,
-      details: { results: [{ id: D1, status: 'error', rate_naira: 1500, is_active: true }], warning: 'Not audited.' },
-    }, 500));
-    const failedWrite = model.classifySave(await patch());
-    assert.equal(failedWrite.kind, 'partial');
-    assert.equal(failedWrite.kind === 'partial' && failedWrite.warning, 'Not audited.');
+      success: false, error: conflict, code: 'STATE_CONFLICT', message: conflict,
+      details: { results: [{ id: D1, status: 'error', rate_naira: 1500, is_active: true }] },
+    }, 409));
+    assert.deepEqual(model.classifySave(await patch()), { kind: 'retry', message: conflict });
 
-    respond(() => json({ success: false, error: 'Nothing saved.', code: 'INTERNAL_ERROR', message: 'Nothing saved.' }, 500));
-    assert.deepEqual(model.classifySave(await patch()), { kind: 'retry', message: 'Nothing saved.' });
+    const notSaved = 'The database did not accept the rate changes, so nothing was saved. Try again.';
+    respond(() => json({ success: false, error: notSaved, code: 'INTERNAL_ERROR', message: notSaved }, 500));
+    assert.deepEqual(model.classifySave(await patch()), { kind: 'retry', message: notSaved });
 
     respond(() => json({ success: false, error: 'No changes provided.', code: 'VALIDATION_ERROR' }, 400));
     assert.deepEqual(model.classifySave(await patch()), { kind: 'retry', message: 'No changes provided.' });
@@ -662,44 +663,110 @@ describe('save outcomes', () => {
     assert.equal(warned.toasts[2].text, 'The new rates could not be reloaded. Refresh to see them.');
   });
 
-  test('a partial save reports which rows saved and keeps the rest staged', () => {
-    const snap = snapshot();
-    let draft = model.editRate(model.EMPTY_DRAFT, row(snap, D1), '1550');
-    draft = model.editRate(draft, row(snap, D2), '1650');
-    const pending = pendingFor(snap, draft);
-    const fresh = snapshot({ [D1]: { rate_naira: 1550 }, [D2]: { rate_naira: 1600 } });
+  describe('a refused save', () => {
+    const CONFLICT_REASON = 'Someone else changed this to ₦1,600.00 before your save reached it.';
+    const ALREADY_LIVE = 'Someone else already made this change, so there is nothing left to save.';
+
+    function staged(): { draft: Draft; pending: PendingChange[] } {
+      const snap = snapshot();
+      let draft = model.editRate(model.EMPTY_DRAFT, row(snap, D1), '1550');
+      draft = model.editRate(draft, row(snap, D2), '1650');
+      draft = model.editRate(draft, row(snap, D3), '1200');
+      draft = model.editRate(draft, row(snap, D4), '2000');
+      const pending = pendingFor(snap, draft);
+      return { draft: { ...draft, [D2]: { ...draft[D2], failure: 'From an earlier save.' } }, pending };
+    }
+
     const outcome = {
-      kind: 'partial' as const,
-      message: '1 of 2 rate changes saved; 1 not saved.',
-      warning: null,
+      kind: 'conflict' as const,
       results: [
-        { id: D1, status: 'saved' as const, rate: 1550, active: true },
-        { id: D2, status: 'conflict' as const, rate: 1600, active: true },
+        { id: D1, status: 'conflict' as const, rate: 1600, active: true },
+        { id: D3, status: 'missing' as const, rate: null, active: null },
+        { id: D4, status: 'unchanged' as const, rate: 2000, active: true },
       ],
     };
-    const settled = model.settleSave(draft, pending, outcome, fresh);
-    assert.deepEqual(Object.keys(settled.draft), [D2]);
-    assert.equal(settled.draft[D2].failure, 'Someone else changed this to ₦1,600.00 before your save reached it.');
-    assert.deepEqual(settled.draft[D2].conflict, { rate: 1600, active: true });
-    assert.equal(settled.cleared, false);
-    assert.ok(settled.notice);
-    assert.equal(settled.notice.tone, 'danger');
-    assert.equal(settled.notice.title, '1 of 2 rate changes not saved');
-    assert.equal(settled.notice.message, '1 change was saved and is live. The rest are still marked as unsaved below.');
-    assert.deepEqual(settled.notice.items.map((item) => item.id), [D2]);
-    assert.deepEqual(settled.toasts, [{ text: '1 of 2 rate changes saved; 1 not saved.', tone: 'error' }]);
-    const unaudited = model.settleSave(draft, pending, { ...outcome, warning: 'Not audited.' }, fresh);
-    assert.deepEqual(unaudited.toasts.map((toast) => toast.tone), ['error', 'warning']);
+
+    test('saves nothing: conflicts are listed, blocked edits stay staged and already-live rows are done', () => {
+      const { draft, pending } = staged();
+      const fresh = snapshot({ [D1]: { rate_naira: 1600 }, [D4]: { rate_naira: 2000 } }, [D3]);
+      const settled = model.settleSave(draft, pending, outcome, fresh);
+      assert.deepEqual(Object.keys(settled.draft).sort(), [D1, D2].sort());
+      assert.equal(settled.draft[D1].rate, '1550');
+      assert.equal(settled.draft[D1].failure, CONFLICT_REASON);
+      assert.deepEqual(settled.draft[D1].base, { rate: 1600, active: true });
+      assert.deepEqual(settled.draft[D1].conflict, { rate: 1600, active: true });
+      assert.equal(settled.draft[D2].rate, '1650');
+      assert.equal(settled.draft[D2].failure, null);
+      assert.equal(settled.cleared, false);
+      assert.deepEqual(settled.notice, {
+        tone: 'danger',
+        title: 'None of the 4 rate changes were saved',
+        message: 'Rate changes are saved together, and 2 ranges changed or were removed after you loaded them. 2 changes are still marked as unsaved below. Review and save again.',
+        items: [
+          { id: D1, title: row(snapshot(), D1).title, detail: CONFLICT_REASON },
+          { id: D3, title: row(snapshot(), D3).title, detail: 'This range no longer exists.' },
+          { id: D4, title: row(snapshot(), D4).title, detail: ALREADY_LIVE },
+        ],
+      });
+      assert.deepEqual(settled.toasts, [{ text: 'Nothing was saved. Check the notice above the rates.', tone: 'error' }]);
+      for (const text of [settled.notice?.title ?? '', settled.notice?.message ?? '', ...settled.toasts.map((toast) => toast.text)]) {
+        assert.doesNotMatch(text, /\d+ of \d+/);
+        assert.doesNotMatch(text, /saved and (is|are) live/);
+      }
+    });
+
+    test('without fresh rates every blocked or conflicting edit stays staged and a refresh is suggested', () => {
+      const { draft, pending } = staged();
+      const settled = model.settleSave(draft, pending, outcome, null);
+      assert.deepEqual(Object.keys(settled.draft).sort(), [D1, D2, D3].sort());
+      assert.equal(settled.draft[D1].failure, CONFLICT_REASON);
+      assert.deepEqual(settled.draft[D1].base, { rate: 1500, active: true });
+      assert.equal(settled.draft[D2].failure, null);
+      assert.equal(settled.draft[D3].failure, 'This range no longer exists.');
+      assert.equal(
+        settled.notice?.message,
+        'Rate changes are saved together, and 2 ranges changed or were removed after you loaded them. 3 changes are still marked as unsaved below. Review and save again.',
+      );
+      assert.deepEqual(settled.toasts, [
+        { text: 'Nothing was saved. Check the notice above the rates.', tone: 'error' },
+        { text: 'The live rates could not be reloaded. Refresh to see them.', tone: 'warning' },
+      ]);
+    });
+
+    test('a single change that conflicted or vanished', () => {
+      const snap = snapshot();
+      const draft = model.editRate(model.EMPTY_DRAFT, row(snap, D1), '1550');
+      const pending = pendingFor(snap, draft);
+      const conflicted = model.settleSave(draft, pending, {
+        kind: 'conflict', results: [{ id: D1, status: 'conflict', rate: 1600, active: true }],
+      }, snapshot({ [D1]: { rate_naira: 1600 } }));
+      assert.equal(conflicted.notice?.title, 'The rate change was not saved');
+      assert.equal(
+        conflicted.notice?.message,
+        'The range changed or was removed after you loaded it. 1 change is still marked as unsaved below. Review and save again.',
+      );
+      assert.equal(conflicted.draft[D1].failure, CONFLICT_REASON);
+
+      const vanished = model.settleSave(draft, pending, {
+        kind: 'conflict', results: [{ id: D1, status: 'missing', rate: null, active: null }],
+      }, snapshot({}, [D1]));
+      assert.deepEqual(vanished.draft, {});
+      assert.equal(vanished.notice?.message, 'The range changed or was removed after you loaded it.');
+      assert.deepEqual(vanished.notice?.items.map((item) => item.detail), ['This range no longer exists.']);
+    });
   });
 
   test('failure reasons', () => {
-    assert.equal(model.failureReason(undefined), 'No result came back for this change.');
     assert.equal(model.failureReason({ id: D1, status: 'missing', rate: null, active: null }), 'This range no longer exists.');
-    assert.equal(model.failureReason({ id: D1, status: 'error', rate: 1, active: true }), 'The database did not accept this change.');
     assert.equal(
       model.failureReason({ id: D1, status: 'conflict', rate: 1600, active: false }),
       'Someone else changed this to ₦1,600.00 (switched off) before your save reached it.',
     );
+    assert.equal(
+      model.failureReason({ id: D1, status: 'conflict', rate: null, active: null }),
+      'Someone else changed this range before your save reached it.',
+    );
+    assert.equal(model.failureReason({ id: D1, status: 'unchanged', rate: 1500, active: true }), '');
   });
 
   test('an unknown outcome is reconciled against the live rates', () => {
@@ -1032,5 +1099,576 @@ describe('rendering', () => {
     }));
     assert.match(textOf(html), /Amazon US · Physical · \$25–\$99 : This range no longer exists\./);
     assert.ok(tagsOf(html, 'button').some((attrs) => attrs['aria-label'] === 'Dismiss this notice'));
+  });
+});
+
+interface RouteClaims {
+  admin_id: string;
+  username: string;
+  role_title: string;
+  is_super_admin: boolean;
+  page_permissions: string[];
+  token_version: number;
+}
+
+interface RpcCall {
+  name: string;
+  args: unknown;
+}
+
+interface DbReply {
+  data: unknown;
+  error: { message: string; code?: string } | null;
+}
+
+interface RouteHarness {
+  claims: RouteClaims | null;
+  headers: Record<string, string>;
+  rpcCalls: RpcCall[];
+  reply: DbReply;
+  tables: string[];
+  audits: Record<string, unknown>[];
+  auditFailure: string | null;
+  from(table: string): { insert(row: Record<string, unknown>): Promise<DbReply> };
+  rpc(name: string, args: unknown): Promise<DbReply>;
+}
+
+interface RatesRoute {
+  PATCH: (req: Request) => Promise<Response>;
+}
+
+interface RouteReply {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+type Pair = [number | null, boolean];
+
+const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
+const ROUTE_HARNESS_KEY = '__ratesRouteHarness';
+const ROUTE_REQUEST_ID = 'req_ratestest01';
+const ROUTE_USER_AGENT = 'rates-route-test';
+const ROUTE_CLIENT_IP = '198.51.100.23';
+const ADMIN_ID = '0e000000-0000-4000-8000-000000000001';
+const NOT_SAVED = 'The database did not accept the rate changes, so nothing was saved. Try again.';
+const UNCONFIRMED = 'The save could not be confirmed. Reload the rates to check them before trying again.';
+
+const OWNER: RouteClaims = {
+  admin_id: ADMIN_ID,
+  username: 'owner',
+  role_title: 'Super Admin',
+  is_super_admin: true,
+  page_permissions: [],
+  token_version: 0,
+};
+
+function rateStaff(grants: string[]): RouteClaims {
+  return { ...OWNER, username: 'rates', role_title: 'Rates desk', is_super_admin: false, page_permissions: grants };
+}
+
+const RANGE_CONTEXT: Readonly<Record<string, { card_type_id: string; range_label: string; min_value: number; max_value: number }>> = {
+  [D1]: { card_type_id: PHYSICAL, range_label: '$25–$99', min_value: 25, max_value: 99 },
+  [D2]: { card_type_id: PHYSICAL, range_label: '$100–$500', min_value: 100, max_value: 500 },
+  [D3]: { card_type_id: PHYSICAL, range_label: '$501–$1000', min_value: 501, max_value: 1000 },
+  [D4]: { card_type_id: ECODE, range_label: '£10–£50', min_value: 10, max_value: 50 },
+};
+
+const routeHarness: RouteHarness = {
+  claims: OWNER,
+  headers: {},
+  rpcCalls: [],
+  reply: { data: null, error: null },
+  tables: [],
+  audits: [],
+  auditFailure: null,
+  from(table) {
+    routeHarness.tables.push(table);
+    return {
+      async insert(row) {
+        if (table !== 'audit_log') throw new Error(`unexpected insert into ${table}`);
+        if (routeHarness.auditFailure) return { data: null, error: { message: routeHarness.auditFailure } };
+        routeHarness.audits.push(row);
+        return { data: null, error: null };
+      },
+    };
+  },
+  async rpc(name, args) {
+    routeHarness.rpcCalls.push({ name, args });
+    return routeHarness.reply;
+  },
+};
+(globalThis as unknown as Record<string, unknown>)[ROUTE_HARNESS_KEY] = routeHarness;
+
+const moduleUrl = (source: string) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const harnessRef = `const harness = () => globalThis.${ROUTE_HARNESS_KEY};`;
+
+const ROUTE_FILE_STUBS: Readonly<Record<string, string>> = {
+  [resolve(APP_DIR, 'lib', 'supabase.ts')]: moduleUrl(`${harnessRef}
+export const supabaseAdmin = {
+  from: (table) => harness().from(table),
+  rpc: (name, args) => harness().rpc(name, args),
+};`),
+  [resolve(APP_DIR, 'lib', 'jwt.ts')]: moduleUrl(`${harnessRef}
+export async function verifyAdminFromRequest() { return harness().claims; }`),
+};
+
+const ROUTE_PACKAGE_STUBS: Readonly<Record<string, string>> = {
+  'next/headers': moduleUrl(`${harnessRef}
+export async function headers() { return new Headers(harness().headers); }
+export async function cookies() { return { get: () => undefined }; }`),
+  'next/server': moduleUrl('export const NextResponse = { json: (body, init) => Response.json(body, init) };'),
+};
+
+const ROUTE_IMPORTS = /^((?:import|export)\b[^;'"]*?\bfrom\s*|import\s*)['"]([^'"]+)['"]/gm;
+const routeBundles = new Map<string, Promise<string>>();
+
+function resolveRouteImport(fromFile: string, specifier: string): string {
+  const base = resolve(dirname(fromFile), specifier);
+  const found = [base, `${base}.ts`, `${base}.tsx`, resolve(base, 'index.ts')]
+    .find((candidate) => /\.tsx?$/.test(candidate) && existsSync(candidate));
+  if (!found) throw new Error(`${fromFile} imports ${specifier}, which does not resolve to a .ts file`);
+  return found;
+}
+
+async function compileRouteModule(file: string): Promise<string> {
+  const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
+    fileName: file,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  });
+  const targets = new Map<string, string>();
+  for (const [, , specifier] of outputText.matchAll(ROUTE_IMPORTS)) {
+    if (targets.has(specifier)) continue;
+    if (specifier.startsWith('.')) {
+      const target = resolveRouteImport(file, specifier);
+      targets.set(specifier, ROUTE_FILE_STUBS[target] ?? (await bundleRouteModule(target)));
+    } else if (ROUTE_PACKAGE_STUBS[specifier]) {
+      targets.set(specifier, ROUTE_PACKAGE_STUBS[specifier]);
+    } else {
+      throw new Error(`${file} imports ${specifier}, which this test does not provide`);
+    }
+  }
+  return moduleUrl(outputText.replace(ROUTE_IMPORTS, (match: string, head: string, specifier: string) => {
+    const target = targets.get(specifier);
+    return target ? `${head}'${target}'` : match;
+  }));
+}
+
+function bundleRouteModule(file: string): Promise<string> {
+  let pending = routeBundles.get(file);
+  if (!pending) {
+    pending = compileRouteModule(file);
+    routeBundles.set(file, pending);
+  }
+  return pending;
+}
+
+let ratesRoute: RatesRoute;
+
+function resetRoute(claims: RouteClaims | null = OWNER): void {
+  routeHarness.claims = claims;
+  routeHarness.headers = {
+    'x-request-id': ROUTE_REQUEST_ID,
+    'user-agent': ROUTE_USER_AGENT,
+    'x-forwarded-for': ROUTE_CLIENT_IP,
+  };
+  routeHarness.rpcCalls = [];
+  routeHarness.reply = { data: null, error: null };
+  routeHarness.tables = [];
+  routeHarness.audits = [];
+  routeHarness.auditFailure = null;
+}
+
+async function patchRates(body: unknown): Promise<RouteReply> {
+  const response = await ratesRoute.PATCH(new Request('http://admin.test/api/rates', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  }));
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}
+
+function failureBody(message: string, code: string, extra: Record<string, unknown> = {}) {
+  return { success: false, error: message, code, message, request_id: ROUTE_REQUEST_ID, ...extra };
+}
+
+function auditRow(fields: { entity_id: string; before_value?: unknown; after_value: unknown; result?: string; error?: string }) {
+  return {
+    admin_id: ADMIN_ID,
+    user_id: null,
+    action: 'UPDATE_RATE',
+    entity: 'denominations',
+    entity_id: fields.entity_id,
+    before_value: fields.before_value ?? null,
+    after_value: fields.after_value,
+    ip_address: ROUTE_CLIENT_IP,
+    admin_role: OWNER.role_title,
+    user_agent: ROUTE_USER_AGENT,
+    request_id: ROUTE_REQUEST_ID,
+    reason: null,
+    result: fields.result ?? 'success',
+    error: fields.error ?? null,
+    sensitivity: 'financial',
+  };
+}
+
+function beforeValue(id: string, [rate, active]: Pair) {
+  return { rate_naira: rate, is_active: active, ...RANGE_CONTEXT[id] };
+}
+
+function doneRow(index: number, id: string, before: Pair, after: Pair, status: 'saved' | 'unchanged' = 'saved') {
+  return {
+    index,
+    id,
+    status,
+    before: { rate_naira: before[0], is_active: before[1] },
+    ...RANGE_CONTEXT[id],
+    rate_naira: after[0],
+    is_active: after[1],
+  };
+}
+
+function refusedRow(index: number, id: string, status: 'conflict' | 'missing', live: Pair | null = null) {
+  const context = live ? RANGE_CONTEXT[id] : { card_type_id: null, range_label: null, min_value: null, max_value: null };
+  return {
+    index,
+    id,
+    status,
+    rate_naira: live ? live[0] : null,
+    is_active: live ? live[1] : null,
+    ...context,
+    expected: { rate_naira: 1500, is_active: true },
+    requested: { rate_naira: 1550, is_active: true },
+  };
+}
+
+function applied(saved: string[], unchanged: string[], results: unknown[]): DbReply {
+  return { data: { applied: true, saved, unchanged, results }, error: null };
+}
+
+function refused(conflicts: unknown[], invalid: unknown[], unchanged: string[]): DbReply {
+  return { data: { applied: false, conflicts, invalid, unchanged }, error: null };
+}
+
+function raised(message: string, code = 'P0001'): DbReply {
+  return { data: null, error: { code, message } };
+}
+
+function saveCall(): Record<string, unknown> {
+  assert.equal(routeHarness.rpcCalls.length, 1);
+  const [call] = routeHarness.rpcCalls;
+  assert.equal(call.name, 'admin_save_rates');
+  assert.deepEqual(JSON.parse(JSON.stringify(call.args)), call.args, 'no parameter may be undefined');
+  return call.args as Record<string, unknown>;
+}
+
+describe('PATCH /api/rates saves through admin_save_rates', () => {
+  const WEB_CHANGES = [
+    { id: D1, rate_naira: 1550, is_active: true, expected: { rate_naira: 1500, is_active: true } },
+    { id: D2, rate_naira: 1600, is_active: false, expected: { rate_naira: 1550, is_active: true } },
+    { id: D3, rate_naira: 1200, is_active: true, expected: { rate_naira: 0, is_active: false } },
+  ];
+  const WEB_BODY = { changes: WEB_CHANGES };
+
+  before(async () => {
+    ratesRoute = (await import(await bundleRouteModule(resolve(APP_DIR, 'api', 'rates', 'route.ts')))) as RatesRoute;
+  });
+
+  beforeEach(() => {
+    resetRoute();
+    mock.method(console, 'error', () => {});
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  test('no session is 401 and the database is never called', async () => {
+    resetRoute(null);
+    const res = await patchRates(WEB_BODY);
+    assert.equal(res.status, 401);
+    assert.deepEqual(res.body, failureBody('Your session has expired. Sign in again.', 'AUTH_REQUIRED'));
+    assert.deepEqual(routeHarness.rpcCalls, []);
+    assert.deepEqual(routeHarness.tables, []);
+  });
+
+  test('saving needs rates.write: a viewer is refused with 403 before the database', async () => {
+    resetRoute(rateStaff(['rates.read']));
+    const viewer = await patchRates(WEB_BODY);
+    assert.equal(viewer.status, 403);
+    assert.equal(viewer.body.code, 'PERMISSION_DENIED');
+    assert.deepEqual(viewer.body.details, { required: ['rates.write'] });
+    assert.deepEqual(routeHarness.rpcCalls, []);
+
+    resetRoute(rateStaff(['rates_management']));
+    routeHarness.reply = applied([], [D1], [doneRow(0, D1, [1550, true], [1550, true], 'unchanged')]);
+    const manager = await patchRates({ changes: [{ id: D1, rate_naira: 1550, is_active: true }] });
+    assert.equal(manager.status, 200);
+    assert.equal(saveCall().p_admin_id, ADMIN_ID);
+  });
+
+  test('bodies the checks refuse keep their messages and never reach the database', async () => {
+    const cases: ReadonlyArray<[unknown, string]> = [
+      ['not json', 'No changes provided.'],
+      [{ changes: [] }, 'No changes provided.'],
+      [{ changes: Array.from({ length: 501 }, () => ({ id: D1, rate_naira: 1 })) }, 'Save at most 500 rate changes at a time.'],
+      [{ changes: ['x'] }, 'Change 1 is not a valid rate change.'],
+      [{ changes: [{ id: 'nope', rate_naira: 1 }] }, 'Change 1 does not name a valid range.'],
+      [{ changes: [{ id: D1, rate_naira: 1 }, { id: D1, rate_naira: 2 }] }, `Range ${D1} appears more than once in this save.`],
+      [{ changes: [{ id: D1, rate_naira: -1 }] }, `The rate for range ${D1} must be a number from 0 to ₦99,999,999.99.`],
+      [{ changes: [{ id: D1, rate_naira: 1, is_active: 'yes' }] }, `The active setting for range ${D1} must be true or false.`],
+      [{ changes: [{ id: D1, rate_naira: 1, expected: { is_active: true } }] }, `The expected values sent for range ${D1} are not valid.`],
+    ];
+    for (const [body, message] of cases) {
+      resetRoute();
+      const res = await patchRates(body);
+      assert.equal(res.status, 400, message);
+      assert.deepEqual(res.body, failureBody(message, 'VALIDATION_ERROR'), message);
+      assert.deepEqual(routeHarness.rpcCalls, [], message);
+      assert.deepEqual(routeHarness.tables, [], message);
+    }
+  });
+
+  test('the function gets every named parameter, rebuilt from the checked body, with null and never undefined', async () => {
+    const lettered = 'ab000000-0000-4000-8000-0000000000cd';
+    routeHarness.reply = applied([], [lettered, D2, D3], [
+      { ...doneRow(0, D1, [1550.5, true], [1550.5, true], 'unchanged'), id: lettered },
+      doneRow(1, D2, [1600, false], [1600, false], 'unchanged'),
+      doneRow(2, D3, [1200, false], [1200, false], 'unchanged'),
+    ]);
+    const res = await patchRates({
+      changes: [
+        { id: ` ${lettered.toUpperCase()} `, rate_naira: '1550.50' },
+        { id: D2, rate_naira: 1600, is_active: false, expected: { rate_naira: '1550', is_active: true } },
+        { id: D3, rate_naira: 1200, is_active: null, expected: { rate_naira: null, is_active: null } },
+      ],
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(saveCall(), {
+      p_admin_id: ADMIN_ID,
+      p_changes: [
+        { id: lettered, rate_naira: 1550.5, is_active: null, expected: null },
+        { id: D2, rate_naira: 1600, is_active: false, expected: { rate_naira: 1550, is_active: true } },
+        { id: D3, rate_naira: 1200, is_active: null, expected: { rate_naira: null, is_active: false } },
+      ],
+    });
+    assert.deepEqual(routeHarness.tables, []);
+  });
+
+  test('applied: results come back in order and each saved row gets one UPDATE_RATE audit with its before and after', async () => {
+    routeHarness.reply = applied([D1, D2], [D3], [
+      doneRow(0, D1, [1500, true], [1550, true]),
+      doneRow(1, D2, [1550, true], [1600, false]),
+      doneRow(2, D3, [1200, true], [1200, true], 'unchanged'),
+    ]);
+    const res = await patchRates(WEB_BODY);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, {
+      success: true,
+      request_id: ROUTE_REQUEST_ID,
+      saved: 2,
+      unchanged: 1,
+      results: [
+        { id: D1, status: 'saved', rate_naira: 1550, is_active: true },
+        { id: D2, status: 'saved', rate_naira: 1600, is_active: false },
+        { id: D3, status: 'unchanged', rate_naira: 1200, is_active: true },
+      ],
+      audit_recorded: true,
+    });
+    assert.deepEqual(saveCall().p_changes, WEB_CHANGES);
+    assert.deepEqual(routeHarness.audits, [
+      auditRow({ entity_id: D1, before_value: beforeValue(D1, [1500, true]), after_value: { rate_naira: 1550, is_active: true } }),
+      auditRow({ entity_id: D2, before_value: beforeValue(D2, [1550, true]), after_value: { rate_naira: 1600, is_active: false } }),
+    ]);
+    assert.deepEqual(routeHarness.tables, ['audit_log', 'audit_log']);
+  });
+
+  test('applied with every value already live: no audit rows and no warning', async () => {
+    routeHarness.reply = applied([], [D1], [doneRow(0, D1, [1500, true], [1500, true], 'unchanged')]);
+    const res = await patchRates({ changes: [{ id: D1, rate_naira: 1500, is_active: true }] });
+    assert.deepEqual(res.body, {
+      success: true,
+      request_id: ROUTE_REQUEST_ID,
+      saved: 0,
+      unchanged: 1,
+      results: [{ id: D1, status: 'unchanged', rate_naira: 1500, is_active: true }],
+      audit_recorded: true,
+    });
+    assert.deepEqual(routeHarness.audits, []);
+    assert.deepEqual(routeHarness.tables, []);
+  });
+
+  test('a failed audit write keeps the save and says so', async () => {
+    routeHarness.auditFailure = 'audit insert refused';
+    routeHarness.reply = applied([D1, D2], [], [
+      doneRow(0, D1, [1500, true], [1550, true]),
+      doneRow(1, D2, [1550, true], [1600, true]),
+    ]);
+    const many = await patchRates({ changes: [{ id: D1, rate_naira: 1550 }, { id: D2, rate_naira: 1600 }] });
+    assert.equal(many.status, 200);
+    assert.equal(many.body.saved, 2);
+    assert.equal(many.body.audit_recorded, false);
+    assert.equal(many.body.warning, 'The rates were saved, but some changes could not be written to the audit log.');
+
+    resetRoute();
+    routeHarness.auditFailure = 'audit insert refused';
+    routeHarness.reply = applied([D1], [], [doneRow(0, D1, [1500, true], [1550, true])]);
+    const one = await patchRates({ changes: [{ id: D1, rate_naira: 1550 }] });
+    assert.equal(one.status, 200);
+    assert.equal(one.body.audit_recorded, false);
+    assert.equal(one.body.warning, 'The rate was saved, but the change could not be written to the audit log.');
+  });
+
+  test('refused for conflicts: 409, nothing saved, conflicting and already-live rows listed in order, no audit', async () => {
+    routeHarness.reply = refused([refusedRow(0, D1, 'conflict', [1600, true]), refusedRow(2, D3, 'missing')], [], [D2]);
+    const changes = [...WEB_CHANGES, { id: D4, rate_naira: 2000, is_active: true, expected: { rate_naira: 1900, is_active: true } }];
+    const res = await patchRates({ changes });
+    const message = 'None of the 4 rate changes were saved: they are saved together, and 2 rates changed or were removed after you loaded them. Reload the rates and review them again.';
+    assert.equal(res.status, 409);
+    assert.deepEqual(res.body, failureBody(message, 'STATE_CONFLICT', {
+      details: {
+        saved: 0,
+        unchanged: 1,
+        failed: 3,
+        results: [
+          { id: D1, status: 'conflict', rate_naira: 1600, is_active: true },
+          { id: D2, status: 'unchanged', rate_naira: 1600, is_active: false },
+          { id: D3, status: 'missing', rate_naira: null, is_active: null },
+        ],
+        audit_recorded: true,
+      },
+    }));
+    assert.deepEqual(saveCall().p_changes, changes);
+    assert.deepEqual(routeHarness.audits, []);
+    assert.deepEqual(routeHarness.tables, []);
+
+    respond(() => json(res.body, res.status));
+    assert.deepEqual(model.classifySave(await patch()), {
+      kind: 'conflict',
+      results: [
+        { id: D1, status: 'conflict', rate: 1600, active: true },
+        { id: D2, status: 'unchanged', rate: 1600, active: false },
+        { id: D3, status: 'missing', rate: null, active: null },
+      ],
+    });
+  });
+
+  test('the mobile body { changes: [{ id, rate_naira, is_active }] } is sent with expected null and keeps its answers', async () => {
+    const mobile = { changes: [{ id: D1, rate_naira: 1650, is_active: true }] };
+    routeHarness.reply = applied([D1], [], [doneRow(0, D1, [1500, true], [1650, true])]);
+    const saved = await patchRates(mobile);
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.success, true);
+    assert.deepEqual(saveCall().p_changes, [{ id: D1, rate_naira: 1650, is_active: true, expected: null }]);
+
+    resetRoute();
+    routeHarness.reply = refused([refusedRow(0, D1, 'missing')], [], []);
+    const gone = await patchRates(mobile);
+    assert.equal(gone.status, 409);
+    assert.equal(
+      gone.body.error,
+      'The rate change was not saved. 1 rate changed or was removed after you loaded it. Reload the rates and review them again.',
+    );
+  });
+
+  test('refused for invalid entries: 400 with the message the body check gives, and nothing saved', async () => {
+    routeHarness.reply = refused(
+      [refusedRow(0, D1, 'conflict', [1600, true])],
+      [{ index: 1, id: D2, reason: 'invalid_rate' }],
+      [],
+    );
+    const rate = await patchRates(WEB_BODY);
+    assert.equal(rate.status, 400);
+    assert.deepEqual(rate.body, failureBody(`The rate for range ${D2} must be a number from 0 to ₦99,999,999.99.`, 'VALIDATION_ERROR', {
+      details: { invalid: [{ index: 1, id: D2, reason: 'invalid_rate' }] },
+    }));
+    assert.deepEqual(routeHarness.audits, []);
+
+    resetRoute();
+    routeHarness.reply = refused([], [{ index: 0, id: null, reason: 'not_an_object' }], []);
+    const shape = await patchRates(WEB_BODY);
+    assert.equal(shape.status, 400);
+    assert.equal(shape.body.error, 'Change 1 is not a valid rate change.');
+    assert.deepEqual(routeHarness.audits, []);
+  });
+
+  test('raised errors: a deactivated admin gets exactly the guard answer, and the count checks keep their messages', async () => {
+    resetRoute(null);
+    const signedOut = await patchRates(WEB_BODY);
+
+    resetRoute();
+    routeHarness.reply = raised('Not authorized');
+    const deactivated = await patchRates(WEB_BODY);
+    assert.equal(deactivated.status, 401);
+    assert.deepEqual(deactivated, signedOut);
+    assert.equal(routeHarness.rpcCalls.length, 1);
+    assert.deepEqual(routeHarness.audits, []);
+
+    const counts: ReadonlyArray<[string, string]> = [
+      ['No rate changes provided', 'No changes provided.'],
+      ['Too many rate changes', 'Save at most 500 rate changes at a time.'],
+    ];
+    for (const [error, message] of counts) {
+      resetRoute();
+      routeHarness.reply = raised(error);
+      const res = await patchRates(WEB_BODY);
+      assert.equal(res.status, 400, error);
+      assert.deepEqual(res.body, failureBody(message, 'VALIDATION_ERROR'), error);
+      assert.deepEqual(routeHarness.audits, [], error);
+    }
+  });
+
+  test('any other database error is a 500 that says nothing was saved, with one failure audit per change', async () => {
+    routeHarness.reply = raised('deadlock detected', '40P01');
+    const res = await patchRates({
+      changes: [
+        { id: D1, rate_naira: 1550, is_active: true, expected: { rate_naira: 1500, is_active: true } },
+        { id: D2, rate_naira: '1600' },
+      ],
+    });
+    assert.equal(res.status, 500);
+    assert.deepEqual(res.body, failureBody(NOT_SAVED, 'INTERNAL_ERROR'));
+    assert.deepEqual(routeHarness.audits, [
+      auditRow({ entity_id: D1, after_value: { rate_naira: 1550, is_active: true }, result: 'failure', error: 'deadlock detected' }),
+      auditRow({ entity_id: D2, after_value: { rate_naira: 1600 }, result: 'failure', error: 'deadlock detected' }),
+    ]);
+
+    resetRoute();
+    const schemaCache = 'Could not find the function public.admin_save_rates(p_admin_id, p_changes) in the schema cache';
+    routeHarness.reply = raised(schemaCache, 'PGRST202');
+    const missing = await patchRates({ changes: [{ id: D1, rate_naira: 1550 }] });
+    assert.equal(missing.status, 500);
+    assert.deepEqual(missing.body, failureBody(NOT_SAVED, 'INTERNAL_ERROR'));
+    assert.deepEqual(routeHarness.audits, [
+      auditRow({ entity_id: D1, after_value: { rate_naira: 1550 }, result: 'failure', error: schemaCache }),
+    ]);
+
+    resetRoute();
+    routeHarness.reply = raised('Not authorized for this');
+    assert.equal((await patchRates({ changes: [{ id: D1, rate_naira: 1550 }] })).status, 500);
+  });
+
+  test('a result in an unexpected shape is a 500 that claims nothing and writes no audit', async () => {
+    const shapes: unknown[] = [
+      null,
+      [],
+      { applied: 'yes', unchanged: [] },
+      { applied: true, saved: [D1], results: [] },
+      { applied: true, saved: [D1], unchanged: [] },
+      { applied: true, saved: [D1], unchanged: [], results: [{ index: 0, id: D1, status: 'written', before: {} }] },
+      { applied: true, saved: [D1], unchanged: [], results: [{ index: 0, id: D1, status: 'saved' }] },
+      { applied: true, saved: [7], unchanged: [], results: [] },
+      { applied: false, conflicts: [], invalid: [], unchanged: [] },
+      { applied: false, conflicts: [{ id: D1, status: 'stale' }], invalid: [], unchanged: [] },
+      { applied: false, conflicts: [], invalid: [{ index: '0', reason: 'invalid_rate' }], unchanged: [] },
+      { applied: false, conflicts: [refusedRow(0, D1, 'missing')], unchanged: [] },
+    ];
+    for (const data of shapes) {
+      resetRoute();
+      routeHarness.reply = { data, error: null };
+      const res = await patchRates(WEB_BODY);
+      assert.equal(res.status, 500, JSON.stringify(data));
+      assert.deepEqual(res.body, failureBody(UNCONFIRMED, 'INTERNAL_ERROR'), JSON.stringify(data));
+      assert.deepEqual(routeHarness.audits, [], JSON.stringify(data));
+    }
   });
 });

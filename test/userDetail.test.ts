@@ -324,6 +324,47 @@ describe('UserParts', () => {
     assert.equal(withClass(skeleton(['users.read']), 'div', 'pageHeaderAction').length, 1);
     assert.equal(freezer.match(/role="status">Loading user</g)?.length, 1);
   });
+
+  test('the loading header also keeps a place for Adjust wallet when the admin can adjust wallets', () => {
+    const skeleton = (permissions: string[]) => render(createElement(
+      perms.PermissionsProvider,
+      { permissions, isSuperAdmin: false },
+      createElement(parts.UserDetailSkeleton),
+    ));
+    assert.equal(withClass(skeleton(['users.read', 'wallets.adjust']), 'div', 'pageHeaderAction').length, 2);
+    assert.equal(withClass(skeleton(['users.read', 'users.freeze', 'wallets.adjust']), 'div', 'pageHeaderAction').length, 3);
+  });
+
+  test('the Adjust wallet button sits in the header for admins who can adjust and accounts not being deleted', () => {
+    const base = profile();
+    const header = (user: ProfileData['user'], permissions: string[]) => render(createElement(
+      perms.PermissionsProvider,
+      { permissions, isSuperAdmin: false },
+      createElement(parts.AdjustWalletButton, { user, onOpen: () => {} }),
+    ));
+    const shown = header(base.user, ['users.read', 'wallets.adjust']);
+    assert.match(textOf(shown), /Adjust wallet/);
+    assert.deepEqual(classesOf(tagsOf(shown, 'button')[0]), ['btn', 'secondary', 'sm']);
+    assert.equal(header(base.user, ['users.read', 'users.freeze']), '');
+    assert.equal(header({ ...base.user, deleted_at: '2026-09-30T08:00:00.000Z' }, ['users.read', 'wallets.adjust']), '');
+    assert.match(textOf(header({ ...base.user, is_frozen: true }, ['users.read', 'wallets.adjust'])), /Adjust wallet/);
+  });
+});
+
+describe('wallet adjustments on the user page', () => {
+  test('only accounts that are not being deleted can be adjusted', () => {
+    const user = { deleted_at: null, is_frozen: false, is_active: true };
+    assert.equal(model.canAdjustWallet(user), true);
+    assert.equal(model.canAdjustWallet({ ...user, is_frozen: true }), true);
+    assert.equal(model.canAdjustWallet({ ...user, is_active: false }), true);
+    assert.equal(model.canAdjustWallet({ ...user, deleted_at: '2026-09-30T08:00:00.000Z' }), false);
+  });
+
+  test('the transactions section names the adjustment types', () => {
+    assert.equal(model.typeLabel('wallet_credit'), 'Wallet credit');
+    assert.equal(model.typeLabel('wallet_debit'), 'Wallet debit');
+    assert.equal(model.typeLabel('giftcard_credit'), 'Gift card credit');
+  });
 });
 
 describe('section requests and the tab link', () => {

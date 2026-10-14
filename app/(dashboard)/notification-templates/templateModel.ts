@@ -78,6 +78,7 @@ export const VARIABLE_INFO: Readonly<Record<string, VariableInfo>> = {
   provider: { sample: 'MTN', hint: 'Bill provider' },
   type: { sample: 'airtime', hint: 'Bill type: airtime, data, cable or electricity' },
   hours: { sample: '24', hint: 'Hours withdrawals stay paused after a PIN reset' },
+  note: { sample: 'Balance adjustment by CardElite support.', hint: 'Short message the admin chose for the user' },
   sender_username: { sample: 'john', hint: 'Username of the sender' },
   first_name: { sample: 'Ada', hint: 'First name, or nothing when the user has no name on file' },
   device_model: { sample: 'iPhone 14', hint: 'Device model' },

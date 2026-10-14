@@ -1,5 +1,9 @@
-import { afterEach, before, describe, test } from 'node:test';
+import { afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { createElement, type ElementType } from 'react';
 import { classesOf, loadAppModule, render, tagsOf, textOf } from './support/uiHarness.ts';
 import type { ApiFailure, ApiResult } from '../app/lib/apiClient.ts';
@@ -207,45 +211,6 @@ describe('cards catalog rules: reorder requests', () => {
     assert.equal(rules.readReorderIds(Array.from({ length: 201 }, () => ID.amazon)).ok, false);
     assert.equal(rules.readReorderIds([ID.amazon, ID.amazon.toUpperCase()]).ok, false);
     assert.deepEqual(rules.readReorderIds([ID.apple.toUpperCase(), ID.amazon]), { ok: true, ids: [ID.apple, ID.amazon] });
-  });
-
-  test('a plan writes only the brands whose position changes', () => {
-    const rows = [
-      { id: ID.amazon, sort_order: 0 },
-      { id: ID.apple, sort_order: 1 },
-      { id: ID.steam, sort_order: 2 },
-    ];
-    const plan = rules.planReorder(rows, [ID.apple, ID.amazon, ID.steam]);
-    assert.deepEqual(plan.steps, [
-      { id: ID.apple, from: 1, to: 0 },
-      { id: ID.amazon, from: 0, to: 1 },
-    ]);
-    assert.deepEqual(plan.missing, []);
-    assert.deepEqual(plan.extra, []);
-  });
-
-  test('a plan renumbers brands that shared a position', () => {
-    const rows = [
-      { id: ID.amazon, sort_order: 0 },
-      { id: ID.apple, sort_order: 0 },
-      { id: ID.steam, sort_order: null },
-    ];
-    const plan = rules.planReorder(rows, [ID.amazon, ID.apple, ID.steam]);
-    assert.deepEqual(plan.steps, [
-      { id: ID.apple, from: 0, to: 1 },
-      { id: ID.steam, from: null, to: 2 },
-    ]);
-  });
-
-  test('a plan reports brands that were added or are unknown since the list was loaded', () => {
-    const rows = [
-      { id: ID.amazon, sort_order: 0 },
-      { id: ID.apple, sort_order: 1 },
-      { id: ID.steam.toUpperCase(), sort_order: 2 },
-    ];
-    const plan = rules.planReorder(rows, [ID.apple, ID.amazon, ID.sephora]);
-    assert.deepEqual(plan.missing, [ID.sephora]);
-    assert.deepEqual(plan.extra, [ID.steam]);
   });
 });
 
@@ -585,5 +550,379 @@ describe('cards catalog parts', () => {
       card: { countries: [country(COUNTRY_ID.us, 'US', 'United States'), country(COUNTRY_ID.gb, 'GB', 'United Kingdom', false)] },
     }));
     assert.equal(textOf(html), '2 countries · 1 unavailable United Kingdom, United States');
+  });
+});
+
+const ROUTE_STATE = '__cardsCatalogRouteTest';
+const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
+const IMPORTS = /^((?:import|export)\b[^;'"]*?\bfrom\s*|import\s*)['"]([^'"]+)['"]/gm;
+const REQUEST_ID = 'req_cardsroute01';
+const USER_AGENT = 'cards-route-test';
+const CLIENT_IP = '198.51.100.24';
+const AUDIT_DOWN = 'audit store unavailable';
+const ORDER_CHANGED = 'The brand list has changed since you loaded it. Reload and try again.';
+const NOT_SAVED = 'The new order could not be saved.';
+
+interface RouteClaims {
+  admin_id: string;
+  username: string;
+  role_title: string;
+  is_super_admin: boolean;
+  page_permissions: string[];
+  token_version: number;
+}
+
+interface RpcError {
+  code: string;
+  message: string;
+  details: string | null;
+  hint: string | null;
+}
+
+interface RpcReply {
+  data: unknown;
+  error: RpcError | null;
+}
+
+interface AuditInsert {
+  data: null;
+  error: { message: string } | null;
+}
+
+interface RouteState {
+  claims: RouteClaims | null;
+  reply: RpcReply;
+  calls: Array<{ name: string; params: unknown }>;
+  tables: string[];
+  audits: Array<Record<string, unknown>>;
+  auditError: string | null;
+  from: (table: string) => { insert: (row: Record<string, unknown>) => Promise<AuditInsert> };
+  rpc: (name: string, params: unknown) => Promise<RpcReply>;
+}
+
+interface CardsRoute {
+  PATCH: (req: Request) => Promise<Response>;
+}
+
+interface Reply {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+const OWNER: RouteClaims = {
+  admin_id: '5f0c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f',
+  username: 'owner',
+  role_title: 'Super Admin',
+  is_super_admin: true,
+  page_permissions: [],
+  token_version: 0,
+};
+
+const route: RouteState = {
+  claims: OWNER,
+  reply: { data: null, error: null },
+  calls: [],
+  tables: [],
+  audits: [],
+  auditError: null,
+  from(table) {
+    route.tables.push(table);
+    if (table !== 'audit_log') throw new Error(`the reorder must not touch ${table} directly`);
+    return {
+      insert: async (row) => {
+        if (route.auditError) return { data: null, error: { message: route.auditError } };
+        route.audits.push(row);
+        return { data: null, error: null };
+      },
+    };
+  },
+  async rpc(name, params) {
+    route.calls.push({ name, params });
+    return route.reply;
+  },
+};
+(globalThis as unknown as Record<string, unknown>)[ROUTE_STATE] = route;
+
+const moduleUrl = (source: string) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const stateRef = `const state = () => globalThis.${ROUTE_STATE};`;
+
+const FILE_STUBS: Readonly<Record<string, string>> = {
+  [resolve(APP_DIR, 'lib', 'supabase.ts')]: moduleUrl(`${stateRef}
+export const supabaseAdmin = {
+  from: (table) => state().from(table),
+  rpc: (name, params) => state().rpc(name, params),
+};`),
+  [resolve(APP_DIR, 'lib', 'jwt.ts')]: moduleUrl(`${stateRef}
+export async function verifyAdminFromRequest() { return state().claims; }`),
+};
+
+const PACKAGE_STUBS: Readonly<Record<string, string>> = {
+  'next/headers': moduleUrl(`
+export async function headers() {
+  return new Headers({ 'x-request-id': '${REQUEST_ID}', 'user-agent': '${USER_AGENT}', 'x-forwarded-for': '${CLIENT_IP}' });
+}
+export async function cookies() { return { get: () => undefined }; }`),
+  'next/server': moduleUrl('export const NextResponse = { json: (body, init) => Response.json(body, init) };'),
+};
+
+const routeBundles = new Map<string, Promise<string>>();
+
+function resolveImport(fromFile: string, specifier: string): string {
+  const base = resolve(dirname(fromFile), specifier);
+  const found = [base, `${base}.ts`, `${base}.tsx`, resolve(base, 'index.ts')]
+    .find((candidate) => /\.tsx?$/.test(candidate) && existsSync(candidate));
+  if (!found) throw new Error(`${fromFile} imports ${specifier}, which does not resolve to a .ts file`);
+  return found;
+}
+
+async function compileRoute(file: string): Promise<string> {
+  const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
+    fileName: file,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  });
+  const targets = new Map<string, string>();
+  for (const [, , specifier] of outputText.matchAll(IMPORTS)) {
+    if (targets.has(specifier)) continue;
+    if (specifier.startsWith('.')) {
+      const target = resolveImport(file, specifier);
+      targets.set(specifier, FILE_STUBS[target] ?? (await bundleRoute(target)));
+    } else if (PACKAGE_STUBS[specifier]) {
+      targets.set(specifier, PACKAGE_STUBS[specifier]);
+    } else {
+      throw new Error(`${file} imports ${specifier}, which this test does not provide`);
+    }
+  }
+  return moduleUrl(outputText.replace(IMPORTS, (match, head: string, specifier: string) => {
+    const target = targets.get(specifier);
+    return target ? `${head}'${target}'` : match;
+  }));
+}
+
+function bundleRoute(file: string): Promise<string> {
+  let pending = routeBundles.get(file);
+  if (!pending) {
+    pending = compileRoute(file);
+    routeBundles.set(file, pending);
+  }
+  return pending;
+}
+
+function rpcError(message: string, code = 'P0001'): RpcError {
+  return { code, message, details: null, hint: null };
+}
+
+function failureBody(message: string, code: string, details?: unknown): Record<string, unknown> {
+  return {
+    success: false,
+    error: message,
+    code,
+    message,
+    request_id: REQUEST_ID,
+    ...(details === undefined ? {} : { details }),
+  };
+}
+
+function auditRow(fields: {
+  entity_id: string | null;
+  before_value: unknown;
+  after_value: unknown;
+  result: string;
+  error?: string;
+}): Record<string, unknown> {
+  return {
+    admin_id: OWNER.admin_id,
+    user_id: null,
+    action: 'REORDER_CARDS',
+    entity: 'cards',
+    entity_id: fields.entity_id,
+    before_value: fields.before_value,
+    after_value: fields.after_value,
+    ip_address: CLIENT_IP,
+    admin_role: OWNER.role_title,
+    user_agent: USER_AGENT,
+    request_id: REQUEST_ID,
+    reason: null,
+    result: fields.result,
+    error: fields.error ?? null,
+    sensitivity: 'normal',
+  };
+}
+
+describe('cards route: reorder through admin_reorder_cards', () => {
+  let cardsRoute: CardsRoute;
+
+  before(async () => {
+    cardsRoute = (await import(await bundleRoute(resolve(APP_DIR, 'api', 'cards', 'route.ts')))) as CardsRoute;
+  });
+
+  beforeEach(() => {
+    route.claims = OWNER;
+    route.reply = { data: null, error: null };
+    route.calls = [];
+    route.tables = [];
+    route.audits = [];
+    route.auditError = null;
+    mock.method(console, 'error', () => {});
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  async function reorder(body: unknown): Promise<Reply> {
+    const response = await cardsRoute.PATCH(new Request('http://admin.test/api/cards', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }));
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  function applied(positions: Array<{ id: string; from: number | null; to: number }>) {
+    return {
+      data: {
+        applied: true,
+        changed: positions.length > 0,
+        order: [ID.apple, ID.amazon, ID.steam],
+        before: [ID.amazon, ID.apple, ID.steam],
+        positions,
+      },
+      error: null,
+    };
+  }
+
+  test('the function gets the admin and the validated ids, with every parameter present', async () => {
+    route.reply = applied([]);
+    await reorder({ type: 'reorder', ids: [ID.apple.toUpperCase(), ` ${ID.amazon} `, ID.steam] });
+    assert.equal(route.calls.length, 1);
+    assert.equal(route.calls[0].name, 'admin_reorder_cards');
+    assert.deepEqual(route.calls[0].params, { p_admin_id: OWNER.admin_id, p_ids: [ID.apple, ID.amazon, ID.steam] });
+  });
+
+  test('a saved order returns each moved brand with its new position and is audited from and to', async () => {
+    route.reply = applied([{ id: ID.apple, from: 1, to: 0 }, { id: ID.amazon, from: null, to: 1 }]);
+    const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.steam], moved: ID.apple.toUpperCase() });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, {
+      success: true,
+      request_id: REQUEST_ID,
+      changed: true,
+      positions: [{ id: ID.apple, sort_order: 0 }, { id: ID.amazon, sort_order: 1 }],
+      audit_recorded: true,
+    });
+    assert.deepEqual(route.audits, [auditRow({
+      entity_id: ID.apple,
+      before_value: { positions: [{ id: ID.apple, sort_order: 1 }, { id: ID.amazon, sort_order: null }] },
+      after_value: { positions: [{ id: ID.apple, sort_order: 0 }, { id: ID.amazon, sort_order: 1 }] },
+      result: 'success',
+    })]);
+    assert.deepEqual(route.tables, ['audit_log']);
+  });
+
+  test('the audit names the moved brand only when it is part of the new order', async () => {
+    route.reply = applied([{ id: ID.apple, from: 1, to: 0 }]);
+    await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.steam], moved: ID.sephora });
+    await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.steam], moved: 'not-an-id' });
+    await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.steam] });
+    assert.deepEqual(route.audits.map((row) => row.entity_id), [null, null, null]);
+  });
+
+  test('a saved order whose audit cannot be written still succeeds, with a warning', async () => {
+    route.reply = applied([{ id: ID.apple, from: 1, to: 0 }]);
+    route.auditError = AUDIT_DOWN;
+    const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.steam] });
+    assert.equal(reply.status, 200);
+    assert.equal(reply.body.changed, true);
+    assert.equal(reply.body.audit_recorded, false);
+    assert.equal(reply.body.warning, 'The change was saved, but it could not be written to the audit log.');
+  });
+
+  test('an order that is already in place reports no change and writes no audit', async () => {
+    route.reply = applied([]);
+    const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.steam] });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body, { success: true, request_id: REQUEST_ID, changed: false, positions: [] });
+    assert.deepEqual(route.audits, []);
+    assert.deepEqual(route.tables, []);
+  });
+
+  test('a brand list that changed since it was loaded is a conflict naming the missing and extra brands', async () => {
+    route.reply = {
+      data: { applied: false, reason: 'mismatch', missing: [ID.sephora], extra: [ID.steam] },
+      error: null,
+    };
+    const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon, ID.sephora] });
+    assert.equal(reply.status, 409);
+    assert.deepEqual(reply.body, failureBody(ORDER_CHANGED, 'STATE_CONFLICT', { missing: [ID.sephora], extra: [ID.steam] }));
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('the other refusals are validation errors worded like the request checks', async () => {
+    const cases: Array<[string, string]> = [
+      ['empty', 'Send every brand id in its new order.'],
+      ['too_many', `At most ${rules.REORDER_MAX} brands can be ordered at once.`],
+      ['duplicate', 'A brand appears more than once in the new order.'],
+    ];
+    for (const [reason, message] of cases) {
+      route.reply = { data: { applied: false, reason, missing: [], extra: [] }, error: null };
+      const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon] });
+      assert.equal(reply.status, 400, reason);
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR'), reason);
+    }
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('an admin deactivated after the guard gets the same answer as the guard gives a deactivated admin', async () => {
+    route.claims = null;
+    const guarded = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon] });
+    assert.deepEqual(route.calls, []);
+    route.claims = OWNER;
+    route.reply = { data: null, error: rpcError('Not authorized') };
+    const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon] });
+    assert.equal(reply.status, 401);
+    assert.deepEqual(reply, guarded);
+    assert.deepEqual(reply.body, failureBody('Your session has expired. Sign in again.', 'AUTH_REQUIRED'));
+    assert.deepEqual(route.audits, []);
+  });
+
+  test('any other database error saves nothing, says so, and is audited as a failure', async () => {
+    route.reply = { data: null, error: rpcError('canceling statement due to lock timeout', '55P03') };
+    const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon], moved: ID.amazon });
+    assert.equal(reply.status, 500);
+    assert.deepEqual(reply.body, failureBody(NOT_SAVED, 'INTERNAL_ERROR'));
+    assert.deepEqual(route.audits, [auditRow({
+      entity_id: ID.amazon,
+      before_value: null,
+      after_value: { order: [ID.apple, ID.amazon] },
+      result: 'failure',
+      error: 'canceling statement due to lock timeout',
+    })]);
+  });
+
+  test('a result the route does not recognise is treated as a failure', async () => {
+    for (const data of [null, { applied: 'yes' }, { applied: true, changed: true, positions: [{ id: ID.apple }] }]) {
+      route.audits = [];
+      route.reply = { data, error: null };
+      const reply = await reorder({ type: 'reorder', ids: [ID.apple, ID.amazon] });
+      assert.equal(reply.status, 500);
+      assert.deepEqual(reply.body, failureBody(NOT_SAVED, 'INTERNAL_ERROR'));
+      assert.equal(route.audits.length, 1);
+      assert.equal(route.audits[0].result, 'failure');
+      assert.equal(route.audits[0].error, 'admin_reorder_cards returned an unexpected result.');
+    }
+  });
+
+  test('requests the route refuses up front never reach the database', async () => {
+    const cases: Array<[unknown, string]> = [
+      [[], 'Send every brand id in its new order.'],
+      [['nope'], 'Every brand id in the new order must be a valid id.'],
+      [[ID.apple, ID.apple.toUpperCase()], 'A brand appears more than once in the new order.'],
+    ];
+    for (const [ids, message] of cases) {
+      const reply = await reorder({ type: 'reorder', ids });
+      assert.equal(reply.status, 400);
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR'));
+    }
+    assert.deepEqual(route.calls, []);
   });
 });

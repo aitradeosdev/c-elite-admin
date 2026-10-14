@@ -9,7 +9,7 @@ import {
   parseTypeFilter, planFlagSearch, presentTransaction, presentWithdrawal, userMatchClause,
   type FlagSearch, type FlagSortKey, type FlagStatus, type OtherFlag, type Reviewer, type StatusCounts,
   type TransactionSummary, type WithdrawalSummary,
-} from '../../(dashboard)/flagged-transactions/model';
+} from '../../lib/flags';
 
 const LIST_COLUMNS =
   'id, user_id, transaction_id, transaction_type, amount, flag_reason, status, reviewed_by, reviewed_at, created_at, users(username, full_name, email)';

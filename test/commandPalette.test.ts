@@ -46,7 +46,6 @@ function action(id: string, label: string, extra: Partial<PaletteCommand> = {}):
 const PAGES: PaletteCommand[] = [
   page('dashboard', 'Dashboard', { subtitle: 'Operations', keywords: ['Operations'] }),
   page('withdrawals', 'Withdrawals', { subtitle: 'Operations', keywords: ['Operations'] }),
-  page('flagged-transactions', 'Flagged', { subtitle: 'Operations', keywords: ['Operations'] }),
   page('users', 'Users', { subtitle: 'People', keywords: ['People'] }),
   page('security-limits', 'Rate Limits & IPs', { subtitle: 'Security', keywords: ['Security'] }),
   page('limits-fees', 'Limits & Fees', { subtitle: 'Configuration', keywords: ['Configuration'] }),
@@ -488,6 +487,30 @@ describe('recents', () => {
     ]);
   });
 
+  test('drops records of a kind the palette no longer searches, such as the retired flags group', () => {
+    const user = { href: '/users/u1', title: 'Joan Obi', subtitle: '@joan', kind: 'users' };
+    const stored = JSON.stringify([
+      { href: '/flagged-transactions?id=f1', title: 'Withdrawal flag · ₦500,000.00', subtitle: '@ada', kind: 'flags' },
+      user,
+      { href: '/mystery?id=m1', title: 'Mystery', subtitle: null, kind: 'mystery' },
+    ]);
+    assert.deepEqual(palette.parseRecents(stored), [user]);
+
+    const storage = new MemoryStorage();
+    const key = palette.recentStorageKey('ada');
+    storage.setItem(key, stored);
+    const loaded = palette.loadRecents(key, storage);
+    assert.deepEqual(loaded, [user]);
+    const shown = sections('', { recents: loaded, recordKinds: null })[0];
+    assert.equal(shown.label, 'Recent');
+    assert.deepEqual(shown.options.map((option) => option.href), ['/users/u1']);
+
+    palette.saveRecent(key, recent('/coupons', 'Coupons'), storage);
+    const rewritten = storage.getItem(key) ?? '';
+    assert.ok(!rewritten.includes('flagged-transactions'), rewritten);
+    assert.deepEqual(palette.loadRecents(key, storage).map((r) => r.href), ['/coupons', '/users/u1']);
+  });
+
   test('keeps at most five, newest first, without duplicates', () => {
     const many = JSON.stringify(Array.from({ length: 9 }, (_, i) => recent(`/p${i}`)));
     assert.equal(palette.parseRecents(many).length, palette.PALETTE_RECENT_LIMIT);
@@ -588,6 +611,20 @@ describe('buildPaletteSections', () => {
     assert.deepEqual(result[1].options[0].recent, {
       href: '/withdrawals?id=w1', title: '₦50,000.00 to •••• 1234', subtitle: 'Joan Obi', kind: 'withdrawals',
     });
+  });
+
+  test('a result from a group the palette does not know still opens but is never remembered as a recent', () => {
+    const stale: PaletteSearchGroup = {
+      key: 'flags',
+      label: 'Flagged transactions',
+      moreHref: null,
+      items: [{ id: 'f1', title: 'Withdrawal flag', subtitle: '@ada', meta: null, status: 'pending_review', href: '/withdrawals?id=w1' }],
+    };
+    const result = sections('jo', { groups: [stale, GROUPS[0]] });
+    const flagged = result.find((s) => s.label === 'Flagged transactions');
+    assert.equal(flagged?.options[0].href, '/withdrawals?id=w1');
+    assert.equal(flagged?.options[0].recent, null);
+    assert.equal(result.find((s) => s.label === 'Users')?.options[0].recent?.kind, 'users');
   });
 
   test('local matches come before search groups so late results never move the highlight', () => {
@@ -692,11 +729,11 @@ describe('palette copy', () => {
 
   test('partial results name the groups that failed, never the reason', () => {
     assert.equal(
-      palette.partialSearchDetail(['withdrawals', 'coupons', 'flags']),
-      'Withdrawals, Coupons and Flagged transactions could not be searched. Try again in a moment.',
+      palette.partialSearchDetail(['withdrawals', 'coupons', 'card_submissions']),
+      'Withdrawals, Coupons and Card submissions could not be searched. Try again in a moment.',
     );
     assert.equal(palette.partialSearchDetail(['transactions']), 'Transactions could not be searched. Try again in a moment.');
-    assert.equal(palette.partialSearchDetail(['mystery']), 'Try again in a moment.');
+    assert.equal(palette.partialSearchDetail(['mystery', 'flags']), 'Try again in a moment.');
   });
 
   test('status announcements wait for results and say what happened', () => {

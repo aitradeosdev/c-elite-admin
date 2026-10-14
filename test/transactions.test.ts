@@ -79,6 +79,24 @@ describe('filter tokens', () => {
   });
 });
 
+describe('wallet adjustment types', () => {
+  test('are labelled in the explorer', () => {
+    assert.equal(model.typeLabel('wallet_credit'), 'Wallet credit');
+    assert.equal(model.typeLabel('wallet_debit'), 'Wallet debit');
+  });
+
+  test('can be filtered together or one at a time', () => {
+    const group = model.TYPE_GROUPS.find((entry) => entry.label === 'Wallet adjustments');
+    assert.ok(group);
+    assert.deepEqual(group.options, [
+      { value: 'wallet_credit,wallet_debit', label: 'All wallet adjustments' },
+      { value: 'wallet_credit', label: 'Wallet credits' },
+      { value: 'wallet_debit', label: 'Wallet debits' },
+    ]);
+    assert.equal(model.isKnownType(model.normalizeTokens('wallet_debit,wallet_credit')), true);
+  });
+});
+
 describe('list and export queries', () => {
   test('the list query carries every filter, the sort and the page', () => {
     assert.equal(
@@ -232,6 +250,12 @@ describe('related links', () => {
       { href: `/card-queue?id=${WITHDRAWAL_ID}`, label: 'Open card submission' },
     );
     assert.equal(model.relatedLink({ ...TX, type: 'airtime' }, ALL), null);
+  });
+
+  test('wallet adjustments have no related link, even with an id reference and every permission', () => {
+    for (const type of ['wallet_credit', 'wallet_debit']) {
+      assert.equal(model.relatedLink({ ...TX, type, reference_id: WITHDRAWAL_ID }, ALL), null, type);
+    }
   });
 
   test('need a real id as the reference and lower-case it', () => {

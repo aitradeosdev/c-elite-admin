@@ -118,27 +118,15 @@ export interface ConfigConflict {
 }
 
 export interface ConfigWritePlan {
-  updates: Record<string, string>;
+  changes: Record<string, string>;
+  expected: Record<string, string> | null;
   unchanged: string[];
-  before: Record<string, string | null>;
-  after: Record<string, string>;
-  entityId: string;
-  sensitivity: ConfigSensitivity;
 }
-
-export type ConfigWritePlanResult =
-  | { ok: true; plan: ConfigWritePlan }
-  | { ok: false; message: string; conflicts: ConfigConflict[] };
 
 export type CurrentConfig = Readonly<Record<string, string | null>>;
 
 function currentOf(current: CurrentConfig, key: string): string | null | undefined {
   return owns(current, key) ? current[key] : undefined;
-}
-
-function alreadyStored(key: string, current: string | null | undefined, next: string): boolean {
-  if (typeof current !== 'string') return false;
-  return isSettingKey(key) ? sameSettingValue(key, current, next) : current === next;
 }
 
 function joinLabels(labels: readonly string[]): string {
@@ -157,42 +145,19 @@ export function sensitivityFor(keys: readonly string[]): ConfigSensitivity {
   return 'normal';
 }
 
-export function planConfigWrite(patch: ConfigPatch, current: CurrentConfig): ConfigWritePlanResult {
-  const updates: Record<string, string> = {};
+export function planConfigWrite(patch: ConfigPatch, current: CurrentConfig): ConfigWritePlan {
+  const changes: Record<string, string> = {};
+  const expected: Record<string, string> = {};
   const unchanged: string[] = [];
   for (const [key, next] of Object.entries(patch.changes)) {
-    if (alreadyStored(key, currentOf(current, key), next)) unchanged.push(key);
-    else updates[key] = next;
+    const stored = currentOf(current, key);
+    if (isSettingKey(key) && typeof stored === 'string' && sameSettingValue(key, stored, next)) {
+      unchanged.push(key);
+      expected[key] = stored;
+      continue;
+    }
+    changes[key] = next;
+    if (patch.expected && owns(patch.expected, key)) expected[key] = patch.expected[key];
   }
-
-  const keys = Object.keys(updates);
-  const expected = patch.expected;
-  const conflicted = expected
-    ? keys.filter((key) => owns(expected, key) && (currentOf(current, key) ?? '') !== expected[key])
-    : [];
-  if (conflicted.length > 0) {
-    return {
-      ok: false,
-      message: conflictMessage(conflicted),
-      conflicts: conflicted.map((key) => ({ key, label: configLabel(key), current: currentOf(current, key) ?? null })),
-    };
-  }
-
-  const before: Record<string, string | null> = {};
-  const after: Record<string, string> = {};
-  for (const key of keys) {
-    before[key] = currentOf(current, key) ?? null;
-    after[key] = updates[key];
-  }
-  return {
-    ok: true,
-    plan: {
-      updates,
-      unchanged,
-      before,
-      after,
-      entityId: keys.length === 1 ? keys[0] : 'batch',
-      sensitivity: sensitivityFor(keys),
-    },
-  };
+  return { changes, expected: Object.keys(expected).length > 0 ? expected : null, unchanged };
 }

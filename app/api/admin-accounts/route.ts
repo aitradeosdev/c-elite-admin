@@ -23,6 +23,9 @@ const ENTITY = 'admin_users';
 const BCRYPT_ROUNDS = 12;
 const EDIT_ATTEMPTS = 3;
 const UNIQUE_VIOLATION = '23505';
+const LAST_SUPER_ADMIN = 'At least one active super admin is required';
+const LAST_SUPER_ADMIN_DEACTIVATE = 'Cannot deactivate the last active super admin.';
+const LAST_SUPER_ADMIN_DELETE = 'Cannot delete the last active super admin.';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
 
 type Body = Record<string, unknown>;
@@ -33,6 +36,76 @@ interface AdminRecord extends AdminState {
 }
 
 type StateRead = { ok: true; state: AdminRecord | null } | { ok: false };
+
+interface SecurityStatus {
+  mfa_status: 'none' | 'pending' | 'active' | null;
+  mfa_confirmed_at: string | null;
+  mfa_locked_until: string | null;
+  mfa_last_used_at: string | null;
+  recovery_codes_left: number | null;
+  live_sessions: number | null;
+  last_seen_at: string | null;
+}
+
+const NO_SECURITY_STATUS: Readonly<SecurityStatus> = Object.freeze({
+  mfa_status: null,
+  mfa_confirmed_at: null,
+  mfa_locked_until: null,
+  mfa_last_used_at: null,
+  recovery_codes_left: null,
+  live_sessions: null,
+  last_seen_at: null,
+});
+
+function timeOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function countOf(value: unknown): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+function securityStatus(raw: Record<string, unknown>): SecurityStatus {
+  return {
+    mfa_status: raw.mfa_status === 'active' || raw.mfa_status === 'pending' ? raw.mfa_status : 'none',
+    mfa_confirmed_at: timeOrNull(raw.mfa_confirmed_at),
+    mfa_locked_until: timeOrNull(raw.mfa_locked_until),
+    mfa_last_used_at: timeOrNull(raw.mfa_last_used_at),
+    recovery_codes_left: countOf(raw.recovery_codes_left),
+    live_sessions: countOf(raw.live_sessions),
+    last_seen_at: timeOrNull(raw.last_seen_at),
+  };
+}
+
+async function readSecurityOverview(): Promise<Map<string, SecurityStatus> | null> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('admin_security_overview');
+    if (error) {
+      console.error('admin security overview read:', error.message);
+      return null;
+    }
+    if (!Array.isArray(data)) {
+      console.error('admin security overview read:', 'no rows were returned');
+      return null;
+    }
+    const overview = new Map<string, SecurityStatus>();
+    for (const row of data as unknown[]) {
+      if (!row || typeof row !== 'object') continue;
+      const record = row as Record<string, unknown>;
+      if (isUuid(record.admin_id)) overview.set(record.admin_id.toLowerCase(), securityStatus(record));
+    }
+    return overview;
+  } catch (error) {
+    console.error('admin security overview read:', error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+
+function withSecurityStatus(row: Record<string, unknown>, overview: Map<string, SecurityStatus> | null) {
+  const id = typeof row.id === 'string' ? row.id.toLowerCase() : '';
+  return { ...row, ...(overview?.get(id) ?? NO_SECURITY_STATUS) };
+}
 
 function publicAdmin(row: AdminRecord) {
   return {
@@ -79,17 +152,30 @@ function auditFields(recorded: boolean) {
 export async function GET() {
   const guard = await requireSuperAdmin();
   if (!guard.ok) return guard.response;
+  const { admin } = guard;
 
-  const { data, error } = await supabaseAdmin
-    .from('admin_users')
-    .select(ADMIN_COLUMNS)
-    .order('created_at', { ascending: true });
+  const [listed, overview] = await Promise.all([
+    supabaseAdmin.from('admin_users').select(ADMIN_COLUMNS).order('created_at', { ascending: true }),
+    readSecurityOverview(),
+  ]);
+  const { data, error } = listed;
 
   if (error) {
     console.error('admin accounts list:', error.message);
     return fail('INTERNAL_ERROR', 'Admin accounts could not be loaded.');
   }
-  return ok({ admins: data ?? [], current_admin_id: guard.admin.admin_id });
+  const rows = (data ?? []) as Record<string, unknown>[];
+  return ok({
+    admins: rows.map((row) => withSecurityStatus(row, overview)),
+    current_admin_id: admin.admin_id,
+    security: {
+      mfa_mode: admin.policy.mode,
+      mfa_grace_ends_at: admin.policy.graceEndsAt,
+      mfa_required_now: admin.policy.requiredNow,
+      actor_mfa_status: admin.mfa.status,
+      status_loaded: overview !== null,
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -188,7 +274,7 @@ export async function PATCH(req: NextRequest) {
         console.error('admin account super admin count:', countError.message);
         return fail('INTERNAL_ERROR', 'The remaining super admins could not be counted, so nothing was changed.');
       }
-      if ((count ?? 0) <= 1) return fail('STATE_CONFLICT', 'Cannot deactivate the last active super admin.');
+      if ((count ?? 0) <= 1) return fail('STATE_CONFLICT', LAST_SUPER_ADMIN_DEACTIVATE);
     }
 
     if (plan.password !== null && passwordHash === null) {
@@ -217,9 +303,12 @@ export async function PATCH(req: NextRequest) {
     };
 
     if (error) {
-      console.error('admin account update:', error.message);
+      const lastSuperAdmin = error.message === LAST_SUPER_ADMIN;
+      if (!lastSuperAdmin) console.error('admin account update:', error.message);
       await writeAudit({ ...audit, result: 'failure', error: error.message });
-      return fail('INTERNAL_ERROR', 'The admin account could not be updated.');
+      return lastSuperAdmin
+        ? fail('STATE_CONFLICT', LAST_SUPER_ADMIN_DEACTIVATE)
+        : fail('INTERNAL_ERROR', 'The admin account could not be updated.');
     }
 
     const rows = (data ?? []) as unknown as AdminRecord[];
@@ -277,9 +366,12 @@ export async function DELETE(req: NextRequest) {
     .select(ADMIN_COLUMNS);
 
   if (error) {
-    console.error('admin account delete:', error.message);
+    const lastSuperAdmin = error.message === LAST_SUPER_ADMIN;
+    if (!lastSuperAdmin) console.error('admin account delete:', error.message);
     await writeAudit({ ...audit, result: 'failure', error: error.message });
-    return fail('INTERNAL_ERROR', 'The admin account could not be deleted.');
+    return lastSuperAdmin
+      ? fail('STATE_CONFLICT', LAST_SUPER_ADMIN_DELETE)
+      : fail('INTERNAL_ERROR', 'The admin account could not be deleted.');
   }
 
   const rows = (data ?? []) as unknown as AdminRecord[];

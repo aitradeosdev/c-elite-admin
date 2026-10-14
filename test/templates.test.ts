@@ -1,6 +1,6 @@
 import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement, type ElementType, type ReactElement } from 'react';
@@ -37,6 +37,7 @@ const NOTIFICATION_DIR = fileURLToPath(new URL('../app/(dashboard)/notification-
 const EMAIL_DIR = fileURLToPath(new URL('../app/(dashboard)/email-templates/', import.meta.url));
 const NOTIFICATION_ROUTE = fileURLToPath(new URL('../app/api/notification-templates/route.ts', import.meta.url));
 const EMAIL_ROUTE = fileURLToPath(new URL('../app/api/email-templates/route.ts', import.meta.url));
+const SCHEMA_FILE = fileURLToPath(new URL('../../schema.sql', import.meta.url));
 
 const CARD_VARIABLES = ['symbol', 'amount_foreign', 'card_name', 'type_parens', 'credit'];
 const CARD_BODY = '{symbol}{amount_foreign} {card_name}{type_parens} approved — ₦{credit} credited to your wallet';
@@ -425,7 +426,7 @@ describe('client model', () => {
 
   test('every seeded variable has a sample and a hint', () => {
     const seeded = [
-      ...CARD_VARIABLES, 'card_label', 'reason', 'amount', 'bank_name', 'account_last4', 'provider', 'type', 'hours',
+      ...CARD_VARIABLES, 'card_label', 'reason', 'amount', 'bank_name', 'account_last4', 'provider', 'type', 'hours', 'note',
       ...DEVICE_ROW.variables, 'severity_upper', 'severity_color', 'alert_type', 'alert_subject', 'detail_json', 'fired_at',
     ];
     for (const name of seeded) {
@@ -433,6 +434,20 @@ describe('client model', () => {
       assert.notEqual(model.defaultSample(name), `[${name}]`, name);
     }
     assert.equal(model.defaultSample('mystery'), '[mystery]');
+  });
+
+  test('every variable the canonical template seeds declare has a sample and a hint', { skip: !existsSync(SCHEMA_FILE) }, () => {
+    const schema = readFileSync(SCHEMA_FILE, 'utf8');
+    const seeds = [...schema.matchAll(/INSERT INTO (?:notification|email)_templates\b[\s\S]*?ON CONFLICT/g)].map((match) => match[0]);
+    assert.ok(seeds.length > 0, 'no template seeds were found in schema.sql');
+    const declared = new Set(seeds
+      .flatMap((seed) => [...seed.matchAll(/ARRAY\[([^\]]*)\]/g)])
+      .flatMap((array) => [...array[1].matchAll(/'([^']+)'/g)].map((name) => name[1])));
+    for (const name of ['amount', 'note', 'hours', 'first_name']) assert.ok(declared.has(name), name);
+    for (const name of declared) {
+      assert.ok(model.variableHint(name), name);
+      assert.notEqual(model.defaultSample(name), `[${name}]`, name);
+    }
   });
 });
 

@@ -1,9 +1,11 @@
 import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement, type ElementType, type ReactNode } from 'react';
+import { readFileSync } from 'node:fs';
 import {
-  ACTION_FAILED_MESSAGE, DEFAULT_PENDING_LABEL, EMPTY_CONFIRM_VALUES, OTHER_REASON, actionErrorText, canConfirm,
-  choosePreset, createConfirmController, effectiveReason,
+  ACTION_FAILED_MESSAGE, CREDENTIAL_HELP, CREDENTIAL_LABEL, DEFAULT_PENDING_LABEL, EMPTY_CONFIRM_VALUES, OTHER_REASON,
+  actionErrorText, canConfirm, choosePreset, clearCredential, confirmResult, createConfirmController, credentialReady,
+  effectiveReason, settledResult,
   type ConfirmActionSpec, type ConfirmPhase, type ConfirmResult, type ConfirmValues,
 } from '../app/_ui/confirmModel.ts';
 import { classesOf, loadUi, render, tagsOf, textOf, type Attrs } from './support/uiHarness.ts';
@@ -110,6 +112,117 @@ describe('can confirm', () => {
     const rules = { requireTyped: 'FREEZE', acknowledge: 'Understood', reason: { required: true } };
     assert.equal(canConfirm(rules, values({ typed: 'FREEZE', acknowledged: true })), false);
     assert.equal(canConfirm(rules, values({ typed: 'FREEZE', acknowledged: true, preset: 'Fraud' })), true);
+  });
+});
+
+describe('credential option rules (opt-in)', () => {
+  test('the empty values carry an empty credential', () => {
+    assert.equal(EMPTY_CONFIRM_VALUES.credential, '');
+    assert.equal(Object.isFrozen(EMPTY_CONFIRM_VALUES), true);
+  });
+
+  test('a code needs exactly 6 digits', () => {
+    const rules = { credential: { kind: 'otp' as const } };
+    for (const credential of ['', '12345', '1234567', '12345a', ' 12345', '123 456']) {
+      assert.equal(canConfirm(rules, values({ credential })), false, JSON.stringify(credential));
+    }
+    assert.equal(canConfirm(rules, values({ credential: '012345' })), true);
+    assert.equal(credentialReady('otp', '999999'), true);
+  });
+
+  test('a password needs any non-empty value, spaces included, and is never trimmed', () => {
+    const rules = { credential: { kind: 'password' as const } };
+    assert.equal(canConfirm(rules, values()), false);
+    assert.equal(canConfirm(rules, values({ credential: ' ' })), true);
+    assert.equal(canConfirm(rules, values({ credential: 'correct horse' })), true);
+    assert.equal(credentialReady('password', ''), false);
+  });
+
+  test('without the option a typed credential changes nothing', () => {
+    assert.equal(canConfirm({}, values({ credential: 'ignored' })), true);
+    assert.equal(canConfirm({ reason: { required: true } }, values({ credential: '123456' })), false);
+  });
+
+  test('the credential must pass together with every other rule', () => {
+    const rules = { reason: { required: true }, acknowledge: 'I checked', credential: { kind: 'otp' as const } };
+    assert.equal(canConfirm(rules, values({ preset: 'Lost phone', acknowledged: true })), false);
+    assert.equal(canConfirm(rules, values({ preset: 'Lost phone', credential: '123456' })), false);
+    assert.equal(canConfirm(rules, values({ preset: 'Lost phone', acknowledged: true, credential: '123456' })), true);
+  });
+
+  test('the result carries the credential only when the option is on', () => {
+    const typed = values({ preset: 'Lost phone', credential: '123456' });
+    assert.deepEqual(confirmResult({ credential: { kind: 'otp' } }, typed), { reason: 'Lost phone', credential: '123456' });
+    assert.deepEqual(confirmResult({}, typed), { reason: 'Lost phone' });
+    assert.deepEqual(Object.keys(confirmResult({}, typed)), ['reason']);
+  });
+
+  test('clearing empties only the credential, and keeps the same object when there is nothing to clear', () => {
+    const typed = values({ preset: 'Lost phone', reason: '', acknowledged: true, credential: '123456' });
+    assert.deepEqual(clearCredential(typed), { ...typed, credential: '' });
+    const empty = values({ preset: 'Lost phone' });
+    assert.equal(clearCredential(empty), empty);
+  });
+
+  test('the settled result drops the credential and keeps the reason and the value', () => {
+    assert.deepEqual(settledResult({ reason: 'r', credential: 'pw', value: 1 }), { reason: 'r', value: 1 });
+    const plain = { reason: 'r', value: 1 };
+    assert.equal(settledResult(plain), plain);
+  });
+
+  test('the default field copy', () => {
+    assert.equal(CREDENTIAL_LABEL.otp, 'Code from your authenticator app');
+    assert.equal(CREDENTIAL_LABEL.password, 'Your password');
+    assert.equal(CREDENTIAL_HELP, 'Asked before changes to sign-in security.');
+  });
+});
+
+describe('confirm with a credential and an action', () => {
+  test('the action receives the credential; confirm() resolves without it', async () => {
+    const c = controller();
+    const seen: ConfirmResult[] = [];
+    const { result, id } = openSession(c, {
+      title: 'Get new recovery codes?',
+      action: async (base) => {
+        seen.push(base);
+        return { codes: 10 };
+      },
+    });
+    c.submit(id, { reason: '', credential: '123456' });
+    await flush();
+    assert.deepEqual(seen, [{ reason: '', credential: '123456' }]);
+    assert.deepEqual(result.value, { reason: '', value: { codes: 10 } });
+    assert.equal('credential' in (result.value ?? {}), false, 'the code or password never leaves the dialog after use');
+  });
+
+  test('a failed check keeps the dialog open; the retry sends the new credential', async () => {
+    const c = controller();
+    const seen: Array<string | undefined> = [];
+    const { result, id } = openSession(c, {
+      title: 'Reset two-step sign-in for @ada?',
+      action: async (base) => {
+        seen.push(base.credential);
+        if (seen.length === 1) throw new Error('That code did not work. Enter the newest code from your authenticator app.');
+        return 'reset';
+      },
+    });
+    c.submit(id, { reason: 'Lost or replaced phone', credential: '111111' });
+    await flush();
+    assert.equal(c.getSession()?.phase, 'failed');
+    assert.equal(c.getSession()?.error, 'That code did not work. Enter the newest code from your authenticator app.');
+    assert.equal(result.settled, false);
+    c.submit(id, { reason: 'Lost or replaced phone', credential: '222222' });
+    await flush();
+    assert.deepEqual(seen, ['111111', '222222']);
+    assert.deepEqual(result.value, { reason: 'Lost or replaced phone', value: 'reset' });
+  });
+
+  test('without an action the page gets the credential back to send itself', async () => {
+    const c = controller();
+    const { result, id } = openSession(c, { title: 'Confirm it is you' });
+    c.submit(id, { reason: '', credential: 'pw' });
+    await flush();
+    assert.deepEqual(result.value, { reason: '', credential: 'pw' });
   });
 });
 
@@ -593,6 +706,86 @@ describe('ConfirmDialog markup', () => {
     assert.equal(panel?.['aria-modal'], 'true');
     assert.ok(panel?.['aria-labelledby']);
     assert.ok(html.includes(`id="${panel?.['aria-labelledby']}"`));
+  });
+
+  const reset: ConfirmOptions = {
+    tone: 'danger',
+    title: 'Reset two-step sign-in for @ada?',
+    reason: { required: true, presets: ['Lost or replaced phone'] },
+    acknowledge: 'I checked who asked',
+    credential: { kind: 'otp' },
+    confirmLabel: 'Reset two-step sign-in',
+    action,
+  };
+
+  function credentialInput(html: string): Attrs | undefined {
+    return tagsOf(html, 'input').find((attrs) => attrs.name === 'otp' || attrs.name === 'password');
+  }
+
+  test('an otp credential renders last: a labelled, required, mono, numeric one-time-code field with the default help', () => {
+    const html = dialog(reset);
+    const input = credentialInput(html);
+    assert.ok(input);
+    assert.equal(input.type, 'text');
+    assert.equal(input.inputMode, 'numeric');
+    assert.equal(input.autoComplete, 'one-time-code');
+    assert.equal(input['aria-required'], 'true');
+    assert.equal(input.translate, 'no');
+    assert.equal('maxLength' in input, false);
+    assert.ok(classesOf(input).includes('mono'));
+    const label = tagsOf(html, 'label').find((attrs) => attrs.for === input.id);
+    assert.ok(label);
+    assert.match(textOf(html), /Code from your authenticator app Asked before changes to sign-in security\./);
+    assert.ok(html.indexOf('name="otp"') > html.indexOf('type="checkbox"'), 'after the acknowledgement');
+    assert.ok(html.indexOf('name="otp"') > html.indexOf('type="radio"'), 'after the reason');
+    assert.ok(html.indexOf('name="otp"') < html.indexOf('<button'), 'before the footer buttons');
+  });
+
+  test('a password credential is a current-password field labelled Your password', () => {
+    const html = dialog({ title: 'Set up two-step sign-in?', credential: { kind: 'password' }, action });
+    const input = credentialInput(html);
+    assert.equal(input?.type, 'password');
+    assert.equal(input?.autoComplete, 'current-password');
+    assert.match(textOf(html), /Your password Asked before changes to sign-in security\./);
+  });
+
+  test('the label and help can be replaced, and an empty help hides it', () => {
+    const custom = textOf(dialog({ title: 'x', credential: { kind: 'otp', label: 'Code from your app', help: 'It changes every 30 seconds.' } }));
+    assert.match(custom, /Code from your app It changes every 30 seconds\./);
+    const quiet = textOf(dialog({ title: 'x', credential: { kind: 'otp', help: '' } }));
+    assert.doesNotMatch(quiet, /Asked before changes/);
+  });
+
+  test('Confirm stays disabled until the credential is ready; the field adds no extra button', () => {
+    const { confirm } = buttons(dialog({ title: 'Get new recovery codes?', credential: { kind: 'otp' }, action }));
+    assert.equal('disabled' in confirm, true);
+  });
+
+  test('pending: the credential is read-only and focusable, never disabled', () => {
+    const input = credentialInput(dialog(reset, 'pending'));
+    assert.ok(input);
+    assert.equal(hasAttr(input, 'readonly'), true);
+    assert.equal('disabled' in input, false);
+    assert.ok(classesOf(input).includes('readOnly'));
+    const idle = credentialInput(dialog(reset));
+    assert.equal(hasAttr(idle, 'readonly'), false);
+  });
+
+  test('with both an acknowledgement and a credential, the checkbox sits in a spaced block; without a credential the markup is unchanged', () => {
+    const withCredential = dialog({ title: 'x', acknowledge: 'I checked', credential: { kind: 'otp' } });
+    const blocks = tagsOf(withCredential, 'div').filter((attrs) => classesOf(attrs).includes('block'));
+    assert.equal(blocks.length, 2);
+    const plain = { title: 'Reject payout?', acknowledge: 'I checked', reason: { required: true }, action };
+    assert.equal(dialog({ ...plain, credential: undefined }), dialog(plain));
+    assert.equal(tagsOf(dialog(plain), 'div').filter((attrs) => classesOf(attrs).includes('block')).length, 1);
+  });
+
+  test('a failure clears the credential and moves focus back to it', () => {
+    const source = readFileSync(new URL('../app/_ui/Confirm.tsx', import.meta.url), 'utf8');
+    assert.match(source, /if \(phase === 'failed' && credentialSpec\) setValues\(clearCredential\);/);
+    assert.match(source, /if \(phase !== 'failed' \|\| !hasCredential\) return;\s+credentialRef\.current\?\.focus\(\{ preventScroll: true \}\);/);
+    assert.match(source, /onSubmit\(confirmResult\(options, values\)\)/);
+    assert.match(source, /update\(\{ credential: sanitizeOtp\(e\.target\.value\) \}\)/);
   });
 });
 

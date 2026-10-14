@@ -244,7 +244,13 @@ export const RULE_SPECS: readonly RuleSpec[] = [
   { type: 'max_account_age_days', label: 'Account at most this old', kind: 'days', group: 'Account', retired: null },
   { type: 'email_verified', label: 'Email verified', kind: 'none', group: 'Account', retired: null },
   { type: 'has_set_pin', label: 'Transaction PIN set', kind: 'none', group: 'Account', retired: null },
-  { type: 'has_bank_account', label: 'Saved bank account', kind: 'none', group: 'Account', retired: null },
+  {
+    type: 'has_bank_account',
+    label: 'Saved bank account',
+    kind: 'none',
+    group: 'Account',
+    retired: 'Removed: this rule no longer has any effect.',
+  },
   { type: 'country_in', label: 'Country', kind: 'list', group: 'Account', retired: null },
   { type: 'min_balance_naira', label: 'Wallet balance', kind: 'naira', group: 'Wallet', retired: null },
   { type: 'min_referrals', label: 'Referrals', kind: 'count', group: 'Referrals', retired: null },
@@ -544,6 +550,7 @@ export function ruleImpact(raw: unknown): RuleImpact {
   if (spec.type === 'cooldown_days') {
     return { level: 'warning', message: `${spec.retired} A second attempt shows the user a database error.` };
   }
+  if (spec.retired) return { level: 'warning', message: spec.retired };
   return { level: 'ok', message: null };
 }
 

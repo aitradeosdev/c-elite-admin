@@ -6,7 +6,7 @@ import { BUSINESS_TZ_LABEL, formatBusinessDate, formatBusinessDateTime, lagosDat
 import { formatNaira } from '../_ui/money';
 
 export const SEARCH_GROUP_KEYS = [
-  'users', 'withdrawals', 'transactions', 'card_submissions', 'coupons', 'flags',
+  'users', 'withdrawals', 'transactions', 'card_submissions', 'coupons',
 ] as const;
 
 export type SearchGroupKey = (typeof SEARCH_GROUP_KEYS)[number];
@@ -134,16 +134,6 @@ export type CouponHit = {
   state: string;
 };
 
-export type FlagHit = {
-  id: string;
-  transaction_type: string | null;
-  amount: number | string | null;
-  flag_reason: string | null;
-  status: string | null;
-  created_at: string | null;
-  users?: Embedded<PersonRef>;
-};
-
 export const SEARCH_MIN_LENGTH = 2;
 export const SEARCH_DEFAULT_LIMIT = 5;
 export const SEARCH_MAX_LIMIT = 10;
@@ -157,7 +147,6 @@ export const SEARCH_GROUP_ACCESS: Readonly<Record<SearchGroupKey, readonly Permi
   transactions: ['transactions.read'],
   card_submissions: ['cards.read'],
   coupons: ['coupons.read'],
-  flags: ['flags.read', 'withdrawals.read'],
 };
 
 export const SEARCH_GROUP_LABELS: Readonly<Record<SearchGroupKey, string>> = {
@@ -166,7 +155,6 @@ export const SEARCH_GROUP_LABELS: Readonly<Record<SearchGroupKey, string>> = {
   transactions: 'Transactions',
   card_submissions: 'Card submissions',
   coupons: 'Coupons',
-  flags: 'Flagged transactions',
 };
 
 const DETAIL_PATHS: Readonly<Record<SearchGroupKey, (id: string) => string>> = {
@@ -175,7 +163,6 @@ const DETAIL_PATHS: Readonly<Record<SearchGroupKey, (id: string) => string>> = {
   transactions: (id) => `/transactions-overview?id=${id}`,
   card_submissions: (id) => `/card-queue?id=${id}`,
   coupons: (id) => `/coupons?id=${id}`,
-  flags: (id) => `/flagged-transactions?id=${id}`,
 };
 
 const LIST_SEARCH: Readonly<Record<SearchGroupKey, { path: string; param: string } | null>> = {
@@ -184,7 +171,6 @@ const LIST_SEARCH: Readonly<Record<SearchGroupKey, { path: string; param: string
   transactions: { path: '/transactions-overview', param: 'search' },
   card_submissions: null,
   coupons: { path: '/coupons', param: 'q' },
-  flags: { path: '/flagged-transactions', param: 'search' },
 };
 
 const LEADING_GROUP: Readonly<Record<SearchIntentKind, SearchGroupKey | null>> = {
@@ -216,7 +202,6 @@ const LONG_DIGITS = /\d{10,}/g;
 const SPACES = /\s+/g;
 const SAFE_CODE = /^[A-Za-z0-9_]{1,32}$/;
 const PHONE_TAIL = 10;
-const REASON_MAX = 80;
 const SEPARATOR = ' · ';
 
 export class SearchQueryError extends Error {
@@ -379,13 +364,6 @@ export function couponsFilter(intent: SearchIntent): string | null {
   return searchesOwnText(intent) ? ilikeAny(COUPON_TEXT_COLUMNS, intent.needle) : null;
 }
 
-export function flagsFilter(intent: SearchIntent, userIds: readonly string[]): string | null {
-  if (intent.kind === 'id') {
-    return `id.eq.${intent.needle},transaction_id.eq.${intent.needle},user_id.eq.${intent.needle}`;
-  }
-  return idIn('user_id', userIds);
-}
-
 export function itemHref(key: SearchGroupKey, id: string): string {
   return DETAIL_PATHS[key](encodeURIComponent(id));
 }
@@ -398,8 +376,6 @@ function listText(key: SearchGroupKey, intent: SearchIntent): string | null {
       return intent.kind === 'phone' ? null : intent.needle;
     case 'coupons':
       return searchesOwnText(intent) ? intent.needle : null;
-    case 'flags':
-      return intent.kind === 'phone' || intent.kind === 'account' ? null : intent.needle;
     default:
       return null;
   }
@@ -456,14 +432,6 @@ function maskDigits(text: string): string {
 function maskedText(value: unknown): string | null {
   const text = clean(value);
   return text ? maskDigits(text) : null;
-}
-
-function reasonText(value: unknown): string | null {
-  const text = maskedText(value);
-  if (!text) return null;
-  const characters = Array.from(text);
-  if (characters.length <= REASON_MAX) return characters.join('');
-  return `${characters.slice(0, REASON_MAX - 1).join('').trimEnd()}…`;
 }
 
 export function handleOf(person: PersonRef | null | undefined): string | null {
@@ -555,17 +523,6 @@ export function toCouponItem(hit: CouponHit, today: string): SearchItem {
     meta: expiryText(hit.expiry, today),
     status: clean(hit.state) ? couponItemStatus(hit.state) : null,
     href: itemHref('coupons', hit.id),
-  };
-}
-
-export function toFlagItem(row: FlagHit, typeText: string | null): SearchItem {
-  return {
-    id: row.id,
-    title: joinParts([typeText ? `${typeText} flag` : 'Flag', nairaText(row.amount)]) ?? 'Flag',
-    subtitle: joinParts([handleOf(firstOf(row.users)), reasonText(row.flag_reason)]),
-    meta: lagosDateTime(row.created_at),
-    status: clean(row.status),
-    href: itemHref('flags', row.id),
   };
 }
 

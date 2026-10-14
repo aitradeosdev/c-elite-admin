@@ -1,4 +1,4 @@
-import type { ApiBody, ApiResult } from '../../lib/apiClient';
+import type { ApiBody, ApiFailure, ApiResult } from '../../lib/apiClient';
 import { resolvePayoutGateway } from '../../lib/gateway';
 import { formatNaira } from '../../_ui';
 import {
@@ -139,9 +139,22 @@ export type SaveOutcome =
   | { kind: 'done'; receipt: SaveReceipt }
   | { kind: 'refused'; message: string }
   | { kind: 'conflict'; message: string; keys: string[] }
+  | { kind: 'reauth'; message: string }
   | { kind: 'denied'; message: string }
   | { kind: 'expired' }
   | { kind: 'unknown'; message: string };
+
+export type StepUpCode = 'REAUTH_REQUIRED' | 'MFA_REQUIRED';
+
+export const STEP_UP_MESSAGE: Readonly<Record<StepUpCode, string>> = {
+  REAUTH_REQUIRED: 'Your identity check ran out. Enter a new code from your authenticator app and try again.',
+  MFA_REQUIRED: 'Set up two-step sign-in on your Profile first.',
+};
+
+export function stepUpCode(failure: ApiFailure): StepUpCode | null {
+  if (failure.kind !== 'http' || failure.status !== 403) return null;
+  return failure.code === 'REAUTH_REQUIRED' || failure.code === 'MFA_REQUIRED' ? failure.code : null;
+}
 
 export type LiveNoticeTone = 'warning' | 'danger';
 
@@ -648,6 +661,8 @@ export function classifySave(result: ApiResult<SaveReceipt>): SaveOutcome {
   if (result.ok) return { kind: 'done', receipt: result.data };
   const failure = result.error;
   if (failure.status === 401) return { kind: 'expired' };
+  const stepUp = stepUpCode(failure);
+  if (stepUp) return { kind: 'reauth', message: STEP_UP_MESSAGE[stepUp] };
   if (failure.status === 403) return { kind: 'denied', message: failure.message };
   if (failure.status === 409 && failure.code === 'STATE_CONFLICT') {
     return { kind: 'conflict', message: failure.message, keys: conflictKeys(failure.details) };

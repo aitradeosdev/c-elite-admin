@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, ClipboardList, ArrowDownToLine, Flag,
+  LayoutDashboard, ClipboardList, ArrowDownToLine,
   Users, Activity, ShieldCheck,
   CreditCard, Wrench, BadgePercent,
   Gift, Trophy, TicketPercent, Share2,
@@ -11,7 +11,6 @@ import {
 
 export interface NavLeaf {
   key: string;
-  altKeys?: readonly string[];
   label: string;
   href: string;
   icon: LucideIcon;
@@ -30,7 +29,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { key: 'dashboard',              label: 'Dashboard',      href: '/dashboard',              icon: LayoutDashboard },
       { key: 'card_queue',             label: 'Card Queue',     href: '/card-queue',             icon: ClipboardList },
       { key: 'withdrawals',            label: 'Withdrawals',    href: '/withdrawals',            icon: ArrowDownToLine },
-      { key: 'flags.read',             label: 'Flagged',        href: '/flagged-transactions',   icon: Flag, altKeys: ['withdrawals'] },
       { key: 'transactions_overview',  label: 'Transactions',   href: '/transactions-overview',  icon: ClipboardList },
     ],
   },
@@ -108,6 +106,9 @@ export function findNavMatch(pathname: string, groups: readonly NavGroup[] = NAV
   return best;
 }
 
+export const PROFILE_HREF = '/profile';
+export const PROFILE_LABEL = 'Profile';
+
 export interface Breadcrumb {
   group: string;
   item: string;
@@ -134,7 +135,7 @@ export interface Crumb {
 
 export function breadcrumbTrail(pathname: string): Crumb[] {
   const crumb = findBreadcrumb(pathname);
-  if (!crumb) return [{ label: 'Admin', current: true }];
+  if (!crumb) return [{ label: hrefMatches(pathname, PROFILE_HREF) ? PROFILE_LABEL : 'Admin', current: true }];
   if (!crumb.detail) return [{ label: crumb.group }, { label: crumb.item, current: true }];
   return [
     { label: crumb.group },
@@ -147,27 +148,18 @@ export function findNavKey(pathname: string): string | null {
   return findNavMatch(pathname)?.leaf.key ?? null;
 }
 
-export function navLeafKeys(leaf: NavLeaf): readonly string[] {
-  return leaf.altKeys?.length ? [leaf.key, ...leaf.altKeys] : [leaf.key];
-}
-
-export function navLeafAllowed(leaf: NavLeaf, allowedKeys: Iterable<string>): boolean {
-  const allowed = allowedKeys instanceof Set ? allowedKeys : new Set(allowedKeys);
-  return navLeafKeys(leaf).some((key) => allowed.has(key));
-}
-
 export function filterNavByPermissions(allowedKeys: readonly string[], isSuperAdmin: boolean): NavGroup[] {
   if (isSuperAdmin) return NAV_GROUPS;
   const allowed = new Set(allowedKeys);
   return NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((i) => navLeafAllowed(i, allowed)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.key)) }))
     .filter((g) => g.items.length > 0);
 }
 
 export function isNavPathDenied(pathname: string, allowedKeys: readonly string[], isSuperAdmin: boolean): boolean {
   if (isSuperAdmin || pathname === '/dashboard') return false;
-  const match = findNavMatch(pathname);
-  return match !== null && !navLeafAllowed(match.leaf, allowedKeys);
+  const key = findNavKey(pathname);
+  return key !== null && !allowedKeys.includes(key);
 }
 
 export const SIDEBAR_COLLAPSED_COOKIE = 'admin_sidebar_collapsed';

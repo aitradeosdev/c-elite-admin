@@ -1,15 +1,19 @@
 import { Notice, type ConfirmDetail, type ConfirmOptions } from '../../_ui';
-import { formatAge, formatBusinessDateTime } from '../../lib/time';
+import { twoStepUnlockText } from '../../lib/http';
+import { isLocalAddress, isLockActive, type DeviceSession } from '../../lib/adminSecurity';
+import { formatAge, formatBusinessDate, formatBusinessDateTime } from '../../lib/time';
 import { REASON_MAX, diffGrants, normalizeGrants, type GrantChange } from './rules';
 import {
   RESERVED_ADDITIONAL,
   adminHandle,
   plural,
+  policyRequirement,
   type AdminRow,
   type EditProposal,
   type EditorDraft,
   type RebaseResult,
   type RowActionKind,
+  type SecurityPolicy,
 } from './model';
 import { Change, GrantDiff } from './GrantParts';
 import s from './page.module.css';
@@ -181,8 +185,8 @@ export function rowActionConfirm(kind: RowActionKind, admin: AdminRow): ConfirmB
           { label: 'Last sign-in', value: lastSignIn(admin) },
         ],
         consequences: [
-          'Their access does not change. They can sign in again with their password straight away.',
-          'Every device is signed out together; single sessions cannot be picked.',
+          'They can sign in again straight away.',
+          'To end one device only, use the Security tab in their account.',
         ],
         reason: { required: true, label: 'Reason for signing them out', presets: REVOKE_REASONS, maxLength: REASON_MAX },
         confirmLabel: 'Sign out everywhere',
@@ -248,4 +252,102 @@ export function rowActionConfirm(kind: RowActionKind, admin: AdminRow): ConfirmB
         confirmLabel: 'Delete account',
       };
   }
+}
+
+export const RESET_REASONS = [
+  'Lost or replaced phone',
+  'Authenticator app removed',
+  'Locked out after too many codes',
+  'Suspected account compromise',
+];
+
+export const RESET_PENDING = 'Resetting two-step sign-in…';
+
+export const DEVICE_SIGN_OUT_PENDING = 'Signing out the device…';
+
+export const APP_SESSION_NOTE = 'The app goes back to its sign-in screen the next time it reaches the server.';
+
+function twoStepBefore(admin: AdminRow, now: Date): string {
+  const security = admin.security;
+  if (security && isLockActive(security.lockedUntil, now)) {
+    const until = twoStepUnlockText(security.lockedUntil, now.getTime());
+    return until ? `Locked until ${until}` : 'Locked';
+  }
+  return security?.confirmedAt ? `On since ${formatBusinessDate(security.confirmedAt)}` : 'On';
+}
+
+function setUpAgainText(policy: SecurityPolicy, now: Date): string {
+  const requirement = policyRequirement(policy, now);
+  if (requirement.kind === 'required') return 'They must set it up again the next time they sign in.';
+  if (requirement.kind === 'grace') {
+    return `They are asked to set it up again by ${requirement.date}, and must set it up when they sign in after that.`;
+  }
+  return 'They can set it up again on their Profile.';
+}
+
+export function resetMfaConfirm(admin: AdminRow, policy: SecurityPolicy, now: Date = new Date()): ConfirmBase {
+  const handle = adminHandle(admin);
+  return {
+    tone: 'danger',
+    title: `Reset two-step sign-in for ${handle}?`,
+    message: 'Use this when they lost their phone or authenticator app. Their password does not change.',
+    details: [
+      ...adminDetails(admin),
+      { label: 'Two-step sign-in', value: <Change before={twoStepBefore(admin, now)} after="Off" /> },
+      { label: 'Recovery codes left', value: String(admin.security?.recoveryCodesLeft ?? 0) },
+    ],
+    consequences: [
+      'Their authenticator app and recovery codes stop working straight away.',
+      'They are signed out everywhere, on the web and in the mobile app.',
+      setUpAgainText(policy, now),
+      `Super administrators get an alert, and ${handle} sees the reset on their Profile.`,
+    ],
+    reason: { required: true, label: 'Reason for the reset', presets: RESET_REASONS, maxLength: REASON_MAX },
+    credential: { kind: 'otp' },
+    confirmLabel: 'Reset two-step sign-in',
+    pendingLabel: RESET_PENDING,
+  };
+}
+
+export function resetSuccess(admin: AdminRow): string {
+  return `${adminHandle(admin)}’s two-step sign-in was reset and they were signed out everywhere.`;
+}
+
+function addressText(ip: string | null): string {
+  if (!ip) return 'Not recorded';
+  return isLocalAddress(ip) ? `Local address (${ip})` : ip;
+}
+
+function seenText(at: string | null, now: Date): string {
+  if (!at) return 'Not recorded';
+  return `${formatBusinessDateTime(at)} WAT · ${formatAge(at, now)} ago`;
+}
+
+export function deviceSignOutConfirm(
+  admin: AdminRow,
+  session: DeviceSession,
+  device: string,
+  now: Date = new Date(),
+): ConfirmBase {
+  const handle = adminHandle(admin);
+  return {
+    tone: 'danger',
+    title: `Sign out ${handle} on ${device}?`,
+    message: 'That session ends straight away. Their other devices stay signed in.',
+    details: [
+      { label: 'Admin', value: handle },
+      { label: 'Device', value: device },
+      { label: 'Signed in', value: session.createdAt ? `${formatBusinessDateTime(session.createdAt)} WAT` : 'Not recorded' },
+      { label: 'Last active', value: seenText(session.lastSeenAt, now) },
+      { label: 'IP', value: addressText(session.ip), mono: true },
+    ],
+    consequences: session.client === 'mobile' ? [APP_SESSION_NOTE] : undefined,
+    reason: { required: true, label: 'Reason for signing out this device', presets: REVOKE_REASONS, maxLength: REASON_MAX },
+    confirmLabel: 'Sign out',
+    pendingLabel: DEVICE_SIGN_OUT_PENDING,
+  };
+}
+
+export function deviceSignOutSuccess(admin: AdminRow, device: string): string {
+  return `${adminHandle(admin)} was signed out of ${device}.`;
 }

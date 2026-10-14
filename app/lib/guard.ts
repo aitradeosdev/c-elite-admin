@@ -1,16 +1,31 @@
 import type { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { verifyAdminFromRequest, type AdminJWTPayload } from './jwt';
+import { verifyAdminFromRequest, type VerifiedAdmin } from './jwt';
 import { resolvePermissions, type Permission } from './permissions';
 import { clientIpFrom } from './http';
 import { fail, requestId } from './api';
+import {
+  DEFAULT_MFA,
+  DEFAULT_POLICY,
+  SESSION_UNAVAILABLE,
+  isSessionUnavailable,
+  type MfaState,
+  type PolicyState,
+  type SessionInfo,
+} from './session';
+
+export { requireRecentAuth, requireTwoStep } from './session';
 
 export interface AdminContext {
   admin_id: string;
   username: string;
   role_title: string;
   is_super_admin: boolean;
+  page_permissions: string[];
   permissions: Set<Permission>;
+  session: SessionInfo | null;
+  mfa: MfaState;
+  policy: PolicyState;
   ip: string;
   user_agent: string;
   request_id: string;
@@ -23,16 +38,21 @@ export type Guarded =
   | { ok: true; admin: AdminContext }
   | { ok: false; response: NextResponse };
 
-async function buildContext(claims: AdminJWTPayload): Promise<AdminContext> {
+async function buildContext(claims: VerifiedAdmin): Promise<AdminContext> {
   const h = await headers();
   const get = (name: string) => h.get(name);
-  const permissions = resolvePermissions(claims.page_permissions, claims.is_super_admin);
+  const pagePermissions = Array.isArray(claims.page_permissions) ? [...claims.page_permissions] : [];
+  const permissions = resolvePermissions(pagePermissions, claims.is_super_admin);
   return {
     admin_id: claims.admin_id,
     username: claims.username,
     role_title: claims.role_title,
     is_super_admin: claims.is_super_admin,
+    page_permissions: pagePermissions,
     permissions,
+    session: claims.session ?? null,
+    mfa: claims.mfa ? { ...claims.mfa } : { ...DEFAULT_MFA },
+    policy: claims.policy ? { ...claims.policy } : { ...DEFAULT_POLICY },
     ip: clientIpFrom(get),
     user_agent: (get('user-agent') || '').slice(0, 512),
     request_id: await requestId(),
@@ -43,7 +63,13 @@ async function buildContext(claims: AdminJWTPayload): Promise<AdminContext> {
 }
 
 async function authenticate(): Promise<Guarded> {
-  const claims = await verifyAdminFromRequest();
+  let claims: VerifiedAdmin | null;
+  try {
+    claims = await verifyAdminFromRequest();
+  } catch (error) {
+    if (!isSessionUnavailable(error)) throw error;
+    return { ok: false, response: await fail('INTERNAL_ERROR', SESSION_UNAVAILABLE) };
+  }
   if (!claims) return { ok: false, response: await fail('AUTH_REQUIRED') };
   return { ok: true, admin: await buildContext(claims) };
 }

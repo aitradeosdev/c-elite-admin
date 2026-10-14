@@ -98,13 +98,13 @@ describe('rule catalogue', () => {
     const offered = rules.OFFERED_RULES.map((spec) => spec.type).sort();
     assert.deepEqual(offered, [
       'consecutive_days_active', 'country_in', 'email_verified', 'exact_level', 'first_time_claimer',
-      'has_bank_account', 'has_claimed_level_bonus', 'has_set_pin', 'has_used_coupon', 'max_account_age_days',
+      'has_claimed_level_bonus', 'has_set_pin', 'has_used_coupon', 'max_account_age_days',
       'min_account_age_days', 'min_avg_trade_usd', 'min_balance_naira', 'min_card_categories', 'min_level',
       'min_referrals', 'min_single_trade_usd', 'min_successful_referrals', 'min_trades', 'min_volume_usd',
       'min_withdrawn_total', 'specific_card_category', 'trades_in_period', 'volume_in_period',
     ]);
     assert.equal(rules.ruleSpec('completed_task'), null);
-    for (const type of ['max_claims_per_user', 'cooldown_days']) {
+    for (const type of ['max_claims_per_user', 'cooldown_days', 'has_bank_account']) {
       assert.ok(rules.ruleSpec(type)?.retired, `${type} should be retired`);
     }
   });
@@ -133,6 +133,7 @@ describe('rule catalogue', () => {
     const refused: Array<[unknown, RegExp]> = [
       [{ type: 'completed_task', value: 3 }, /every claim would fail/],
       [{ type: 'cooldown_days', value: 7 }, /only once/],
+      [{ type: 'has_bank_account', value: null }, /^Saved bank account cannot be used\. Removed: this rule no longer has any effect\.$/],
       [{ type: 'min_trades', value: 2.5 }, /whole number/],
       [{ type: 'min_trades', value: 0 }, /whole number/],
       [{ type: 'min_account_age_days', value: 0 }, /days from 1/],
@@ -190,6 +191,8 @@ describe('rule catalogue', () => {
     assert.match(rules.ruleImpact({ type: 'cooldown_days', value: 7 }).message ?? '', /database error/);
     assert.deepEqual(rules.ruleImpact({ type: 'min_trades', value: 3 }), { level: 'ok', message: null });
     assert.equal(rules.rulesImpact([{ type: 'min_trades', value: 3 }, { type: 'cooldown_days', value: 2 }]), 'warning');
+    assert.deepEqual(rules.ruleImpact({ type: 'has_bank_account', value: null }), { level: 'warning', message: 'Removed: this rule no longer has any effect.' });
+    assert.equal(rules.rulesImpact([{ type: 'min_trades', value: 3 }, { type: 'has_bank_account', value: null }]), 'warning');
   });
 
   test('compares rule lists regardless of key order', () => {
@@ -255,6 +258,7 @@ describe('gift box readers', () => {
       [{ title: 'Promo', reward_naira: 10.005 }, /2 decimal places/],
       [{ title: 'Promo', reward_naira: 10, expiry_date: '2026-13-01' }, /date like/],
       [{ title: 'Promo', reward_naira: 10, eligibility_rules: [{ type: 'completed_task', value: 1 }] }, /Rule 1/],
+      [{ title: 'Promo', reward_naira: 10, eligibility_rules: [{ type: 'has_bank_account', value: null }] }, /^Rule 1: Saved bank account cannot be used\./],
       [{ title: 'Promo', reward_naira: 10, is_active: 'maybe' }, /true or false/],
       ['nope', /JSON object/],
     ];
@@ -540,6 +544,7 @@ describe('gift box model', () => {
     assert.equal(model.giftboxStatus(item({ expiry_date: '2026-10-02' }), TODAY).kind, 'ended');
     assert.equal(model.giftboxStatus(item({ expiry_date: TODAY }), TODAY).kind, 'live');
     assert.equal(model.giftboxStatus(item({ eligibility_rules: [{ type: 'completed_task', value: 1 }] }), TODAY).kind, 'failing');
+    assert.equal(model.giftboxStatus(item({ eligibility_rules: [{ type: 'has_bank_account', value: null }] }), TODAY).kind, 'live');
   });
 
   test('validates the editor form', () => {
@@ -570,6 +575,18 @@ describe('gift box model', () => {
     const edited = model.checkGiftboxForm({ ...form, rules: [form.rules[0], { ...form.rules[1], a: '5' }] }, legacy.rules, TODAY);
     assert.equal(edited.values, null);
     assert.match(edited.rules.problems[form.rules[0].key], /Remove this rule/);
+    const removed = item({ eligibility_rules: [{ type: 'has_bank_account', value: null }, { type: 'min_trades', value: 2 }] });
+    const removedForm = model.giftboxFormFrom(removed, nextKey);
+    assert.equal(model.isLegacyRule(removedForm.rules[0]), true);
+    const kept = model.checkGiftboxForm({ ...removedForm, title: 'Renamed' }, removed.rules, TODAY);
+    assert.deepEqual(kept.values?.eligibility_rules, removed.rules);
+    assert.equal(kept.rules.warnings[removedForm.rules[0].key], 'Removed: this rule no longer has any effect.');
+    const blocked = model.checkGiftboxForm({ ...removedForm, rules: [removedForm.rules[0], { ...removedForm.rules[1], a: '5' }] }, removed.rules, TODAY);
+    assert.equal(blocked.values, null);
+    assert.equal(blocked.rules.problems[removedForm.rules[0].key], 'Remove this rule to save changes to the rules. Removed: this rule no longer has any effect.');
+    const stripped = model.checkGiftboxForm({ ...removedForm, rules: [removedForm.rules[1]] }, removed.rules, TODAY);
+    assert.deepEqual(stripped.values?.eligibility_rules, [{ type: 'min_trades', value: 2 }]);
+    assert.deepEqual(model.ruleFromDraft(model.newRuleDraft('rule-x', 'has_bank_account')), { rule: null, problem: 'Choose a rule from the list.' });
   });
 
   test('builds change lists and patch bodies for changed fields only', () => {
@@ -795,7 +812,26 @@ describe('RuleBuilder', () => {
     for (const chunk of buttons) assert.match(chunk, /<svg/);
     assert.doesNotMatch(html, /value="completed_task"/);
     assert.doesNotMatch(html, /value="cooldown_days"/);
+    assert.doesNotMatch(html, /value="has_bank_account"/);
     assert.match(textOf(html), /Each user can claim a gift box only once\./);
+  });
+
+  test('shows a stored removed rule with its removal note', () => {
+    const RuleBuilder = builder.RuleBuilder;
+    const legacy = { type: 'has_bank_account', value: null };
+    const html = render(createElement(RuleBuilder, {
+      idBase: 'rb',
+      rules: [{ key: 'r1', type: 'has_bank_account', a: '', b: '', legacy }],
+      problems: {},
+      warnings: { r1: rules.ruleImpact(legacy).message },
+      nextKey: () => 'r2',
+      onChange: () => {},
+      onBlur: () => {},
+    }));
+    assert.match(textOf(html), /Has a saved bank account/);
+    assert.match(textOf(html), /Removed: this rule no longer has any effect\./);
+    assert.ok(tagsOf(html, 'button').some((attrs) => attrs['aria-label'] === 'Remove rule 1: Has a saved bank account'));
+    assert.doesNotMatch(html, /value="has_bank_account"/);
   });
 });
 

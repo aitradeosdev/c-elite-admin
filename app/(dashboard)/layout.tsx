@@ -1,17 +1,21 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { verifyAdminJWT } from '../lib/jwt';
+import { verifyAdminSession } from '../lib/jwt';
+import { SESSION_COOKIE, SessionUnavailableError } from '../lib/session';
 import { resolvePermissions } from '../lib/permissions';
 import { Shell } from './_shell/Shell';
 import { SIDEBAR_COLLAPSED_COOKIE, parseSidebarCollapsed } from './_shell/nav';
+import { shellSecurity } from './profile/securityModel';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) redirect('/login');
 
-  const admin = await verifyAdminJWT(token);
-  if (!admin) redirect('/login');
+  const check = await verifyAdminSession(token, 'cookie');
+  if (check.status === 'unavailable') throw new SessionUnavailableError();
+  if (check.status === 'invalid') redirect('/login');
+  const admin = check.claims;
 
   const permissions = Array.from(resolvePermissions(admin.page_permissions, admin.is_super_admin)).sort();
 
@@ -23,6 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       username={admin.username}
       roleTitle={admin.role_title}
       initialCollapsed={parseSidebarCollapsed(cookieStore.get(SIDEBAR_COLLAPSED_COOKIE)?.value)}
+      security={shellSecurity(check.mfa, check.policy)}
     >
       {children}
     </Shell>

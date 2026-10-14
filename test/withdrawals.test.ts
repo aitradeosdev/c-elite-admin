@@ -1,15 +1,19 @@
-import { afterEach, before, describe, test } from 'node:test';
+import { afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { SignJWT } from 'jose';
 import { createElement, type ElementType } from 'react';
-import { loadAppModule, render, tagsOf, textOf } from './support/uiHarness.ts';
+import ts from 'typescript';
+import { classesOf, loadAppModule, render, tagsOf, textOf, withClass } from './support/uiHarness.ts';
+import { ERROR_MESSAGE } from '../app/lib/http.ts';
 import {
-  EMERGENCY_APPROVAL, EMERGENCY_PAUSED, EMERGENCY_REJECT_NOTE, EMERGENCY_TITLE, EMERGENCY_UNCHECKED, FROZEN_APPROVAL,
-  PAYOUT_UNCHECKED, approvalRefusal, classifyDecision, payoutDiffers, payoutProviderNote, toActionResult, toDetail,
-  toListResult,
-  type ActionResult, type DetailPartial, type Withdrawal,
+  DEFAULT_TAB, EMERGENCY_APPROVAL, EMERGENCY_PAUSED, EMERGENCY_REJECT_NOTE, EMERGENCY_TITLE, EMERGENCY_UNCHECKED,
+  FROZEN_APPROVAL, PAYOUT_UNCHECKED, TABS, approvalRefusal, classifyDecision, formatTab, isActionable, isHeld, parseTab,
+  payoutDiffers, payoutProviderNote, sameTabFilter, tabFilter, tabSpec, toActionResult, toDetail, toListResult,
+  type ActionResult, type DetailPartial, type Tab, type Withdrawal,
 } from '../app/(dashboard)/withdrawals/model.ts';
 import type { ApiResult } from '../app/lib/apiClient.ts';
 
@@ -262,6 +266,131 @@ describe('response mappers', () => {
   });
 });
 
+describe('tabs', () => {
+  test('there is no Held tab: Review, Processing, Success, Failed and All, opening on Review', () => {
+    assert.deepEqual(TABS.map((spec) => [spec.value, spec.label]), [
+      ['pending_review', 'Review'],
+      ['processing', 'Processing'],
+      ['success', 'Success'],
+      ['failed', 'Failed'],
+      ['all', 'All'],
+    ]);
+    assert.equal(DEFAULT_TAB, 'pending_review');
+  });
+
+  test('Review lists pending-review and held withdrawals, and no other status tab lists either', () => {
+    const review = tabSpec('pending_review');
+    assert.deepEqual(review.statuses, ['pending_review', 'held']);
+    for (const spec of TABS) {
+      if (spec.value === 'pending_review' || spec.statuses === null) continue;
+      assert.ok(!spec.statuses.includes('held') && !spec.statuses.includes('pending_review'), spec.value);
+    }
+    assert.equal(review.emptyTitle, 'Nothing is waiting for a decision');
+    assert.match(review.emptyHint, /held withdrawals/);
+  });
+
+  test('held withdrawals stay exactly as actionable as pending-review ones, and nothing else becomes actionable', () => {
+    assert.equal(isActionable('pending_review'), true);
+    assert.equal(isActionable('held'), true);
+    for (const status of ['initiated', 'processing', 'success', 'failed', 'resume_failed', 'HELD', '', null, undefined]) {
+      assert.equal(isActionable(status), false, String(status));
+    }
+    for (const status of tabSpec('pending_review').statuses ?? []) assert.equal(isActionable(status), true, status);
+  });
+
+  test('old Held links and bookmarks land on Review', () => {
+    assert.equal(parseTab('held'), 'pending_review');
+    assert.equal(parseTab(' held '), 'pending_review');
+    for (const spec of TABS) assert.equal(parseTab(spec.value), spec.value);
+    for (const raw of [null, undefined, '', 'bogus', 'constructor', '__proto__', 'toString', 'processing,held']) {
+      assert.equal(parseTab(raw), DEFAULT_TAB, String(raw));
+    }
+  });
+
+  test('Review writes nothing to the address bar, so a held link is tidied on the next change', () => {
+    assert.equal(formatTab('pending_review'), null);
+    assert.equal(formatTab(parseTab('held')), null);
+    for (const tab of ['processing', 'success', 'failed', 'all'] as const) assert.equal(formatTab(tab), tab);
+  });
+});
+
+describe('review list params', () => {
+  test('Review asks the API for its review set, the other tabs for their statuses', () => {
+    assert.deepEqual(tabFilter('pending_review'), { review: '1' });
+    assert.deepEqual(tabFilter('processing'), { status: 'initiated,processing' });
+    assert.deepEqual(tabFilter('success'), { status: 'success' });
+    assert.deepEqual(tabFilter('failed'), { status: 'failed,resume_failed' });
+    assert.deepEqual(tabFilter('all'), {});
+  });
+
+  test('the API review set is exactly the statuses the Review tab promises', () => {
+    const source = readFileSync(LIST_ROUTE, 'utf8');
+    const literal = source.match(/const REVIEW_STATUSES = \[([^\]]*)\];/)?.[1] ?? '';
+    assert.deepEqual([...literal.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]), tabSpec('pending_review').statuses);
+    assert.match(source, /const review = params\.get\('review'\) === '1';/);
+    assert.match(source, /if \(filters\.review\) query = query\.in\('status', REVIEW_STATUSES\);/);
+  });
+
+  test('the list, its Matching count and the export all ask by the tab filter, and the URL reads through parseTab', () => {
+    const page = readFileSync(join(PAGE_DIR, 'page.tsx'), 'utf8');
+    assert.equal(page.split('new URLSearchParams(tabFilter(tab))').length - 1, 2);
+    assert.doesNotMatch(page, /params\.set\('status'/);
+    assert.match(page, /tab: urlParam<Tab>\('tab', \{ parse: parseTab, format: formatTab \}\)/);
+    assert.match(page, /keepPreviousData: sameTabFilter/);
+  });
+
+  test('switching tabs never shows another tab’s rows while loading, but paging and searching keep them', () => {
+    const key = (tab: Tab, extra: Record<string, string> = {}) =>
+      new URLSearchParams({ ...tabFilter(tab), ...extra, page: '1', limit: '50' }).toString();
+    assert.equal(sameTabFilter(key('pending_review'), key('all')), false);
+    assert.equal(sameTabFilter(key('all'), key('pending_review')), false);
+    assert.equal(sameTabFilter(key('pending_review'), key('processing')), false);
+    assert.equal(sameTabFilter(key('processing'), key('failed')), false);
+    assert.equal(sameTabFilter(key('pending_review'), key('pending_review', { search: 'ada' })), true);
+    assert.equal(sameTabFilter(key('all'), key('all', { sort: 'amount', dir: 'asc' })), true);
+  });
+});
+
+describe('held marker', () => {
+  const statusHtml = (status: string) => render(createElement(parts.WithdrawalStatus, { status }));
+
+  test('a held withdrawal shows a Held pill in place of the plain status dot', () => {
+    const html = statusHtml('held');
+    const pills = withClass(html, 'span', 'badge');
+    assert.equal(pills.length, 1);
+    assert.ok(classesOf(pills[0]).includes('warning'));
+    assert.match(pills[0].title ?? '', /risk flag/);
+    assert.equal(textOf(html), 'Held');
+    assert.equal(withClass(html, 'span', 'statusDot').length, 0);
+  });
+
+  test('every other status keeps the plain status dot', () => {
+    for (const status of ['pending_review', 'initiated', 'processing', 'success', 'failed', 'resume_failed']) {
+      const html = statusHtml(status);
+      assert.equal(withClass(html, 'span', 'badge').length, 0, status);
+      assert.equal(withClass(html, 'span', 'statusDot').length, 1, status);
+    }
+    assert.equal(textOf(statusHtml('pending_review')), 'pending review');
+    assert.equal(isHeld('held'), true);
+    for (const status of ['pending_review', 'HELD', '', null, undefined]) assert.equal(isHeld(status), false, String(status));
+  });
+
+  test('the drawer marks a held withdrawal in its status row and still treats it as awaiting a decision', () => {
+    const held = detailHtml({ ...WITHDRAWAL, status: 'held' }, 'paystack');
+    assert.equal(rowValue(held, 'Status')?.startsWith('Held '), true);
+    assert.equal(withClass(held, 'span', 'badge').length, 1);
+    assert.equal(rowValue(detailHtml(WITHDRAWAL, 'paystack'), 'Status')?.startsWith('pending review '), true);
+    assert.equal(rowValue(detailHtml({ ...WITHDRAWAL, status: 'held' }, 'monnify'), 'Payout provider')?.startsWith('Monnify'), true);
+  });
+
+  test('the table row and the mobile list both render the marker', () => {
+    const page = readFileSync(join(PAGE_DIR, 'page.tsx'), 'utf8');
+    assert.match(page, /<div className=\{s\.statusCell\}>\s*<WithdrawalStatus status=\{row\.status\} \/>/);
+    assert.match(page, /status: <WithdrawalStatus status=\{row\.status\} \/>,/);
+    assert.doesNotMatch(page, /<StatusDot\b/);
+  });
+});
+
 describe('withdrawal detail drawer', () => {
   test('masks the bank account number and never prints it whole', () => {
     const html = detailHtml(WITHDRAWAL, 'paystack');
@@ -452,5 +581,375 @@ describe('route contract and hard rules', () => {
     const css = readFileSync(join(PAGE_DIR, 'page.module.css'), 'utf8');
     assert.ok(!/\/\*/.test(css));
     assert.ok(!/#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(|z-index/i.test(css));
+  });
+});
+
+const ROUTE_STATE_KEY = '__cardeliteWithdrawalApproveTest';
+const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
+const nodeRequire = createRequire(import.meta.url);
+const ROUTE_JWT_SECRET = 'withdrawal-approve-test-secret-0123456789abcdef';
+const ROUTE_SUPABASE_URL = 'https://project.supabase.test';
+const ROUTE_ADMIN_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
+const WEB_SID = 'c4e2a9d1-3b5f-4e7a-8c6d-2f1e0a9b8c7d';
+const PHONE_SID = '0f1e2d3c-4b5a-4968-8776-655443322110';
+const ROUTE_REQUEST_ID = 'req_approve_route';
+const SESSION_UNAVAILABLE = 'Your session could not be checked. Try again.';
+const ROUTE_IMPORT = /^((?:import|export)\b[^;'"]*?\bfrom\s*|import\s*)['"]([^'"]+)['"]/gm;
+
+interface RouteReply {
+  data?: unknown;
+  error?: { message: string; code?: string } | null;
+}
+
+interface RouteQuery {
+  table: string;
+  op: string | null;
+  columns: string | null;
+  payload: unknown;
+  filters: Array<[string, string, unknown]>;
+}
+
+interface ApproveState {
+  headers: Headers;
+  cookies: Map<string, string>;
+  rpcs: Array<{ name: string; args: Record<string, unknown> }>;
+  queries: RouteQuery[];
+  authState: (args: Record<string, unknown>, call: number) => RouteReply;
+  db: {
+    from(table: string): object;
+    rpc(name: string, args: Record<string, unknown>): Promise<RouteReply>;
+  };
+}
+
+interface Forwarded {
+  url: string;
+  authorization: string | null;
+}
+
+interface ApproveRoute {
+  POST: (req: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
+}
+
+const approveState: ApproveState = {
+  headers: new Headers(),
+  cookies: new Map(),
+  rpcs: [],
+  queries: [],
+  authState: liveSession,
+  db: {
+    from: (table) => routeChain(table),
+    rpc: (name, args) => routeRpc(name, args),
+  },
+};
+
+Reflect.set(globalThis, ROUTE_STATE_KEY, approveState);
+
+function liveSession(args: Record<string, unknown>): RouteReply {
+  const sid = String(args.p_sid);
+  return {
+    data: {
+      admin: {
+        id: ROUTE_ADMIN_ID,
+        username: 'ops.lead',
+        role_title: 'Finance Lead',
+        is_super_admin: false,
+        page_permissions: ['withdrawals'],
+        token_version: 3,
+      },
+      session: {
+        id: sid,
+        status: 'active',
+        client: sid === PHONE_SID ? 'mobile' : 'web',
+        auth_methods: ['pwd'],
+        created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        reauth_at: null,
+      },
+      mfa: { status: 'none', locked_until: null },
+      policy: { mfa_mode: 'off', mfa_grace_ends_at: null, mfa_required_now: false },
+    },
+  };
+}
+
+function routeRpc(name: string, args: Record<string, unknown>): Promise<RouteReply> {
+  approveState.rpcs.push({ name, args });
+  if (name === 'admin_auth_state') {
+    const call = approveState.rpcs.filter((entry) => entry.name === name).length;
+    return Promise.resolve({ data: null, error: null, ...approveState.authState(args, call) });
+  }
+  if (name === 'admin_approve_withdrawal') return Promise.resolve({ data: null, error: null });
+  return Promise.reject(new Error(`unexpected rpc ${name}`));
+}
+
+function routeAnswer(query: RouteQuery): RouteReply {
+  if (query.table === 'withdrawals' && query.columns === 'status, amount, fee, user_id, gateway') {
+    return { data: { status: 'pending_review', amount: 50000, fee: 100, user_id: WITHDRAWAL.user_id, gateway: 'paystack' } };
+  }
+  if (query.table === 'withdrawals' && query.columns === 'status') return { data: { status: 'processing' } };
+  if (query.table === 'app_config' && query.op === 'select') return { data: [] };
+  if (query.table === 'audit_log' && query.op === 'insert') return { error: null };
+  throw new Error(`unexpected query ${JSON.stringify(query)}`);
+}
+
+function routeChain(table: string): object {
+  const query: RouteQuery = { table, op: null, columns: null, payload: undefined, filters: [] };
+  approveState.queries.push(query);
+  const builder: Record<string, unknown> = {};
+  const filter = (kind: string) => (column: string, value: unknown) => {
+    query.filters.push([kind, column, value]);
+    return builder;
+  };
+  Object.assign(builder, {
+    select: (columns: string) => {
+      query.op = query.op ?? 'select';
+      query.columns = columns;
+      return builder;
+    },
+    insert: (payload: unknown) => {
+      query.op = 'insert';
+      query.payload = payload;
+      return builder;
+    },
+    eq: filter('eq'),
+    in: filter('in'),
+    maybeSingle: () => builder,
+    then: (onFulfilled: (value: unknown) => unknown, onRejected: (reason: unknown) => unknown) =>
+      Promise.resolve()
+        .then(() => ({ data: null, error: null, ...routeAnswer(query) }))
+        .then(onFulfilled, onRejected),
+  });
+  return builder;
+}
+
+function routeModuleUrl(source: string): string {
+  return `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+}
+
+function routeStub(lines: string[]): string {
+  return routeModuleUrl([`const state = () => globalThis.${ROUTE_STATE_KEY};`, ...lines].join('\n'));
+}
+
+const ROUTE_FILE_STUBS: Readonly<Record<string, string>> = {
+  [resolve(APP_DIR, 'lib', 'supabase.ts')]: routeStub([
+    'export const supabaseAdmin = {',
+    '  from(table) { return state().db.from(table); },',
+    '  rpc(name, args) { return state().db.rpc(name, args); },',
+    '};',
+  ]),
+};
+
+const ROUTE_PACKAGES: Readonly<Record<string, string>> = {
+  jose: import.meta.resolve('jose'),
+  'next/server': pathToFileURL(nodeRequire.resolve('next/server')).href,
+  'next/headers': routeStub([
+    'export async function headers() { return state().headers; }',
+    'export async function cookies() {',
+    '  return { get: (name) => (state().cookies.has(name) ? { name, value: state().cookies.get(name) } : undefined) };',
+    '}',
+  ]),
+};
+
+const routeBundles = new Map<string, Promise<string>>();
+
+function resolveRouteImport(fromFile: string, specifier: string): string {
+  const base = resolve(dirname(fromFile), specifier);
+  const candidates = /\.tsx?$/.test(base) ? [base] : [`${base}.ts`, `${base}.tsx`, resolve(base, 'index.ts')];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error(`${fromFile} imports ${specifier}, which does not resolve`);
+  return found;
+}
+
+async function transpileRoute(file: string): Promise<string> {
+  const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
+    fileName: file,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, verbatimModuleSyntax: false },
+  });
+  const targets = new Map<string, string>();
+  for (const [, , specifier] of outputText.matchAll(ROUTE_IMPORT)) {
+    if (targets.has(specifier)) continue;
+    if (specifier.startsWith('.')) {
+      const path = resolveRouteImport(file, specifier);
+      targets.set(specifier, ROUTE_FILE_STUBS[path] ?? (await bundleRoute(path)));
+    } else if (ROUTE_PACKAGES[specifier]) {
+      targets.set(specifier, ROUTE_PACKAGES[specifier]);
+    } else {
+      throw new Error(`${file} imports ${specifier}, which this test does not provide`);
+    }
+  }
+  return routeModuleUrl(outputText.replace(ROUTE_IMPORT, (match: string, head: string, specifier: string) => {
+    const target = targets.get(specifier);
+    return target ? `${head}'${target}'` : match;
+  }));
+}
+
+function bundleRoute(file: string): Promise<string> {
+  let pending = routeBundles.get(file);
+  if (!pending) {
+    pending = transpileRoute(file);
+    routeBundles.set(file, pending);
+  }
+  return pending;
+}
+
+function sessionToken(sid: string): Promise<string> {
+  return new SignJWT({
+    admin_id: ROUTE_ADMIN_ID,
+    role_title: 'Finance Lead',
+    is_super_admin: false,
+    page_permissions: ['withdrawals'],
+    username: 'ops.lead',
+    token_version: 3,
+    sid,
+    amr: ['pwd'],
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + 3600)
+    .sign(new TextEncoder().encode(ROUTE_JWT_SECRET));
+}
+
+describe('approving forwards exactly the session the guard checked', () => {
+  let route: ApproveRoute;
+  let forwarded: Forwarded[] = [];
+
+  before(async () => {
+    route = (await import(await bundleRoute(APPROVE_ROUTE))) as ApproveRoute;
+  });
+
+  beforeEach(() => {
+    approveState.rpcs = [];
+    approveState.queries = [];
+    approveState.authState = liveSession;
+    forwarded = [];
+    Reflect.set(process.env, 'ADMIN_JWT_SECRET', ROUTE_JWT_SECRET);
+    Reflect.set(process.env, 'SUPABASE_URL', ROUTE_SUPABASE_URL);
+    mock.method(console, 'error', () => {});
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      forwarded.push({ url: String(input), authorization: new Headers(init?.headers).get('authorization') });
+      return json({ success: true, gateway_reference: 'TRF_1' }, 200);
+    }) as typeof fetch;
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  function approveWith(headers: Record<string, string>, cookie?: string): Promise<Response> {
+    approveState.headers = new Headers({
+      'content-type': 'application/json',
+      'user-agent': 'withdrawal approve test',
+      'x-request-id': ROUTE_REQUEST_ID,
+      ...headers,
+    });
+    approveState.cookies = new Map(cookie === undefined ? [] : [['admin_token', cookie]]);
+    const req = new Request(`http://localhost/api/withdrawals/${WITHDRAWAL.id}/approve`, {
+      method: 'POST',
+      headers: approveState.headers,
+      body: '{}',
+    });
+    return route.POST(req, { params: Promise.resolve({ id: WITHDRAWAL.id }) });
+  }
+
+  function checkedSessions(): unknown[] {
+    return approveState.rpcs.filter((entry) => entry.name === 'admin_auth_state').map((entry) => entry.args.p_sid);
+  }
+
+  function rpcNames(): string[] {
+    return approveState.rpcs.map((entry) => entry.name);
+  }
+
+  const RESUME_URL = `${ROUTE_SUPABASE_URL}/functions/v1/resume-withdrawal`;
+
+  test('a mobile request forwards its bearer, never the cookie, after one session check', async () => {
+    const bearer = await sessionToken(PHONE_SID);
+    const cookie = await sessionToken(WEB_SID);
+    const res = await approveWith({ 'x-client': 'mobile-admin', authorization: `Bearer ${bearer}` }, cookie);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body.status, 'processing');
+    assert.equal(body.gateway_reference, 'TRF_1');
+    assert.deepEqual(forwarded, [{ url: RESUME_URL, authorization: `Bearer ${bearer}` }]);
+    assert.deepEqual(checkedSessions(), [PHONE_SID]);
+    assert.deepEqual(rpcNames(), ['admin_auth_state', 'admin_approve_withdrawal']);
+  });
+
+  test('a mobile request during a session-store outage is never a 401', async () => {
+    const bearer = await sessionToken(PHONE_SID);
+    const mobile = { 'x-client': 'mobile-admin', authorization: `Bearer ${bearer}` };
+
+    approveState.authState = () => ({ error: { message: 'connection terminated' } });
+    const atGuard = await approveWith(mobile);
+    assert.equal(atGuard.status, 500);
+    assert.deepEqual(await atGuard.json(), {
+      success: false,
+      error: SESSION_UNAVAILABLE,
+      code: 'INTERNAL_ERROR',
+      message: SESSION_UNAVAILABLE,
+      request_id: ROUTE_REQUEST_ID,
+    });
+    assert.deepEqual(rpcNames(), ['admin_auth_state']);
+    assert.deepEqual(approveState.queries, []);
+    assert.deepEqual(forwarded, []);
+
+    approveState.rpcs = [];
+    approveState.authState = (args, call) => (call === 1 ? liveSession(args) : { error: { message: 'connection terminated' } });
+    const afterGuard = await approveWith(mobile);
+    assert.notEqual(afterGuard.status, 401);
+    assert.equal(afterGuard.status, 200);
+    assert.deepEqual(forwarded, [{ url: RESUME_URL, authorization: `Bearer ${bearer}` }]);
+    assert.deepEqual(checkedSessions(), [PHONE_SID]);
+  });
+
+  test('a web request forwards the cookie exactly as before, whatever Authorization says', async () => {
+    const cookie = await sessionToken(WEB_SID);
+    const bearer = await sessionToken(PHONE_SID);
+    const cases: Array<Record<string, string>> = [
+      {},
+      { authorization: `Bearer ${bearer}` },
+      { 'x-client': 'mobile-admin', authorization: 'Basic abc' },
+      { 'x-client': 'mobile-admin', authorization: `Bearer${bearer}` },
+    ];
+    for (const headers of cases) {
+      approveState.rpcs = [];
+      forwarded = [];
+      const res = await approveWith(headers, cookie);
+      assert.equal(res.status, 200, JSON.stringify(headers));
+      assert.deepEqual(forwarded, [{ url: RESUME_URL, authorization: `Bearer ${cookie}` }], JSON.stringify(headers));
+      assert.deepEqual(checkedSessions(), [WEB_SID], JSON.stringify(headers));
+    }
+  });
+
+  test('a request with neither a bearer nor a cookie is still the existing 401, and nothing is read or sent', async () => {
+    const cases: Array<Record<string, string>> = [
+      {},
+      { 'x-client': 'mobile-admin' },
+      { 'x-client': 'mobile-admin', authorization: 'Bearer' },
+    ];
+    for (const headers of cases) {
+      approveState.rpcs = [];
+      approveState.queries = [];
+      const res = await approveWith(headers);
+      assert.equal(res.status, 401, JSON.stringify(headers));
+      assert.deepEqual(await res.json(), {
+        success: false,
+        error: ERROR_MESSAGE.AUTH_REQUIRED,
+        code: 'AUTH_REQUIRED',
+        message: ERROR_MESSAGE.AUTH_REQUIRED,
+        request_id: ROUTE_REQUEST_ID,
+      });
+      assert.deepEqual(approveState.rpcs, [], JSON.stringify(headers));
+      assert.deepEqual(approveState.queries, [], JSON.stringify(headers));
+    }
+    assert.deepEqual(forwarded, []);
+  });
+
+  test('the route takes the token by the same rule as the guard and never checks it a second time', () => {
+    const source = readFileSync(APPROVE_ROUTE, 'utf8');
+    assert.match(source, /^import \{ sessionTokenFromRequest \} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/jwt';$/m);
+    assert.match(
+      source,
+      /const \{ token: adminToken \} = await sessionTokenFromRequest\(\);\n {2}if \(!adminToken\) return fail\('AUTH_REQUIRED', 'Your session has expired\. Sign in again\.'\);/,
+    );
+    assert.doesNotMatch(source, /verifyAdminJWT|verifyAdminSession|from 'next\/headers'|'admin_token'|get\('authorization'\)/);
   });
 });

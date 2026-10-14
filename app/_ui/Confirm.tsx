@@ -12,12 +12,16 @@ import { Checkbox } from './Checkbox';
 import { FieldShell, Input, Textarea } from './Field';
 import { RadioGroup } from './RadioGroup';
 import {
-  DEFAULT_PENDING_LABEL, EMPTY_CONFIRM_VALUES, OTHER_REASON, canConfirm, choosePreset, createConfirmController,
-  effectiveReason, type ConfirmResult, type ConfirmSession, type ConfirmValues,
+  CREDENTIAL_HELP, CREDENTIAL_LABEL, DEFAULT_PENDING_LABEL, EMPTY_CONFIRM_VALUES, OTHER_REASON, canConfirm, choosePreset,
+  clearCredential, confirmResult, createConfirmController,
+  type ConfirmCredential, type ConfirmPhase, type ConfirmResult, type ConfirmSession, type ConfirmValues,
 } from './confirmModel';
+import { OTP_INPUT_ATTRIBUTES, sanitizeOtp } from '../lib/adminSecurity';
 import s from './Confirm.module.css';
 
-export type { ConfirmPhase, ConfirmResult, ConfirmSession } from './confirmModel';
+export type {
+  ConfirmCredential, ConfirmCredentialKind, ConfirmPhase, ConfirmResult, ConfirmSession,
+} from './confirmModel';
 
 export type ConfirmTone = 'default' | 'danger' | 'financial' | 'sensitive';
 
@@ -47,6 +51,7 @@ export interface ConfirmOptions<T = unknown> {
   acknowledge?: string;
   requireTyped?: string;
   reason?: ConfirmReasonSpec;
+  credential?: ConfirmCredential;
   action?: (result: ConfirmResult) => Promise<T>;
   pendingLabel?: string;
   actionErrorMessage?: (error: unknown) => string;
@@ -83,12 +88,20 @@ export function ConfirmDialog({ session, onSubmit, onCancel }: ConfirmDialogProp
   const { options, phase, error } = session;
   const [values, setValues] = useState<ConfirmValues>(EMPTY_CONFIRM_VALUES);
   const [valuesFor, setValuesFor] = useState(session.id);
+  const [phaseSeen, setPhaseSeen] = useState<ConfirmPhase>(phase);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const credentialRef = useRef<HTMLInputElement>(null);
   const busy = phase === 'pending';
+  const credentialSpec = options.credential;
 
   if (valuesFor !== session.id) {
     setValuesFor(session.id);
     setValues(EMPTY_CONFIRM_VALUES);
+  }
+
+  if (phaseSeen !== phase) {
+    setPhaseSeen(phase);
+    if (phase === 'failed' && credentialSpec) setValues(clearCredential);
   }
 
   useEffect(() => {
@@ -104,6 +117,13 @@ export function ConfirmDialog({ session, onSubmit, onCancel }: ConfirmDialogProp
     if (!keep) button.focus({ preventScroll: true });
   }, [busy]);
 
+  const hasCredential = Boolean(credentialSpec);
+
+  useEffect(() => {
+    if (phase !== 'failed' || !hasCredential) return;
+    credentialRef.current?.focus({ preventScroll: true });
+  }, [phase, hasCredential, session.id]);
+
   const tone: ConfirmTone = options.tone ?? 'default';
   const reasonSpec = options.reason;
   const reasonLabel = reasonSpec?.label || 'Reason';
@@ -114,8 +134,17 @@ export function ConfirmDialog({ session, onSubmit, onCancel }: ConfirmDialogProp
 
   const submit = () => {
     if (busy || !ready) return;
-    onSubmit({ reason: effectiveReason(values) });
+    onSubmit(confirmResult(options, values));
   };
+
+  const acknowledgement = options.acknowledge ? (
+    <Checkbox
+      checked={values.acknowledged}
+      onChange={(next) => update({ acknowledged: next })}
+      label={options.acknowledge}
+      disabled={busy}
+    />
+  ) : null;
 
   return (
     <Modal
@@ -249,13 +278,43 @@ export function ConfirmDialog({ session, onSubmit, onCancel }: ConfirmDialogProp
         </div>
       ) : null}
 
-      {options.acknowledge ? (
-        <Checkbox
-          checked={values.acknowledged}
-          onChange={(next) => update({ acknowledged: next })}
-          label={options.acknowledge}
-          disabled={busy}
-        />
+      {credentialSpec && acknowledgement ? <div className={s.block}>{acknowledgement}</div> : acknowledgement}
+
+      {credentialSpec ? (
+        <div className={s.block}>
+          <FieldShell
+            label={credentialSpec.label || CREDENTIAL_LABEL[credentialSpec.kind]}
+            help={credentialSpec.help ?? CREDENTIAL_HELP}
+            required
+          >
+            {credentialSpec.kind === 'otp' ? (
+              <Input
+                ref={credentialRef}
+                mono
+                {...OTP_INPUT_ATTRIBUTES}
+                enterKeyHint="done"
+                name="otp"
+                value={values.credential}
+                readOnly={busy}
+                className={busy ? s.readOnly : undefined}
+                onChange={(e) => update({ credential: sanitizeOtp(e.target.value) })}
+              />
+            ) : (
+              <Input
+                ref={credentialRef}
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={values.credential}
+                readOnly={busy}
+                className={busy ? s.readOnly : undefined}
+                onChange={(e) => update({ credential: e.target.value })}
+              />
+            )}
+          </FieldShell>
+        </div>
       ) : null}
     </Modal>
   );

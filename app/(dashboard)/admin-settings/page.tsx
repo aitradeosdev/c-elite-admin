@@ -23,10 +23,11 @@ import {
   EmergencyCard, ProviderCard, SaveBar, SecretField, SectionCard, SettingInput, SettingsSkeleton, secretReplaceId,
   secretUndoId, type Phase, type ProviderOption,
 } from './SettingsParts';
+import { SecurityPolicySection } from './SecurityPolicyCard';
 import s from './page.module.css';
 
 const TITLE = 'Admin Settings';
-const SUBTITLE = 'Platform-wide configuration for payouts, bills, support and the user app. Super admins only; every change is recorded in the audit log.';
+const SUBTITLE = 'Platform-wide configuration for payouts, bills, support, admin sign-in and the user app. Super admins only; every change is recorded in the audit log.';
 const DENIED_TITLE = 'Super administrators only';
 const DENIED_MESSAGE = 'Platform settings can only be viewed and changed by a super administrator. Ask one if something here needs to change.';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
@@ -254,6 +255,9 @@ function AdminSettings() {
         toast.show(outcome.message, 'error');
         router.refresh();
         return;
+      case 'reauth':
+        toast.show(outcome.message, 'warning');
+        return;
       case 'unknown': {
         const rebased = await reconcile(target, Object.prototype.hasOwnProperty.call(payload.changes, IDENTITY_KEY));
         if (!rebased) {
@@ -387,6 +391,9 @@ function AdminSettings() {
         toast.show(outcome.message, 'error');
         router.refresh();
         return;
+      case 'reauth':
+        toast.show(outcome.message, 'warning');
+        return;
       case 'unknown':
         toast.show(
           'The change was sent, but no response came back, so emergency mode may or may not have changed. The page now shows the current state; check it before trying again.',
@@ -507,6 +514,8 @@ function AdminSettings() {
         buttonRef={emergencyRef}
         onToggle={(turnOn) => void toggleEmergency(turnOn)}
       />
+
+      <SecurityPolicySection />
 
       <form
         ref={formRef}

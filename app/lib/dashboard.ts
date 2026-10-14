@@ -27,7 +27,7 @@ export const GROUP_PERMISSION: Readonly<Record<MetricGroup, Permission | readonl
   referrals: 'referrals.read',
   wallets: 'wallets.read',
   catalog: 'catalog.read',
-  flags: ['flags.read', 'withdrawals.read'],
+  flags: 'withdrawals.read',
   admins: 'admin_users.read',
 };
 

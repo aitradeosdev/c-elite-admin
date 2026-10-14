@@ -36,8 +36,9 @@ Next.js 16.2.2 App Router · React 19 · Supabase service-role server-side · Ta
   `newui.md` §67 explicitly says to consolidate these rather than replace them.
 - `proxy.ts` — CSP with per-request nonce + `strict-dynamic`, cross-origin POST rejection, mobile-admin bearer exemption.
 - `next.config.ts` — HSTS, `X-Frame-Options: DENY`, `nosniff`, Referrer-Policy, Permissions-Policy.
-- `app/lib/jwt.ts` — `verifyAdminJWT` re-reads `admin_users` on every request and checks `token_version`, so
-  deactivation and global session revocation take effect immediately. Dual cookie / `x-client: mobile-admin`
+- `app/lib/jwt.ts` — every request is checked through `admin_auth_state` (the admin row, `token_version`, and since
+  1.7s the device session and two-step state), so deactivation and session revocation take effect immediately; an
+  outage is a 500, never a sign-out. Dual cookie / `x-client: mobile-admin`
   bearer support — the mobile admin app depends on this (`master.md` §38).
 - `audit_log` is range-partitioned by month with an append-only trigger, `mask_audit_jsonb` account masking,
   automatic partition creation and pruning. Schema is thin but the substrate is sound.
@@ -59,7 +60,7 @@ Each row verified against the source at the cited location. Ordered by severity.
 | F-3 | ~~Dashboard money summed in the Node process from downloaded rows.~~ **FIXED.** Replaced by the `admin_dashboard_metrics(from, to, online_from, groups)` SQL function — one round trip, all aggregation in Postgres, scoped per permission group. | `schema.sql`, `app/lib/dashboard.ts` | master §7.3, §30 |
 | F-4 | ~~Every dashboard query swallowed its error into `0`.~~ **FIXED.** A failed aggregate surfaces as `metrics_error`; the page renders `Unavailable` per KPI plus a banner, and `/api/dashboard` returns `INTERNAL_ERROR` instead of a body of zeros. | `app/lib/dashboard.ts`, `app/(dashboard)/dashboard/page.tsx`, `app/_ui/Misc.tsx` | master §27, newui §3.7 |
 | F-5 | ~~Wrong pending-withdrawal count.~~ **FIXED.** The dashboard counted `status='initiated'`, which `admin_approve_withdrawal` sets *after* approval — so the "pending" KPI was counting in-flight payouts while the real review queue (`pending_review`, `held`) was never shown at all. Now split into `pendingWithdrawals` (review queue), `pendingWithdrawalValue` and `processingWithdrawals` (in flight). | `schema.sql` | master §7 |
-| F-6 | No wallet adjustment capability at all — no ledger, no adjustment, no approval path. | absent | master §10.2 |
+| F-6 | ~~No wallet adjustment capability at all.~~ **FIXED (1.7p):** single-admin, audited adjustments through `admin_adjust_wallet` with an append-only `wallet_adjustments` record (D-27, D-28, D-31). A full ledger with an opening balance per wallet stays with reconciliation (F-7). | `schema.sql` `admin_adjust_wallet`, `app/api/users/[id]/wallet-adjustments/route.ts` | master §10.2 |
 | F-7 | No reconciliation of any kind. | absent | master §8.6 |
 | F-9 | **Freeze/unfreeze reported success even when the database write failed.** The `update` result was never checked, so a failed write still returned `{success:true}` **and** wrote a `FREEZE_USER` audit row for a freeze that never happened — a false audit record, which is worse than a missing one. **FIXED**: the update is now a guarded compare-and-swap, the result is checked, and audit records `result: failure` with the error. | `app/api/users/[id]/route.ts` | master §14, §36 |
 | F-8 | **Card rejection is a 4-step non-atomic sequence.** Submission flips to `rejected`, then the `giftcard_credit` transaction is updated or inserted, then a notification is emitted, then the audit row is written. A failure after step 1 leaves a rejected submission with a stale credit transaction. Same shape in the `uphold` branch. | `app/api/card-queue/route.ts:190-262` | master §26 |
@@ -86,7 +87,7 @@ Each row verified against the source at the cited location. Ordered by severity.
 | # | Finding | Evidence | Spec |
 |---|---|---|---|
 | A-1 | **Permission model is page-level only.** `admin_users.page_permissions text[]` holds one key per page. Read and approve are the same grant: `withdrawals` permits both viewing and approving a payout. | `schema.sql` `admin_users`, all `app/api/*/route.ts` | master §15.2, §15.3, §39 |
-| A-2 | The standalone flag list and its Clear / Escalate / Reject actions were super-admin-only (`/api/flagged-transactions`, verified in the 21 Sept commit) with no page. Admins with Withdrawals access always saw each flag on the withdrawals they review (web drawer, mobile detail) and got flag alerts on mobile, and approving or rejecting a withdrawal resolves its flag. **Being fixed:** a Flagged page viewable by Withdrawals admins, super admins and `flags.read` holders (D-23). | `app/api/flagged-transactions/route.ts` | master §8.4 |
+| A-2 | The standalone flag list and its Clear / Escalate / Reject actions were super-admin-only (`/api/flagged-transactions`, verified in the 21 Sept commit) with no page. Admins with Withdrawals access always saw each flag on the withdrawals they review (web drawer, mobile detail) and got flag alerts on mobile, and approving or rejecting a withdrawal resolves its flag. **FIXED (D-23, D-24):** Withdrawals admins can read the flag list, so the mobile flag list works for them. There is no standalone page: the Withdrawals Review tab shows every flag, and approving or rejecting resolves it. | `app/api/flagged-transactions/route.ts` | master §8.4 |
 | A-3 | ~~`users_freeze` could only be granted by typing it into the admin-accounts form.~~ **FIXED (wave 2):** it is a checkbox in the admin-accounts grant grid, after Users. | `app/(dashboard)/admin-accounts/` | master §34 |
 | A-4 | Page guard is client-side: `Shell` renders `AdminNotFound` based on props. Server components do not re-check per-page permission; protection rests entirely on the API. Correct in effect today, but there is no `AccessDenied` screen and no server page gate. | `app/(dashboard)/_shell/Shell.tsx:96-100` | newui §74 |
 | A-5 | No roles. `role_title` is free text with no permission meaning. | `schema.sql` `admin_users` | master §15.1 |
@@ -106,9 +107,9 @@ Each row verified against the source at the cited location. Ordered by severity.
 
 | # | Finding | Evidence | Spec |
 |---|---|---|---|
-| I-1 | No MFA. | absent | master §15.5 |
-| I-2 | No password reset, no self-service password change, no invitations. Super admin types a password into a form and transmits it out of band. | `app/api/admin-accounts/route.ts:62-85` | master §15.4 |
-| I-3 | **No per-session records.** Revocation is a global `token_version` bump — all-or-nothing per admin. Per-session listing and revoke (newui §53) are impossible without a sessions table. | `app/api/admin-accounts/route.ts:177-181` | master §13, newui §53 |
+| I-1 | ~~No MFA.~~ **FIXED in code (1.7s), not deployed yet:** authenticator-app two-step sign-in with recovery codes, a required-for-all switch with a 14-day grace, super-admin and break-glass resets. | `app/lib/mfa.ts`, `app/api/auth/mfa/*`, `schema_admin_app.sql` | master §15.5 |
+| I-2 | No password reset, no invitations. Super admin types a password into a form and transmits it out of band. (Self-service password change: built in 1.7r.) | `app/api/admin-accounts/route.ts:62-85` | master §15.4 |
+| I-3 | ~~**No per-session records.**~~ **FIXED in code (1.7s), not deployed yet:** a database session per device (`admin_sessions`), listed on Profile and in Admin accounts, ended one at a time, all others, or everywhere. | `app/lib/session.ts`, `app/api/account/sessions/*`, `schema_admin_app.sql` | master §13, newui §53 |
 
 ### 1.7 UX consistency
 
@@ -348,8 +349,8 @@ Owner-visible changes worth knowing:
 - Platform balance: the Live/Static switch works and confirms; inputs validated; a conflicting save is refused.
 
 Follow-ups (not done):
-- Atomicity needs RPCs: rate saves, card/field reorders, add-card-type-to-country, the last-super-admin guard,
-  and the config compare-and-set are per-row or read-then-write today (partial results are reported, never silent).
+- ~~Atomicity needs RPCs: rate saves, card/field reorders, add-card-type-to-country, the last-super-admin guard,
+  and the config compare-and-set are per-row or read-then-write today.~~ Done in 1.7o.
 - ~~Emergency mode does not stop approving withdrawals already in review.~~ Decided D-18: it does (database check in `admin_approve_withdrawal`; console refuses up front and shows a notice).
 - Mobile (release, no OTA without instruction): send a reason with emergency toggles; validate rates; the
   field-builder screen still reads `GET /api/cards`, which builder-only admins cannot.
@@ -394,8 +395,8 @@ Remaining follow-ups (not done):
   review (the console now refuses deletes in that state and warns on renames).
 - Ending a user's sessions is immediate for refresh and every GoTrue-validated call, but an unexpired access token
   still works with PostgREST for up to an hour; no index on `users.last_active_at` for the monitor poll.
-- Atomic RPCs still wanted: rate saves, reorders, add-card-type-to-country, app-config compare-and-set, the
-  last-super-admin guard.
+- ~~Atomic RPCs still wanted: rate saves, reorders, add-card-type-to-country, app-config compare-and-set, the
+  last-super-admin guard.~~ Done in 1.7o.
 
 Owner decisions (resolved 2026-10-04): Activity keeps the grant (D-19); referral settings stay visible read-only (D-20); "Users online" is 5 minutes everywhere (D-21). Still open: the user activity nav item is shown to grant holders who then hit Access denied (every route there is super-admin only).
 
@@ -409,7 +410,7 @@ enforces it now scans the source. The shared config form sends the raw values it
 save that would overwrite another admin's change is refused (409) and the form reloads the live values,
 keeping the other edits. Gate: 0 type errors, **2,193 tests**.
 
-Left as they are (described for later): logout's `token_version` bump is read-then-write; the login burst
+Left as they are (described for later): logout's `token_version` bump is read-then-write (done in 1.7o); the login burst
 alert insert does not match the canonical `admin_alerts` columns, so it has probably never been saved; the
 login rate limit fails open if its RPC errors; mobile sign-in failures (edge function) do not count toward
 the web lockout; config numeric validation stays as loose as before (`''`, `null` pass and are stored as text).
@@ -431,13 +432,217 @@ Left as they are: the search text filters use the same unindexed `ilike` columns
 limits and a time budget; trigram indexes would need a schema change); the mobile flag list shows Clear/Escalate
 only for status `pending`, but the database value is `pending_review`, so mobile admins cannot resolve flags until
 a mobile release fixes the check; flag history shows only the latest review (one reviewed_by / reviewed_at per row);
-the dashboard "Open flags" tile still needs `flags.read` to appear.
+the dashboard "Open flags" tile still needs `flags.read` to appear (superseded, see 1.7m).
+
+### 1.7m Flagged page removed, Held folded into Review (2026-10-10)
+
+Owner decisions D-24 and D-25. Two units ran side by side, each adversarially reviewed (Flagged removal: fixed;
+Held fold: pass). Gate: 0 type errors, **2,365 tests**.
+
+Removal: the Flagged page, its sidebar item, its search group and its palette records are gone. Old "flags" palette
+recents in a viewer's browser are dropped on the next save. The helpers the flags API needs moved unchanged into
+`app/lib/flags.ts`. The API keeps the contract the mobile flag list relies on: read with `flags.read` or
+`withdrawals.read`, 200 rows by default and at most, and `flags.resolve` to clear or escalate. The sidebar's
+alternative-key rule, which only the Flagged item used, is removed again. A test fails if anything links to the old
+page path.
+
+Held fold: Review lists `pending_review` and `held` withdrawals through the route's existing `review=1` filter, the
+same one the mobile app sends. A held withdrawal shows a "Held" pill in the table row, the narrow-screen list and the
+drawer. `?tab=held` lands on Review. Approve and Reject are unchanged. A test pins the route's review statuses to the
+tab's statuses. Builder fix: switching between Review and All no longer briefly shows the other tab's rows.
+
+Dashboard: the "Open flags" tile links to the Withdrawals Review tab, so it and its server-side count now need
+`withdrawals.read`. A `flags.read`-only admin would otherwise have been sent to a page they cannot open.
+
+Left as they are: a Review export's audit entry records `review: true` where it used to record
+`status: 'pending_review'`; visiting `?tab=held` keeps the old parameter in the address bar until the next tab
+change or row open (cosmetic). On the web, `flags.read` and `flags.resolve` no longer show anything on their own.
+Flags appear on Withdrawals, which needs `withdrawals.read`, and approving or rejecting resolves them. The API keeps
+both grants for the mobile app; the mobile rebuild decides whether they stay.
+
+### 1.7n Scoping: wallet adjustments and admin security (2026-10-10)
+
+Two read-only scoping passes (code plus aggregate and catalog probes of live); every claim below was re-checked.
+
+- **Platform email is failing at the mail-server step, and both templates are now switched off** (verified 2026-10-10
+  from the template audit history, live query statistics and pg_net responses). `new_device_login` has been off since
+  17 May, which alone explains the missing new-device emails. `admin_security_alert` was on from its 16 May seed until the
+  sole super admin switched it off on 8 October (from a local run of the rebuilt console). In that period about 1.39
+  million attempts passed the template and recipient checks and failed in the SMTP block of `send-email`; none was
+  marked sent or audited. The last successful sends were 17 alerts between 14 April and 16 May. Likely cause, unverified:
+  `SMTP_PORT` defaults to 587 and only 465 uses implicit TLS, while Supabase edge functions cannot connect out on 25 or
+  587. Four flagged-transaction alerts (1 October and three on 10 October) are retried every 5 minutes with no backoff.
+  Password reset and invitations need this fixed first; they also need a recipient rule that admits invitees, lowercase
+  admin emails, visible link text (the plain-text part strips links) and server-side calls that report failures.
+- **Wallet balances do not all come from the ledger.** 7 of 43 wallets hold money with no transactions at all, and
+  one deleted account still has a balance. Adjustments therefore record balance before and after themselves.
+- **The shipped user app shows bonus transactions as a red minus** (only three types count as money in). The wallet
+  user-app update fixes this alongside the new types.
+- **The login burst alert has never been saved** (its insert does not match `admin_alerts`); fixed with the security work.
+- **`/api/auth` with `x-client: mobile-admin` is an unused second bearer-token login** (the mobile app signs in through
+  the `admin-mobile-api` edge function); it is removed together with two-step sign-in so it cannot bypass it.
+- Rejected: the claim that canonical `schema.sql` lacks REVOKEs for `terminate_user_sessions`, `clear_flagged`,
+  `escalate_flagged` and the withdrawal approve/reject functions. A bulk block and explicit lines cover all five.
+
+### 1.7o Atomic database functions and the route switch (2026-10-10)
+
+Eight functions plus a trigger in canonical `schema.sql`: `app_config_compare_and_set`, `admin_bump_token_version`,
+`admin_save_rates`, `admin_reorder_cards`, `admin_reorder_card_type_templates`, `admin_reorder_template_fields`,
+`admin_add_card_type_to_country`, and `enforce_last_super_admin` with `trg_enforce_last_super_admin`. Adversarially
+reviewed against live (pass); 126 PGlite assertions. One fix after review: rows the config function creates are public
+unless listed as private, like the column default and the old upserts (private-on-create would have hidden new keys such
+as `min_data_amount` from the user app). Handed over in chat, copied from the canonical lines (202-239, 523-641,
+3352-4006); the console changes below need these functions on live before they deploy.
+
+Route switch, four units with strict file ownership, each adversarially reviewed (rates and identity pass, catalog and
+config fixed), then an integrator. Gate: 0 type errors, **2,486 tests**. The mobile app's requests to every switched
+route were checked and still work.
+- Rates: a save is all-or-nothing; on a conflict or a missing range nothing is saved and the page says so, keeps the
+  staged edits and lists the conflicting rows. The "N of M saved" outcome is gone.
+- Cards and field builder: each reorder and the add-card-type-to-country step is one call; the half-copied and
+  "could not be switched on" outcomes are gone.
+- Logout bumps `token_version` in one statement. The trigger refuses removing the last active super admin;
+  admin-accounts maps it to a 409, and the automatic lock after failed sign-ins skips that account and records
+  `ADMIN_AUTO_DEACTIVATION_SKIPPED` once per lockout window (sign-in still answers invalid credentials).
+- The seven config writers (limits & fees, bill settings, anomaly alerts, security limits, app config, admin settings,
+  platform balance) save through `app/lib/configCas.ts`; admin settings seals secret keys on every save.
+
+Left as they are: a transport failure after commit is reported as "could not be confirmed, reload" on the config
+routes and as "not saved" on the catalog routes (saving again is safe); a no-op admin-settings save that seals a public
+secret does not clear the public config cache (as before); the add-country error names the country code, not the card
+type; the skip audit's duplicate check is not atomic (at worst two rows); admin-accounts PATCH still bumps
+`token_version` itself, guarded by a compare-and-set.
+
+### 1.7p Wallet adjustments (2026-10-10 → 10-11)
+
+Database (canonical `schema.sql` 4008-4313 and 4694-4703, `schema_admin_app.sql` 577-612; live and verified
+identical on 2026-10-11): the append-only `wallet_adjustments` record (service-role read only, no edit, delete or
+truncate), `admin_adjust_wallet` (one transaction: admin and permission check, input validation, a per-key lock with
+replay of an identical retry and refusal of a mismatched one, deleted-account, self-adjustment and emergency-mode
+refusals, per-adjustment and per-admin Lagos-day limits read from private config with safe fallbacks, wallet row lock,
+optional expected-balance check, never below zero, then the wallet update, a `wallet_credit` / `wallet_debit` transaction
+whose metadata the user sees holds only the note, the record, the audit row and the user notification), the two private
+limit settings (₦500,000 and ₦2,000,000), the `wallet_credited` / `wallet_debited` templates and the super-admin alert.
+SQL reviewed adversarially (fixed: a malformed limit could raise instead of falling back; the limits are forced private);
+179 PGlite assertions.
+
+Console: "Adjust wallet" on the user page (users.read and wallets.adjust; hidden for accounts being deleted) opens a side
+panel with the live balance, limits and today's remaining allowance, frozen / emergency / pending-withdrawal notices,
+credit or debit, a kobo-exact preview, reason, reference and the message the user sees; a financial confirm (typed
+amount from ₦100,000); one idempotency key per panel session, and an unknown outcome locks the panel to "Retry safely"
+with the same key. Limits & Fees gains the two limits (always saved private). `wallets.adjust` is enforced; Activity
+labels `CREDIT_WALLET` / `DEBIT_WALLET`; the transactions explorer labels and filters the new types. Reviewed
+adversarially (fixed: the notification preview now matches the database's amount format; the limit parser matches the
+database; an ambiguous connection loss is treated as unknown, never as "nothing changed"). Gate: 0 type errors,
+**2,592 tests**. User app: the history labels ship with the next app update (D-27), which must go out before the first
+adjustment.
+
+Left as they are: `list_admin_activity` has no `wallet_adjustments` branch, so the legacy activity list (used by the
+mobile app) shows no target label for adjustment rows; concurrency was argued from the locks, not exercised with real
+parallel sessions; the request IP is stored as "unknown" when no forwarding header is present, as elsewhere.
+
+### 1.7q Withdrawal redesign (user app) and its backend (2026-10-11)
+
+Owner decisions D-33 to D-38. Backend in canonical `schema.sql`: saved-account defaults (765-813: `is_default`, one default
+per user, a BEFORE INSERT trigger that makes the first account the default and pins a sole legacy row, and
+`set_default_beneficiary` for authenticated users only); `evaluate_giftbox_rules` with the `has_bank_account` branch as a
+no-op, its stray GRANT to authenticated replaced by a REVOKE, and a cleanup of boxes holding the rule (2659-2892);
+`finalize_account_deletion` deleting the user's saved accounts plus a cleanup of rows left by deleted users (5056-5118).
+Reviewed adversarially (pass); 57 + 28 + 43 PGlite assertions. `process-withdrawal` v60 deployed 2026-10-11 with the
+Lagos-day pre-check (D-37); the live bundle was confirmed to match the local sources line for line before the deploy.
+User app (not yet published): a new amount pad with its own keypad (`app/withdraw.tsx`), a new Add Account page
+(`app/withdraw/add-account.tsx`), shared `components/withdrawUi.tsx`, `components/AmountKeypad.tsx`,
+`lib/withdrawRules.ts` and the extended `lib/beneficiariesCache.ts`; Confirm, success, failed, PinSheet and navNonce are
+byte-identical. Reviewed adversarially (fixed: two cache races); user-app typecheck 0. Console (D-36): the rule is retired
+in `rewardRules.ts` (rewards tests 50/50, admin typecheck 0).
+
+Left as they are: device checks on a small Android (360×740: footer, compact keys, 9-digit amount, the custom narration
+input above the keyboard, swipe-to-remove, the three-line "bank unavailable" row) before publishing; the three users with
+a saved account today will see "bank unavailable" once (their bank names come from an earlier provider's list); a deleted
+user's still-valid access token could re-insert a saved account until it expires (re-running the cleanup removes it);
+`fetchBankLogos` keeps an empty bank list in memory until the app restarts (pre-existing).
+
+### 1.7r Admin Profile page, phase 1 (2026-10-11 → 10-12)
+
+D-29, no SQL. Clicking the avatar, name and role at the bottom of the sidebar opens `/profile` (every admin; no nav key),
+with a "Profile" crumb in the top bar and a "Profile" command in the palette. The page shows the admin's own account
+(username, email, role, super-admin badge, last sign-in and created date in WAT, fresh from `GET /api/auth/me`) and a
+Change password form (three fields with show/hide, a live checklist of the rules, a confirm that says other devices
+including the mobile app are signed out). `POST /api/account/password`: own account only, 5 attempts per 15 minutes
+failing closed, a wrong current password is a 400 (never 401), policy = the existing rules plus at most 72 UTF-8 bytes,
+not the current password, not containing the username or email local part (shared `app/lib/passwordPolicy.ts`); one
+compare-and-set update of the hash and `token_version`, then this web session's cookie is re-issued so only the other
+sessions end; `PASSWORD_CHANGED` / `PASSWORD_CHANGE_FAILED` audited without password material. Fixes: the failed
+sign-in burst alert is finally saved (through `emit_admin_alert`, super admins only, no email or IP, once per 30-minute
+window even under concurrent attempts); the session-expired text no longer mentions inactivity. Reviewed adversarially
+(fixed the concurrent burst-alert duplicate). Gate: 0 type errors, **2,659 tests** (plus the crumb and palette follow-up:
+225 targeted tests, typecheck clean).
+
+Left as they are: a password change starts a fresh 8-hour session for the current browser; revoked devices keep their
+push tokens until they sign in again (the sessions phase handles it); admin-accounts (a super admin setting another
+admin's password) does not yet apply the 72-byte rule; the mobile app has no deep link for the alert's `/activity` target.
+
+### 1.7s Admin security phase 2: signed-in devices and two-step sign-in (2026-10-12 → 10-14)
+
+D-29, D-30, D-39, D-40. **SQL live** (run 2026-10-13; the statements the SQL editor ran were checked against
+`schema_admin_app.sql` byte for byte): five service-only tables (`admin_security_policy`, `admin_sessions`, `admin_mfa`,
+`admin_mfa_recovery_codes`, `admin_auth_challenges`), 26 functions, a trigger that releases an admin's push tokens when
+`token_version` changes, `get_admin_alert_recipients` limited to admins signed in on the phone, and the nightly
+`prune-admin-auth` job. **Edge functions live** (2026-10-14 10:32 WAT, after a read-only pre-deploy gate on the live
+database, the secrets, the installed mobile app and the deployed console): `admin-mobile-api` v29 and
+`register-admin-push` v43, live code checked equal to the repo, both booted; `ADMIN_MFA_ENCRYPTION_KEY` was set on
+Supabase by the owner and checked by fingerprint against `admin/.env.local` (and copied into `supabase.env`). The console
+is built, reviewed and tested but **not deployed**: until it is, the live web console ignores two-step sign-in, while
+the phone already enforces it. The superadmin turned two-step sign-in on through a local copy of the new console
+(2026-10-13 21:57 WAT).
+
+Sessions: every sign-in opens a database session per device (web 8 h, mobile 24 h, never sliding) whose id rides in the
+token; each request checks it with one `admin_auth_state` call, and an outage is a 500, never a sign-out. Log out ends
+this device only; Profile → Signed-in devices lists the admin's devices with "Sign out other devices" and "Sign out
+everywhere"; a super admin can end one device of another admin (Admin accounts → Security). Two-step sign-in: an
+authenticator app (TOTP, ±1 step, each code usable once), set up from Profile, or at sign-in once it is required; 10
+single-use recovery codes (web only, shown once, copy and download); the security actions re-check identity with a code
+(or the password before two-step is on) within 5 minutes. 10 wrong codes in 15 minutes lock it for 15 minutes and 30 in
+24 hours for 24 hours (D-40); web and mobile show the same unlock time in WAT, with the date when it ends on another
+day. On the phone the code is typed straight after the password (D-30). Admin settings: a super admin who has two-step
+sign-in turns "required for all admins" on, which starts the 14-day grace (banner and alerts), and can turn it off. A
+super admin can reset another admin's two-step sign-in (never their own); when no other super admin can help, the
+SQL-editor break-glass reset is the way back in (README §10.4). The key is `ADMIN_MFA_ENCRYPTION_KEY` (README §10.1 and
+§10.6, PRODUCTION_CUTOVER §3). Gate: 0 type errors (incremental and cache-free), **3,161 tests**. The adversarial review
+of the sign-in core and routes passed with no change; the screens review fixed three things (the code-step error is
+announced to screen readers, the lock sentence clears when the lock ends, a too-short reason no longer uses up the
+step-up code).
+
+Ship order (D-39, each step on the owner's instruction): ~~set `ADMIN_MFA_ENCRYPTION_KEY` as the `admin-mobile-api`
+secret~~, ~~deploy `admin-mobile-api` and `register-admin-push`~~ (done 2026-10-14), set the same key on the admin host
+(Vercel), deploy the console, run the smoke test, then switch the requirement on. Phone alerts reach only admins signed
+in through the new `admin-mobile-api`, so every admin signs in on the phone again after the edge deploy (no phone was
+registered on 2026-10-13). 24 hours after the console deploy, a follow-up release refuses tokens without a session id
+(D6).
+
+Follow-ups from the reviews (D-41, 2026-10-14): `GET /api/auth/me` answers a failed account read with 500 (the guard's
+"Your session could not be checked" wording), not 401; the withdrawal approve route forwards the token the guard has
+just verified (`sessionTokenFromRequest()` in `app/lib/jwt.ts`, shared with the guard) instead of re-checking it, so an
+outage can no longer sign the phone out, and a mobile approval can no longer forward a different web cookie; replacing
+recovery codes has the fail-closed limit `admin_mfa_recovery_codes`, 5 per 15 minutes, checked before any code work like
+the identity check's `admin_reauth`; a root `app/error.tsx` keeps errors from the console layout inside the console's
+look and retries the server render (`unstable_retry`). Adversarial review passed with each fix reverted to prove its
+test; gate: 0 type errors (cache-free), **3,177 tests**.
+
+Left as they are: a step-up code is used up when the identity check passes but the action after it fails with a
+retryable error (the admin waits for the next code); `verifyAdminJWT` is still exported but unused by routes (it turns an
+outage into a sign-out, so new code must use the session helpers); `(dashboard)/error.tsx` still retries with `reset()`; a cookie stolen within 5 minutes of sign-in passes the identity
+re-check (by design, D3/D9); no browser pass was possible on this machine, so the smoke test covers the new screens at
+360, 375 and 390 px in light and dark before the requirement is switched on; click flows are pinned by source patterns
+because the test harness renders on the server only; the grace banner's days-left count refreshes on reload; if setup
+at sign-in turns two-step on but the session then fails to open, the admin never saw the recovery codes and makes new
+ones on Profile.
 
 ### 1.8 Missing database infrastructure
 
 Required by the target, absent from `schema.sql` / `schema_admin_app.sql`:
 
-`admin_roles` · `admin_role_permissions` · `admin_sessions` · `admin_mfa` · `admin_invitations` ·
+`admin_roles` · `admin_role_permissions` · ~~`admin_sessions`~~ · ~~`admin_mfa`~~ (built in 1.7s) · `admin_invitations` ·
 `admin_password_resets` · `risk_cases` · `risk_case_events` · `user_notes` · `user_tags` ·
 `saved_views` · `config_versions` · `approval_requests` · `wallet_adjustments` · `wallet_ledger` ·
 `reconciliation_runs` · `reconciliation_items` · `provider_events` · `provider_health` ·
@@ -500,12 +705,12 @@ Plus columns on `audit_log` (U-1) and a set of server-side aggregate functions t
 | SEC-04 | Permission catalog page | `TODO` | newui §52 |
 | SEC-05 | Admin directory | `PART` | `/admin-accounts` exists |
 | SEC-06 | Admin invitations | `TODO` | I-2 |
-| SEC-07 | Password change (self) | `TODO` | I-2 |
+| SEC-07 | Password change (self) | `DONE` | Profile → Change password (1.7r); not deployed yet |
 | SEC-08 | Password reset | `TODO` | I-2 |
-| SEC-09 | MFA | `TODO` | I-1 |
-| SEC-10 | Per-session records + listing | `TODO` | I-3; needs `admin_sessions` |
-| SEC-11 | Per-session revoke | `TODO` | I-3 |
-| SEC-12 | Revoke-all per admin | `DONE` | `token_version` bump |
+| SEC-09 | MFA | `DONE` | Two-step sign-in with an authenticator app and recovery codes (1.7s, I-1); not deployed yet |
+| SEC-10 | Per-session records + listing | `DONE` | `admin_sessions`; Profile → Signed-in devices, Admin accounts → Security (1.7s, I-3); not deployed yet |
+| SEC-11 | Per-session revoke | `DONE` | One device, other devices or everywhere, own or (super admin) another admin's (1.7s); not deployed yet |
+| SEC-12 | Revoke-all per admin | `DONE` | `token_version` bump, which also ends every device session |
 | SEC-13 | Login / failed-login / logout audit events | `DONE` | `LOGIN`, `LOGIN_FAILED`, `LOGOUT`, `ADMIN_AUTO_DEACTIVATED` written through `writeAudit` with result, request id and user agent (wave 4) |
 | SEC-14 | Access policies page | `TODO` | newui §56 |
 | SEC-15 | Audit schema extension | `DONE` | `audit_log` gained `admin_role`, `user_agent`, `request_id`, `reason`, `result`, `error`, `sensitivity` + 5 indexes — live, verified 2026-10-01. `app/lib/audit.ts` writes them; 31 unmigrated routes still insert the legacy columns directly |
@@ -513,7 +718,7 @@ Plus columns on `audit_log` (U-1) and a set of server-side aggregate functions t
 | SEC-17 | Sensitive-data reveal permission + audit | `TODO` | S-2 |
 | SEC-18 | Export audit everywhere | `DONE` | Every export (activity, transactions, users, withdrawals — CSV and PDF) writes `EXPORT_CSV` / `EXPORT_PDF` through `writeAudit` and is blocked if the audit write fails |
 | SEC-19 | Remove unrestricted external card sharing | `DONE` | Owner chose S-1 option 2: sharing kept, gated by `sensitive_data.share` / `sensitive_data.download`, every share audited and blocked if the audit write fails. Web live in code; the mobile change ships with the next mobile release — until then the installed mobile app still shares without the gate |
-| SEC-20 | Login rate limiting / brute-force protection | `DONE` | Per-IP (20/10min) + per-account (10/30min) via `check_rate_limit_by_key`, constant-time dummy compare, burst alert at 5 fails/30min, auto-deactivation at 25 fails/24h |
+| SEC-20 | Login rate limiting / brute-force protection | `DONE` | Per-IP (20/10min) + per-account (10/30min) via `check_rate_limit_by_key`, constant-time dummy compare, burst alert at 5 fails/30min, auto-deactivation at 25 fails/24h. Phase 2 (1.7s): identity check `admin_reauth` 5/15min, setup `admin_mfa_enroll` 10/15min, recovery codes `admin_mfa_recovery_codes` 5/15min, all failing closed; two-step locks 10 wrong codes/15min → 15 min and 30/24h → 24 h (D-40) |
 
 ### Phase 4 — Core operations (`master.md` §7–§9 · `newui.md` §3–§10)
 
@@ -540,7 +745,7 @@ Plus columns on `audit_log` (U-1) and a set of server-side aggregate functions t
 | OPS-19 | Withdrawals — failure recovery (retry, re-route, mark paid/refunded) | `TODO` | newui §5.9 |
 | OPS-20 | Withdrawals — hold / release | `TODO` | |
 | OPS-21 | Transaction explorer + detail page | `PART` | List exists; no detail route |
-| OPS-22 | Flagged transactions UI | `DONE` | `/flagged-transactions`: tabs, filters, search, drawer with the related withdrawal (masked), Clear / Escalate / Reject with reasons (`flags.resolve`); viewable by Withdrawals admins (D-23); says plainly that resolving a flag never pays or refunds — "Open withdrawal" for the payout decision |
+| OPS-22 | Flagged transactions UI | `N/A` | Owner decision D-24: flagged withdrawals are handled on the Withdrawals page; no standalone page. The API remains for the mobile app |
 | OPS-23 | Operations queue | `TODO` | master §8.5 |
 | OPS-24 | Reconciliation | `TODO` | F-7 |
 | OPS-25 | User directory — server search, filters, bulk, export | `PART` | |
@@ -593,7 +798,7 @@ That makes every surface below in scope, including login, empty/loading/error st
 | VIS-04 | Theme selector — Light / Dark / System, persisted, integrated in the shell | `DONE` | `app/_ui/theme.tsx` + `app/_ui/ThemeSwitcher.tsx`. Cookie **and** server (`admin_users.theme_preference`), no-flash inline script in `app/layout.tsx`, live `prefers-color-scheme` following. Moved out of `_shell/` so login shares one implementation |
 | VIS-05 | Theme applies consistently everywhere; no hardcoded light-only colour | `PART` | Added `--overlay-scrim`, `--overlay-scrim-heavy`, `--overlay-control-*` and `--z-lightbox`. Card queue and login are now clean. Remaining concentrations: `coupons/TermsOfUseManager.tsx` (18), `_shared/RuleBuilder.tsx` (17), `activity/page.tsx` (11). `global-error.tsx` keeps literals deliberately |
 | VIS-06 | Login as part of the product: same type, spacing, tokens, quality | `DONE` | Rebuilt on tokens + a CSS module. Was 100% inline styles with 15 hardcoded colours and no dark mode at all |
-| VIS-07 | Login: visibility toggle, validation, auth errors, loading, responsive, keyboard | `PART` | Per-field validation on blur with `aria-invalid` + `aria-describedby`, `role="alert"` form error, distinct 429 copy, network-failure copy, disabled-while-submitting, autofocus, reduced-motion, `?next=` return with an open-redirect guard. MFA step still absent (B-1) |
+| VIS-07 | Login: visibility toggle, validation, auth errors, loading, responsive, keyboard | `PART` | Per-field validation on blur with `aria-invalid` + `aria-describedby`, `role="alert"` form error, distinct 429 copy, network-failure copy, disabled-while-submitting, autofocus, reduced-motion, `?next=` return with an open-redirect guard. Two-step code, recovery-code and set-up-at-sign-in steps built (1.7s) |
 | VIS-08 | Information density — compact tables, restrained whitespace, strong alignment | `TODO` | |
 | VIS-09 | No oversized cards / giant headings / decorative illustration / generic SaaS look | `TODO` | |
 | VIS-10 | Tables: compact rows, sortable headers, sticky header, selection, bulk, column visibility, row actions | `PART` | `Table` primitive has density + sticky; no sort/selection/bulk/columns |
@@ -662,6 +867,24 @@ Recorded as they are made, per prompt §42.
 | D-21 | **Owner decision (2026-10-04): "Users online" means active in the last 5 minutes** on the dashboard and the user activity monitor. | The monitor used 90 seconds, so the two numbers disagreed. |
 | D-22 | **Owner decision (2026-10-04): audit history is kept for 7 years** (`prune_audit_log_partitions(2557)` in `cron_jobs.sql`), matching transaction records. | The 90-day prune would have deleted who approved which payout from 1 November 2026. |
 | D-23 | **Owner direction (2026-10-09): the Flagged page is viewable by admins with Withdrawals access** (plus super admins and `flags.read` holders); clearing, escalating or rejecting a flag directly stays `flags.resolve`. | Every flag in the system is a withdrawal flag, and Withdrawals admins already see each one on the withdrawals they review; approving or rejecting the withdrawal resolves its flag. This also fixes the mobile flag list, which refused them. |
+| D-24 | **Owner decision (2026-10-10): no standalone Flagged page.** Flagged withdrawals are handled on the Withdrawals page (Held later folded into Review, D-25); the page, its sidebar item and the search group are removed, and the dashboard "Open flags" tile links to the Withdrawals review tab. Supersedes the page part of D-23. | Every flag is a withdrawal flag and the Withdrawals page already shows each one and resolves it on approve/reject. The flags API stays (with Withdrawals-admin read access) because the mobile app's flag list uses it. |
+| D-25 | **Owner decision (2026-10-10): the Withdrawals Held tab is folded into Review.** Review lists pending-review and held withdrawals (held ones marked "Held"); `?tab=held` lands on Review. | Nothing ever moves a withdrawal to `held` (only the uncalled `escalate_flagged`), so the tab was always empty; folding it in means a held withdrawal can never be hidden, and the dashboard's "Pending withdrawals" count (both statuses) now matches the page it links to. |
+| D-26 | **Owner decision (2026-10-10): live admin pages move from polling to realtime signals** (queued after the atomic SQL, wallet adjustments and admin security). Database triggers send "changed" signals (table + id + status, never card codes or account numbers) on private, permission-scoped Realtime channels; pages refetch through their existing API routes; a slow safety refresh stays. Admins get short-lived Realtime passes from the console server. | Withdrawals polls every 5 s and other live pages every 30–60 s; signals make updates instant with near-zero idle load. Signal-only keeps sensitive data and permission checks in the API. Admin-only broadcast does not reopen the user-app decision to keep feeds off postgres_changes. Needs one SQL handover and two host settings (public URL/anon key; server-only signing key). |
+| D-27 | **Owner decision (2026-10-10): wallet adjustments get their own history types, `wallet_credit` and `wallet_debit`, shipped with a user-app update the owner publishes.** | The shipped app shows only `giftcard_credit`, `bonus_redeem` and `withdrawal_refund` as money in and prints any other type's raw name. Until a user updates, a credit shows as a red minus with the raw label, so the update should be published before the first adjustment. |
+| D-28 | **Owner decision (2026-10-10): adjustment limits are ₦500,000 per adjustment and ₦2,000,000 per admin per day**, for every admin including super admins, held in private config and editable in Limits & Fees. | One admin acts alone (no second approver), so the limits are the compensating control. |
+| D-29 | **Owner decision (2026-10-10): two-step sign-in (authenticator app) is required for every admin after a 14-day grace period.** Each admin's own settings (account details, change password, two-step sign-in and recovery codes, signed-in devices) live on a new Profile page, opened by clicking the avatar, name and role at the bottom of the sidebar; Log out stays a separate button there. Actions on other admins stay in Admin accounts. | The owner wants one place for per-admin settings, reachable by every admin without a permission. |
+| D-30 | **Owner decision (2026-10-10): until the mobile admin app is rebuilt, mobile sign-in takes the 6-digit code typed straight after the password.** | Keeps two-step sign-in effective with no mobile release; exempting mobile would let a stolen password in through the phone app. |
+| D-31 | Wallet adjustment defaults (2026-10-10). The user is notified of every credit and debit by push and in-app (two editable templates are the global switch). The user sees only a short message (presets or up to 140 characters, default "Balance adjustment by CardElite support."), never the internal reason or reference. A wallet never goes below zero. Deleted accounts are refused; frozen accounts are allowed with a warning and the state is recorded; emergency mode refuses credits and allows debits. An admin cannot adjust the user account that has their own email. The route needs `users.read` and `wallets.adjust`. Mistakes are corrected with an opposite adjustment, never edited. Every adjustment raises a super-admin alert. | One approver means the controls sit in the database function. Emergency mode mirrors D-18; debits stay possible so a clawback is never blocked. The transaction row is readable by the user, so internal notes live in a separate service-only table. |
+| D-33 | **Owner decision (2026-10-10): the user app's withdrawal flow is redesigned in the light theme** (the app has no dark mode): a big amount with its own keypad, the default account and narration in one card, limits behind an info button; "Saved Beneficiaries" becomes a dedicated Add Account page where users add accounts and pick a default; Confirm Withdrawal is unchanged. Mock-up: the "Withdrawal Redesign" canvas. | Owner-requested; the light flow never switches theme between Withdraw, Confirm and the PIN sheet. |
+| D-34 | **Owner decision (2026-10-10): the minimum withdrawal stays checked after the fee.** With a ₦50 fee the smallest amount that goes through is ₦1,050, and the pad says so. | `process-withdrawal` checks `min_withdrawal_amount` against the payout (amount minus fee); the pad now matches it, so nothing fails after the PIN. |
+| D-35 | **Owner decision (2026-10-10): the withdrawal narration defaults to "Personal".** | One tap fewer for a repeat withdrawal; users can still pick another preset or write their own. |
+| D-36 | **Owner decision (2026-10-10): the "has a saved bank account" gift-box rule is removed.** The console no longer offers it (a box that still has it shows it as removed), the database treats it as no requirement so it can never block a claim, and it is stripped from any box that has it (none on live, checked 2026-10-10). | With the Add Account page users can save an account without withdrawing, so the rule no longer means anything. The database keeps a harmless branch because `evaluate_giftbox_rules` raises on unknown rule types and the deployed console still offers the rule until the new one ships. |
+| D-37 | **Owner decision (2026-10-11): `process-withdrawal`'s quick daily-limit check uses the Lagos day**, like `process_withdrawal_debit` and `get_withdrawal_daily_status`, and the function is redeployed with the withdrawal redesign. | It started the day at UTC midnight (01:00 Lagos), so between 00:00 and 01:00 Lagos a user who had reached the previous day's limit was refused after entering the PIN. |
+| D-38 | **Owner decision (2026-10-11): deleting a user account also deletes that user's saved bank accounts**, and the saved accounts already left behind by deleted users are removed. | Saved accounts are convenience data; the withdrawal records, which audits rely on, keep the payout details for 7 years. `finalize_account_deletion` left them in place (one live row belonged to a deleted user). |
+| D-39 | Admin security phase 2 design (2026-10-12, from the verified plan). Sessions are per device: web 8 h, mobile 24 h, never sliding; a session is live only while its token_version matches the admin's, so every existing "sign out everywhere" path still ends all of them. "Log out" ends this device only; Profile offers "Sign out other devices" and "Sign out everywhere"; a super admin can end any one device of another admin. Two-step sign-in: TOTP (RFC 6238, ±1 step, replay guard), 10 single-use recovery codes (web only), secrets encrypted with AES-256-GCM under one key, `ADMIN_MFA_ENCRYPTION_KEY`, held identically by the console hosts, `admin/.env.local` and the `admin-mobile-api` function secret; a missing key fails closed. No self-service authenticator replacement: a lost phone means a recovery code then a super-admin reset, or the SQL-editor break-glass reset for the sole super admin. The QR is drawn server-side with `qrcode-generator@2.0.4` (pinned, MIT, no dependencies). Enforcement is off until a super admin with two-step sign-in switches "required for all admins" on in Admin settings, which starts the 14-day grace (D-29). Ship order: SQL, secret, edge functions, console, then enforcement; each deploy on the owner's instruction. | Verified plan (four read-only verifications and a lead review); "share, never reimplement": the sign-in failure policy moves into SQL so the web and mobile paths count the same failures. |
+| D-41 | Phase-2 review follow-ups (2026-10-14, owner's standing instruction): a database outage never signs anyone out on `/api/auth/me` or the mobile withdrawal approve (500, D8); recovery-code replacement gets the same fail-closed 5-per-15-minutes limit as the identity check (D10); a root error page keeps layout errors inside the console. Left: a step-up code is spent when the action after a passed identity check fails with a retryable error. | The reviews flagged these as the remaining ways an outage could sign an admin out or a code could be guessed without a count; the spent-code case is rare and fixing it would weaken the 5-minute re-check. |
+| D-40 | **Owner decision (2026-10-12): code guessing has a daily cap.** Besides the 15-minute lock after 10 wrong codes, 30 wrong codes in 24 hours lock two-step sign-in for 24 hours; it unlocks by itself and a super admin can reset it sooner. | With only the 15-minute lock, an attacker who already has the password could keep guessing at about an 8% chance a month; the cap cuts that to about 0.3% while a lock can never outlast a day. |
+| D-32 | Admin security defaults (2026-10-10). Invite links last 72 hours, reset links 30 minutes and sign-in challenges 5 minutes, all single use. Password policy: the current rules, plus at most 72 bytes and not the username, email or current password; no expiry. On the web, new admins join by invitation and reset links; the API keeps accepting passwords from the mobile app until its rebuild. `admin_*` email templates are editable by super admins only. Re-authentication applies to admin-security actions first. Idle timeout is deferred and the session-expired text corrected. A two-step reset does not force a password reset; the admin and the other super admins are notified. | Taken from the scoping report; each follows the specs where they speak and the safer common choice where they are silent. |
 
 ---
 
@@ -669,7 +892,7 @@ Recorded as they are made, per prompt §42.
 
 | # | Item | Blocker |
 |---|---|---|
-| B-1 | MFA (SEC-09) | Needs a decision on TOTP vs an external provider, plus recovery-code storage and a reset path for a locked-out super admin. Defaulting to self-hosted TOTP unless directed otherwise. |
+| B-1 | ~~MFA (SEC-09)~~ | **Resolved:** self-hosted TOTP (D-29, D-39), recovery codes and a break-glass reset for a locked-out super admin, built in 1.7s. |
 | B-2 | Password reset (SEC-08) | Needs a sending identity. The user-app SMTP config in `app_config` may be reusable — to confirm before building. |
 | B-3 | Provider health / latency (integrations) | Requires either provider status endpoints or a health-probe job. No probe infrastructure exists. |
 | B-4 | Reconciliation against Paystack / Monnify / Novac / VTPass | Requires provider settlement/transaction-list API access. Not present in the repo. |

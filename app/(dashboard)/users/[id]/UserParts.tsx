@@ -1,22 +1,42 @@
 'use client';
 
+import type { Ref as ReactRef } from 'react';
 import Link from 'next/link';
 import {
   Activity, ArrowDownToLine, ArrowUpRight, ClipboardList, Lock, Receipt, UserX, Wallet,
 } from 'lucide-react';
 import {
-  Avatar, Badge, Card, CardBody, CardHeader, DetailRow, EmptyState, Kpi, KpiGrid, KpiSkeleton, LinkButton, Notice,
-  PageHeader, PageHeaderSkeleton, Ref, SectionLabel, Skeleton, TBody, Table, TableSkeleton, formatNaira, useCan,
+  Avatar, Badge, Button, Card, CardBody, CardHeader, DetailRow, EmptyState, Kpi, KpiGrid, KpiSkeleton, LinkButton,
+  Notice, PageHeader, PageHeaderSkeleton, Ref, SectionLabel, Skeleton, TBody, Table, TableSkeleton, formatNaira, useCan,
 } from '../../../_ui';
 import { formatAge, formatBusinessDate, formatBusinessDateTime } from '../../../lib/time';
 import {
-  ACCOUNT_STATES, accountState, countText, displayName, plural, referrerName, userTransactionsHref,
+  ACCOUNT_STATES, accountState, canAdjustWallet, countText, displayName, plural, referrerName, userTransactionsHref,
   type Referrer, type UserProfile, type UserStats,
 } from './model';
 import s from './page.module.css';
 
 const UNCOUNTED = 'Could not be counted. Refresh to try again.';
 const PROFILE_SKELETON = ['46%', '38%', '52%', '44%', '30%', '41%', '35%', '48%', '33%'];
+const REFRESH_SKELETON = 86;
+const ADJUST_SKELETON = 116;
+const FREEZE_SKELETON = 128;
+
+export function AdjustWalletButton({
+  user, onOpen, buttonRef,
+}: {
+  user: UserProfile;
+  onOpen: () => void;
+  buttonRef?: ReactRef<HTMLButtonElement>;
+}) {
+  const allowed = useCan(['users.read', 'wallets.adjust']);
+  if (!allowed || !canAdjustWallet(user)) return null;
+  return (
+    <Button ref={buttonRef} variant="secondary" size="sm" leftIcon={<Wallet size={14} />} onClick={onOpen}>
+      Adjust wallet
+    </Button>
+  );
+}
 
 export function UserTitle({ user }: { user: UserProfile }) {
   const name = displayName(user);
@@ -213,9 +233,15 @@ export function NotFoundState() {
 
 export function UserDetailSkeleton() {
   const canFreeze = useCan('users.freeze');
+  const canAdjust = useCan(['users.read', 'wallets.adjust']);
+  const actions = [
+    REFRESH_SKELETON,
+    ...(canAdjust ? [ADJUST_SKELETON] : []),
+    ...(canFreeze ? [FREEZE_SKELETON] : []),
+  ];
   return (
     <div className={s.page}>
-      <PageHeaderSkeleton avatar actions={canFreeze ? [86, 128] : [86]} label="Loading user" />
+      <PageHeaderSkeleton avatar actions={actions} label="Loading user" />
       <KpiGrid className={s.kpis} aria-hidden>
         {Array.from({ length: 5 }, (_, index) => <KpiSkeleton key={index} />)}
       </KpiGrid>

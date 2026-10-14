@@ -4,18 +4,18 @@ import { requireAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, ok } from '../../lib/api';
 import {
-  checkCardCreate, checkCardPatch, checkCountryCreate, checkCountryPatch, diffFields, findBrandNamed, planReorder,
+  REORDER_MAX, checkCardCreate, checkCardPatch, checkCountryCreate, checkCountryPatch, diffFields, findBrandNamed,
   readId, readReorderIds, sameBrandName,
-  type ReorderStep,
 } from '../../(dashboard)/cards/catalogRules';
 
 const CARD_COLUMNS = 'id, name, logo_url, is_active, sort_order, created_at';
 const COUNTRY_COLUMNS = 'id, card_id, country_code, country_name, currency_symbol, is_active';
 const PAGE_ROWS = 1000;
-const WRITE_BATCH = 10;
 const UNIQUE_VIOLATION = '23505';
+const NOT_AUTHORIZED = 'Not authorized';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
 const COUNTRY_TAKEN = 'This country is already on this card.';
+const ORDER_CHANGED = 'The brand list has changed since you loaded it. Reload and try again.';
 
 type Body = Record<string, unknown>;
 
@@ -41,6 +41,16 @@ interface NameRow {
   id: string;
   name: string | null;
 }
+
+interface CardMove {
+  id: string;
+  from: number | null;
+  to: number;
+}
+
+type ReorderResult =
+  | { applied: true; changed: boolean; positions: CardMove[] }
+  | { applied: false; reason: string; missing: string[]; extra: string[] };
 
 type Rows<T> = { ok: true; rows: T[] } | { ok: false };
 
@@ -99,14 +109,6 @@ async function readBrandNames(): Promise<Rows<NameRow>> {
     return { ok: false };
   }
   return { ok: true, rows: (data ?? []) as NameRow[] };
-}
-
-async function inBatches<T, R>(items: ReadonlyArray<T>, size: number, run: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = [];
-  for (let start = 0; start < items.length; start += size) {
-    results.push(...await Promise.all(items.slice(start, start + size).map(run)));
-  }
-  return results;
 }
 
 export async function GET() {
@@ -309,53 +311,74 @@ async function updateCountry(admin: AdminContext, body: Body) {
   return ok({ changed: true, country: publicCountry(data), ...auditFields(recorded.ok) });
 }
 
-function positionsOf(steps: ReadonlyArray<ReorderStep>, side: 'from' | 'to') {
-  return steps.map((step) => ({ id: step.id, sort_order: step[side] }));
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function idList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+}
+
+function readMoves(value: unknown): CardMove[] | null {
+  if (!Array.isArray(value)) return null;
+  const moves: CardMove[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.id !== 'string' || typeof item.to !== 'number') return null;
+    moves.push({ id: item.id, from: typeof item.from === 'number' ? item.from : null, to: item.to });
+  }
+  return moves;
+}
+
+function readReorder(data: unknown): ReorderResult | null {
+  if (!isRecord(data)) return null;
+  if (data.applied === false && typeof data.reason === 'string') {
+    return { applied: false, reason: data.reason, missing: idList(data.missing), extra: idList(data.extra) };
+  }
+  if (data.applied !== true) return null;
+  const positions = readMoves(data.positions);
+  return positions ? { applied: true, changed: data.changed === true, positions } : null;
+}
+
+function positionsAt(moves: ReadonlyArray<CardMove>, side: 'from' | 'to') {
+  return moves.map((move) => ({ id: move.id, sort_order: move[side] }));
+}
+
+function reorderRefusal(reason: string): string {
+  if (reason === 'too_many') return `At most ${REORDER_MAX} brands can be ordered at once.`;
+  if (reason === 'duplicate') return 'A brand appears more than once in the new order.';
+  return 'Send every brand id in its new order.';
 }
 
 async function reorderCards(admin: AdminContext, body: Body) {
   const read = readReorderIds(body.ids);
   if (!read.ok) return fail('VALIDATION_ERROR', read.message);
 
-  const { data, error } = await supabaseAdmin.from('cards').select('id, sort_order');
-  if (error) {
-    console.error('card order read:', error.message);
-    return fail('INTERNAL_ERROR', 'The current order could not be read, so nothing was changed.');
-  }
-
-  const plan = planReorder((data ?? []) as Array<{ id: string; sort_order: number | null }>, read.ids);
-  if (plan.missing.length > 0 || plan.extra.length > 0) {
-    return fail('STATE_CONFLICT', 'The brand list has changed since you loaded it. Reload and try again.', {
-      details: { missing: plan.missing, extra: plan.extra },
-    });
-  }
-  if (plan.steps.length === 0) return ok({ changed: false, positions: [] });
-
   const movedId = readId(body.moved);
-  const audit: AuditInput = {
-    ...auditBase(admin, 'REORDER_CARDS', 'cards', movedId && read.ids.includes(movedId) ? movedId : null),
-    before: { positions: positionsOf(plan.steps, 'from') },
-    after: { positions: positionsOf(plan.steps, 'to') },
-  };
-
-  const results = await inBatches(plan.steps, WRITE_BATCH, async (step) => {
-    const { error: writeError } = await supabaseAdmin.from('cards').update({ sort_order: step.to }).eq('id', step.id);
-    return writeError ? writeError.message : null;
-  });
-  const failures = results.filter((message): message is string => message !== null);
-  if (failures.length > 0) {
-    const none = failures.length === plan.steps.length;
-    console.error('card reorder:', failures[0]);
-    await writeAudit({ ...audit, result: none ? 'failure' : 'partial', error: failures[0] });
-    return fail(
-      'INTERNAL_ERROR',
-      none ? 'The new order could not be saved.' : 'Only part of the new order was saved. Reload to see the current order.',
-      { details: { saved: plan.steps.length - failures.length, failed: failures.length } },
-    );
+  const audit = auditBase(admin, 'REORDER_CARDS', 'cards', movedId && read.ids.includes(movedId) ? movedId : null);
+  const { data, error } = await supabaseAdmin.rpc('admin_reorder_cards', { p_admin_id: admin.admin_id, p_ids: read.ids });
+  if (error?.message === NOT_AUTHORIZED) return fail('AUTH_REQUIRED');
+  const result = error ? null : readReorder(data);
+  if (!result) {
+    const message = error?.message ?? 'admin_reorder_cards returned an unexpected result.';
+    console.error('card reorder:', message);
+    await writeAudit({ ...audit, after: { order: read.ids }, result: 'failure', error: message });
+    return fail('INTERNAL_ERROR', 'The new order could not be saved.');
   }
+  if (!result.applied) {
+    if (result.reason === 'mismatch') {
+      return fail('STATE_CONFLICT', ORDER_CHANGED, { details: { missing: result.missing, extra: result.extra } });
+    }
+    return fail('VALIDATION_ERROR', reorderRefusal(result.reason));
+  }
+  if (!result.changed) return ok({ changed: false, positions: [] });
 
-  const recorded = await writeAudit({ ...audit, result: 'success' });
-  return ok({ changed: true, positions: positionsOf(plan.steps, 'to'), ...auditFields(recorded.ok) });
+  const recorded = await writeAudit({
+    ...audit,
+    before: { positions: positionsAt(result.positions, 'from') },
+    after: { positions: positionsAt(result.positions, 'to') },
+    result: 'success',
+  });
+  return ok({ changed: true, positions: positionsAt(result.positions, 'to'), ...auditFields(recorded.ok) });
 }
 
 export async function PATCH(req: NextRequest) {

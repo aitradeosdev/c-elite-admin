@@ -1,8 +1,10 @@
 import type { ConfirmOptions } from '../../_ui';
+import { graceText } from '../../lib/adminSecurity';
 import { formatAge, formatBusinessDateTime } from '../../lib/time';
 import { REASON_MAX_LENGTH } from './rules';
 import type { ReviewRow } from './model';
 import { DiffValue } from './SettingsParts';
+import { GRACE_DAYS, graceEndFrom, missingSummary, policyView, type PolicyState } from './securityPolicy';
 
 export const EMERGENCY_ON_PHRASE = 'turn on emergency mode';
 export const EMERGENCY_OFF_PHRASE = 'turn off emergency mode';
@@ -119,5 +121,73 @@ export function leaveOptions(count: number): ConfirmOptions {
       : `You have ${count} unsaved changes on this page. Leaving discards them.`,
     confirmLabel: 'Discard and leave',
     cancelLabel: 'Keep editing',
+  };
+}
+
+export const POLICY_ON_REASONS: string[] = ['Security policy', 'After a security incident', 'Audit or compliance'];
+
+export const POLICY_OFF_REASONS: string[] = ['Turned on by mistake', 'Rollout paused'];
+
+export function policyOnOptions(state: PolicyState, now: Date = new Date()): ConfirmOptions {
+  const grace = graceText(graceEndFrom(now), now);
+  const until = grace ? grace.dateTime : `${GRACE_DAYS} days from now`;
+  const by = grace ? grace.date : `${GRACE_DAYS} days from now`;
+  return {
+    title: 'Require two-step sign-in for every admin?',
+    message: 'Once the grace period ends, every admin signs in with their password and a 6-digit code from an authenticator app.',
+    details: [
+      {
+        label: 'Two-step sign-in',
+        value: <DiffValue from="Not required" to="Required for every admin" />,
+        emphasis: true,
+      },
+      { label: 'Grace period', value: `${GRACE_DAYS} days, until ${until}` },
+      { label: 'Admins without it', value: missingSummary(state.roster.missing) },
+    ],
+    consequences: [
+      `Admins without it see a banner asking them to set it up by ${by}.`,
+      'After that they must set it up when they sign in on the web console before they can use it. The mobile app cannot set it up.',
+      'In the mobile app, admins with it type their password followed by the 6-digit code.',
+      'Admins already signed in stay signed in until their session ends.',
+      'Every admin gets an alert in the mobile app.',
+    ],
+    reason: {
+      required: true,
+      label: 'Why are you requiring it?',
+      presets: POLICY_ON_REASONS,
+      maxLength: REASON_MAX_LENGTH,
+    },
+    credential: { kind: 'otp' },
+    confirmLabel: 'Require two-step sign-in',
+    pendingLabel: 'Requiring two-step sign-in…',
+  };
+}
+
+export function policyOffOptions(state: PolicyState, now: Date = new Date()): ConfirmOptions {
+  const view = policyView(state, now);
+  return {
+    tone: 'danger',
+    title: 'Stop requiring two-step sign-in?',
+    message: 'Admins who use it keep it. Admins without it can sign in with just their password again.',
+    details: [
+      {
+        label: 'Two-step sign-in',
+        value: <DiffValue from={view.statusLabel} to="Not required" />,
+        emphasis: true,
+      },
+    ],
+    consequences: [
+      'The banner and the setup step at sign-in stop.',
+      'The other super administrators are alerted.',
+    ],
+    reason: {
+      required: true,
+      label: 'Why are you stopping it?',
+      presets: POLICY_OFF_REASONS,
+      maxLength: REASON_MAX_LENGTH,
+    },
+    credential: { kind: 'otp' },
+    confirmLabel: 'Stop requiring it',
+    pendingLabel: 'Stopping the requirement…',
   };
 }

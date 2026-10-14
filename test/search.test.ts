@@ -21,7 +21,7 @@ const USER_ID = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
 const OTHER_ID = '9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
 const ACCOUNT = '0123456789';
 const ALL_KEYS: readonly SearchGroupKey[] = [
-  'users', 'withdrawals', 'transactions', 'card_submissions', 'coupons', 'flags',
+  'users', 'withdrawals', 'transactions', 'card_submissions', 'coupons',
 ];
 
 function grants(...permissions: Permission[]): (permission: Permission) => boolean {
@@ -156,11 +156,11 @@ describe('permission gating', () => {
   test('each group needs its own read permission', () => {
     const expected: Array<[Permission, SearchGroupKey[]]> = [
       ['users.read', ['users']],
-      ['withdrawals.read', ['withdrawals', 'flags']],
+      ['withdrawals.read', ['withdrawals']],
       ['transactions.read', ['transactions']],
       ['cards.read', ['card_submissions']],
       ['coupons.read', ['coupons']],
-      ['flags.read', ['flags']],
+      ['flags.read', []],
       ['users.edit', []],
       ['cards.review', []],
       ['anomaly.read', []],
@@ -170,16 +170,19 @@ describe('permission gating', () => {
     }
   });
 
-  test('flags open to flags.read or withdrawals.read, never to anything else', () => {
-    assert.equal(search.canSearchGroup('flags', grants('flags.read')), true);
-    assert.equal(search.canSearchGroup('flags', grants('withdrawals.read')), true);
-    assert.equal(search.canSearchGroup('flags', grants('flags.resolve', 'withdrawals.approve', 'risk.read')), false);
-    assert.deepEqual(search.SEARCH_GROUP_ACCESS.flags, ['flags.read', 'withdrawals.read']);
+  test('the shell offers recent records for exactly the groups and permissions the server searches', () => {
+    const shell = appText('(dashboard)/_shell/Shell.tsx');
+    const start = shell.indexOf('const SEARCH_GROUP_PERMISSIONS');
+    assert.ok(start >= 0);
+    const table = shell.slice(start, shell.indexOf('];', start));
+    const entries = [...table.matchAll(/\['(\w+)', \[([^\]]*)\]\]/g)]
+      .map(([, key, needs]) => [key, [...needs.matchAll(/'([\w.]+)'/g)].map((match) => match[1])] as const);
+    assert.deepEqual(Object.fromEntries(entries), search.SEARCH_GROUP_ACCESS);
   });
 
   test('legacy page keys and super admins resolve to the expected groups', () => {
     assert.deepEqual(search.permittedGroups(everything()), ALL_KEYS);
-    assert.deepEqual(search.permittedGroups(legacy('withdrawals')), ['withdrawals', 'flags']);
+    assert.deepEqual(search.permittedGroups(legacy('withdrawals')), ['withdrawals']);
     assert.deepEqual(search.permittedGroups(legacy('card_queue')), ['card_submissions']);
     assert.deepEqual(search.permittedGroups(legacy('users', 'coupons', 'transactions_overview')), [
       'users', 'transactions', 'coupons',
@@ -195,8 +198,8 @@ describe('permission gating', () => {
       can: grants('coupons.read', 'withdrawals.read'),
       runners: runners({}, calls),
     });
-    assert.deepEqual(calls.map((call) => call.key).sort(), ['coupons', 'flags', 'withdrawals']);
-    assert.deepEqual(groupKeys(response).sort(), ['coupons', 'flags', 'withdrawals']);
+    assert.deepEqual(calls.map((call) => call.key).sort(), ['coupons', 'withdrawals']);
+    assert.deepEqual(groupKeys(response).sort(), ['coupons', 'withdrawals']);
   });
 
   test('an admin without any read permission gets no groups and no queries', async () => {
@@ -290,18 +293,10 @@ describe('filters', () => {
     assert.equal(search.couponsFilter(intent('phone', '8012345678')), null);
   });
 
-  test('flags match their own id, the flagged transaction id or the user', () => {
-    assert.equal(
-      search.flagsFilter(intent('id', USER_ID), []),
-      `id.eq.${USER_ID},transaction_id.eq.${USER_ID},user_id.eq.${USER_ID}`,
-    );
-    assert.equal(search.flagsFilter(intent('text', 'john'), []), null);
-    assert.equal(search.flagsFilter(intent('text', 'john'), [USER_ID, USER_ID]), `user_id.in.(${USER_ID})`);
-  });
-
   test('id lists are validated, de-duplicated and capped at 100', () => {
+    assert.equal(search.transactionsFilter(intent('text', 'john'), [USER_ID, USER_ID]), `user_id.in.(${USER_ID})`);
     const ids = Array.from({ length: 150 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`);
-    const filter = search.flagsFilter(intent('text', 'john'), [...ids, 'x', ''.padEnd(36, 'z')]) ?? '';
+    const filter = search.transactionsFilter(intent('text', 'john'), [...ids, 'x', ''.padEnd(36, 'z')]) ?? '';
     const listed = filter.slice('user_id.in.('.length, -1).split(',');
     assert.equal(listed.length, 100);
     assert.ok(listed.every((id) => /^[0-9a-f-]{36}$/.test(id)));
@@ -357,24 +352,17 @@ describe('items, masking and formatting', () => {
     assert.equal(spaced.subtitle, '•••• 6789');
   });
 
-  test('free text on withdrawals and flags cannot carry an account number either', () => {
-    const items = [
-      search.toWithdrawalItem({
-        id: 'w', user_id: null, amount: 1234567890, bank_name: `Bank ${ACCOUNT}`, account_number: ACCOUNT,
-        account_name: `Paid from 2${ACCOUNT}`, status: 'success', created_at: '2026-10-09T13:05:00Z',
-      }, { full_name: 'Ada Obi' }),
-      search.toFlagItem({
-        id: 'f', transaction_type: 'withdrawal', amount: 500000, status: 'pending_review', created_at: null,
-        flag_reason: `Payout to ${ACCOUNT} needs review`, users: [{ username: 'ada' }],
-      }, 'Withdrawal'),
-    ];
-    assert.equal(items[0].subtitle, 'Bank •••• 6789 · •••• 6789 · Paid from •••• 6789');
-    assert.equal(items[0].title, '₦1,234,567,890.00 payout for Ada Obi');
-    assert.equal(items[1].subtitle, '@ada · Payout to •••• 6789 needs review');
-    for (const entry of items) assert.doesNotMatch(visibleText(entry), /\d{10}/);
+  test('free text on withdrawals cannot carry an account number either', () => {
+    const withdrawal = search.toWithdrawalItem({
+      id: 'w', user_id: null, amount: 1234567890, bank_name: `Bank ${ACCOUNT}`, account_number: ACCOUNT,
+      account_name: `Paid from 2${ACCOUNT}`, status: 'success', created_at: '2026-10-09T13:05:00Z',
+    }, { full_name: 'Ada Obi' });
+    assert.equal(withdrawal.subtitle, 'Bank •••• 6789 · •••• 6789 · Paid from •••• 6789');
+    assert.equal(withdrawal.title, '₦1,234,567,890.00 payout for Ada Obi');
+    assert.doesNotMatch(visibleText(withdrawal), /\d{10}/);
   });
 
-  test('transactions, card submissions and flags read as naira and Lagos time', () => {
+  test('transactions and card submissions read as naira and Lagos time', () => {
     const transaction = search.toTransactionItem({
       id: USER_ID, type: 'withdrawal', amount: 1234567.5, status: 'success', created_at: '2026-10-09T13:05:00Z',
       users: [{ username: null, full_name: 'Ada Obi', email: 'ada@x.com' }],
@@ -399,14 +387,6 @@ describe('items, masking and formatting', () => {
       status: 'pending',
       href: `/card-queue?id=${USER_ID}`,
     });
-    const flag = search.toFlagItem({
-      id: USER_ID, transaction_type: 'withdrawal', amount: '500000', status: 'escalated', created_at: null,
-      flag_reason: `Large withdrawal (>= N500000) ${'x'.repeat(120)}`, users: null,
-    }, 'Withdrawal');
-    assert.equal(flag.title, 'Withdrawal flag · ₦500,000.00');
-    assert.equal(Array.from(flag.subtitle ?? '').length, 80);
-    assert.ok(flag.subtitle?.endsWith('…'));
-    assert.equal(flag.href, `/flagged-transactions?id=${USER_ID}`);
   });
 
   test('coupons show code, brand, bonus and the Lagos end date', () => {
@@ -445,7 +425,6 @@ describe('links', () => {
     assert.equal(search.itemHref('transactions', USER_ID), `/transactions-overview?id=${USER_ID}`);
     assert.equal(search.itemHref('card_submissions', USER_ID), `/card-queue?id=${USER_ID}`);
     assert.equal(search.itemHref('coupons', USER_ID), `/coupons?id=${USER_ID}`);
-    assert.equal(search.itemHref('flags', USER_ID), `/flagged-transactions?id=${USER_ID}`);
     assert.equal(search.itemHref('users', 'a/b?c'), '/users/a%2Fb%3Fc');
   });
 
@@ -471,8 +450,6 @@ describe('links', () => {
     for (const key of ['withdrawals', 'card_submissions'] as const) {
       assert.equal(search.moreHref(key, intent('text', 'ada')), null, key);
     }
-    assert.equal(search.moreHref('flags', intent('text', 'ada')), '/flagged-transactions?search=ada');
-    assert.equal(search.moreHref('flags', intent('phone', '8012345678')), null);
   });
 
   test('the search parameters match the pages\' URL codecs', () => {
@@ -544,7 +521,7 @@ describe('running a search', () => {
     });
     const users = response.groups.find((group) => group.key === 'users');
     assert.deepEqual(users?.items.map((entry) => entry.id), ['u0', 'u1', 'u2', 'u3']);
-    assert.deepEqual(groupKeys(response), ['users', 'transactions', 'card_submissions', 'flags']);
+    assert.deepEqual(groupKeys(response), ['users', 'transactions', 'card_submissions']);
     assert.deepEqual(response.partial, {});
   });
 
@@ -568,7 +545,7 @@ describe('running a search', () => {
       withdrawals: 'Withdrawals could not be searched.',
       transactions: 'Transactions could not be searched.',
     });
-    assert.deepEqual(groupKeys(response), ['users', 'card_submissions', 'coupons', 'flags']);
+    assert.deepEqual(groupKeys(response), ['users', 'card_submissions', 'coupons']);
     assert.deepEqual(failures, [
       { key: 'withdrawals', status: 'failed', code: 'PGRST100' },
       { key: 'transactions', status: 'failed', code: 'TypeError' },
@@ -608,7 +585,7 @@ describe('running a search', () => {
       { key: 'card_submissions', status: 'timeout', code: 'timeout' },
       { key: 'coupons', status: 'failed', code: '57014' },
     ]);
-    assert.deepEqual(groupKeys(response), ['users', 'withdrawals', 'transactions', 'flags']);
+    assert.deepEqual(groupKeys(response), ['users', 'withdrawals', 'transactions']);
   });
 
   test('a closed request stops the search straight away', async () => {
@@ -674,7 +651,6 @@ describe('running a search', () => {
         withdrawals: async () => [],
         card_submissions: async () => [item(OTHER_ID)],
         coupons: async () => [],
-        flags: async () => [],
       }),
     });
     assert.deepEqual(groupKeys(response), ['card_submissions', 'users', 'transactions']);
@@ -695,7 +671,7 @@ describe('running a search', () => {
     assert.equal(search.failureCode(new search.SearchQueryError(undefined)), 'unknown');
     assert.equal(search.failureCode(new RangeError('ada@x.com')), 'RangeError');
     assert.equal(search.failureCode('ada@x.com'), 'unexpected');
-    assert.equal(search.partialMessage('flags', 'failed'), 'Flagged transactions could not be searched.');
+    assert.equal(search.partialMessage('card_submissions', 'failed'), 'Card submissions could not be searched.');
   });
 });
 
@@ -737,19 +713,5 @@ describe('route source', () => {
     for (const [name, source] of [['route', ROUTE], ['lib', LIB], ['test', own]] as const) {
       assert.equal(commentCount(source), 0, name);
     }
-  });
-});
-
-describe('flags see-all link', () => {
-  test('text, email and id searches open the Flagged page filtered by the same text', () => {
-    assert.equal(search.moreHref('flags', search.detectIntent('ada')), '/flagged-transactions?search=ada');
-    assert.equal(
-      search.moreHref('flags', search.detectIntent('ada@example.com')),
-      '/flagged-transactions?search=ada%40example.com',
-    );
-  });
-
-  test('phone and account-number searches have no Flagged page filter', () => {
-    assert.equal(search.moreHref('flags', search.detectIntent('08012345678')), null);
   });
 });

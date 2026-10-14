@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Circle, Eye, EyeOff } from 'lucide-react';
 import { Button, FieldShell, Input, Notice, SidePanel, useConfirm, useToast } from '../../_ui';
@@ -32,6 +32,7 @@ import {
   validateDraft,
   valuesOf,
   type AdminList,
+  type AdminPanel,
   type AdminRow,
   type EditableValues,
   type EditorDraft,
@@ -43,6 +44,7 @@ import {
 } from './model';
 import { createConfirm, editConfirm } from './confirmOptions';
 import { GrantEditor } from './GrantEditor';
+import { DrawerPanels, drawerPanel } from './SecurityParts';
 import s from './page.module.css';
 
 const EMPTY_VALUES: EditableValues = { email: EMPTY_DRAFT.email, roleTitle: EMPTY_DRAFT.roleTitle, grants: EMPTY_DRAFT.grants };
@@ -57,6 +59,10 @@ export interface AdminEditorProps {
   refreshList: () => void;
   onClose: () => void;
   returnFocusTo?: () => HTMLElement | null;
+  panel?: AdminPanel;
+  onPanelChange?: (next: AdminPanel) => void;
+  security?: ReactNode;
+  securityCount?: number | null;
 }
 
 function subtitleFor(admin: AdminRow): string {
@@ -66,13 +72,15 @@ function subtitleFor(admin: AdminRow): string {
 }
 
 export function AdminEditor({
-  mode, admin, readFresh, applyAdmin, refreshList, onClose, returnFocusTo,
+  mode, admin, readFresh, applyAdmin, refreshList, onClose, returnFocusTo, panel = 'account', onPanelChange, security,
+  securityCount = null,
 }: AdminEditorProps) {
   const confirm = useConfirm();
   const { show: notify } = useToast();
   const router = useRouter();
   const formId = useId();
   const rulesId = useId();
+  const tabsId = useId();
   const [draft, setDraft] = useState<EditorDraft>(() => draftFor(admin));
   const [base, setBase] = useState<EditableValues>(() => (admin ? valuesOf(admin) : EMPTY_VALUES));
   const [showErrors, setShowErrors] = useState(false);
@@ -169,6 +177,9 @@ export function AdminEditor({
       case 'refused':
         notify(outcome.message, 'error');
         router.refresh();
+        return;
+      case 'reauth':
+        notify(outcome.message, 'warning');
         return;
       case 'expired':
         return;
@@ -280,6 +291,8 @@ export function AdminEditor({
   };
 
   const creating = mode === 'create';
+  const tabs = creating ? undefined : security;
+  const active = drawerPanel(panel, tabs, onPanelChange);
 
   return (
     <SidePanel
@@ -289,7 +302,7 @@ export function AdminEditor({
       title={creating ? 'New admin account' : `Edit ${handle}`}
       subtitle={creating ? 'They can sign in as soon as the account is created.' : admin ? subtitleFor(admin) : undefined}
       returnFocusTo={returnFocusTo}
-      footer={
+      footer={active === 'account' ? (
         <div className={s.panelFooter}>
           <Button type="button" variant="ghost" disabled={reviewing} onClick={() => void requestClose()}>
             Cancel
@@ -304,156 +317,158 @@ export function AdminEditor({
             {creating ? 'Review and create' : 'Review changes'}
           </Button>
         </div>
-      }
+      ) : undefined}
     >
-      <form
-        ref={formRef}
-        id={formId}
-        className={s.form}
-        tabIndex={-1}
-        noValidate
-        onSubmit={(event) => void submit(event)}
-      >
-        {!creating && admin && !admin.is_active ? (
-          <Notice tone="warning" compact flush>
-            This account is deactivated. Changes apply if it is reactivated.
-          </Notice>
-        ) : null}
-        {!creating && admin && !admin.email ? (
-          <Notice tone="warning" compact flush>
-            This account has no email, so it cannot sign in. Add one below.
-          </Notice>
-        ) : null}
-
-        <section className={s.formSection}>
-          <h3 className={s.formHeading}>Account</h3>
-          {creating ? (
-            <FieldShell
-              label="Username"
-              required
-              error={usernameError}
-              help={`${USERNAME_MIN}–${USERNAME_MAX} characters. Admins sign in with it, and it cannot be changed later.`}
-            >
-              <Input
-                ref={usernameRef}
-                value={draft.username}
-                maxLength={USERNAME_MAX}
-                autoComplete="off"
-                spellCheck={false}
-                readOnly={reviewing}
-                onChange={(event) => update('username', event.target.value)}
-              />
-            </FieldShell>
+      <DrawerPanels id={tabsId} panel={active} onPanelChange={onPanelChange} sessions={securityCount} security={tabs}>
+        <form
+          ref={formRef}
+          id={formId}
+          className={s.form}
+          tabIndex={-1}
+          noValidate
+          onSubmit={(event) => void submit(event)}
+        >
+          {!creating && admin && !admin.is_active ? (
+            <Notice tone="warning" compact flush>
+              This account is deactivated. Changes apply if it is reactivated.
+            </Notice>
           ) : null}
-          <div className={s.fieldGrid}>
-            <FieldShell
-              label="Email"
-              required
-              error={errors.email}
-              help="Admins sign in with this exact email, and security alerts go to it."
-            >
-              <Input
-                ref={emailRef}
-                type="email"
-                inputMode="email"
-                value={draft.email}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="name@cardelite.ng"
-                readOnly={reviewing}
-                onChange={(event) => update('email', event.target.value)}
-              />
-            </FieldShell>
-            <FieldShell
-              label="Role title"
-              required
-              error={errors.roleTitle}
-              help="Shown next to their name. It grants nothing; access comes from the grants below."
-            >
-              <Input
-                ref={roleRef}
-                value={draft.roleTitle}
-                maxLength={ROLE_TITLE_MAX}
-                placeholder="For example: Card Reviewer"
-                readOnly={reviewing}
-                onChange={(event) => update('roleTitle', event.target.value)}
-              />
-            </FieldShell>
-          </div>
-        </section>
+          {!creating && admin && !admin.email ? (
+            <Notice tone="warning" compact flush>
+              This account has no email, so it cannot sign in. Add one below.
+            </Notice>
+          ) : null}
 
-        <section className={s.formSection}>
-          <h3 className={s.formHeading}>{creating ? 'Password' : 'Change password'}</h3>
-          <p className={s.formHint}>
-            {creating
-              ? 'Send it to them through a secure channel. It cannot be read back once the account exists.'
-              : `Leave both fields empty to keep the current password. A new password signs ${handle} out everywhere.`}
-          </p>
-          <div className={s.fieldGrid}>
-            <FieldShell label={creating ? 'Password' : 'New password'} required={creating} error={errors.password}>
-              <div className={s.passwordField}>
+          <section className={s.formSection}>
+            <h3 className={s.formHeading}>Account</h3>
+            {creating ? (
+              <FieldShell
+                label="Username"
+                required
+                error={usernameError}
+                help={`${USERNAME_MIN}–${USERNAME_MAX} characters. Admins sign in with it, and it cannot be changed later.`}
+              >
                 <Input
-                  ref={passwordRef}
-                  className={s.passwordInput}
+                  ref={usernameRef}
+                  value={draft.username}
+                  maxLength={USERNAME_MAX}
+                  autoComplete="off"
+                  spellCheck={false}
+                  readOnly={reviewing}
+                  onChange={(event) => update('username', event.target.value)}
+                />
+              </FieldShell>
+            ) : null}
+            <div className={s.fieldGrid}>
+              <FieldShell
+                label="Email"
+                required
+                error={errors.email}
+                help="Admins sign in with this exact email, and security alerts go to it."
+              >
+                <Input
+                  ref={emailRef}
+                  type="email"
+                  inputMode="email"
+                  value={draft.email}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="name@cardelite.ng"
+                  readOnly={reviewing}
+                  onChange={(event) => update('email', event.target.value)}
+                />
+              </FieldShell>
+              <FieldShell
+                label="Role title"
+                required
+                error={errors.roleTitle}
+                help="Shown next to their name. It grants nothing; access comes from the grants below."
+              >
+                <Input
+                  ref={roleRef}
+                  value={draft.roleTitle}
+                  maxLength={ROLE_TITLE_MAX}
+                  placeholder="For example: Card Reviewer"
+                  readOnly={reviewing}
+                  onChange={(event) => update('roleTitle', event.target.value)}
+                />
+              </FieldShell>
+            </div>
+          </section>
+
+          <section className={s.formSection}>
+            <h3 className={s.formHeading}>{creating ? 'Password' : 'Change password'}</h3>
+            <p className={s.formHint}>
+              {creating
+                ? 'Send it to them through a secure channel. It cannot be read back once the account exists.'
+                : `Leave both fields empty to keep the current password. A new password signs ${handle} out everywhere.`}
+            </p>
+            <div className={s.fieldGrid}>
+              <FieldShell label={creating ? 'Password' : 'New password'} required={creating} error={errors.password}>
+                <div className={s.passwordField}>
+                  <Input
+                    ref={passwordRef}
+                    className={s.passwordInput}
+                    type={reveal ? 'text' : 'password'}
+                    value={draft.password}
+                    maxLength={PASSWORD_MAX}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    aria-describedby={rulesId}
+                    readOnly={reviewing}
+                    onChange={(event) => update('password', event.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    className={s.passwordToggle}
+                    leftIcon={reveal ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
+                    aria-label="Show passwords"
+                    aria-pressed={reveal}
+                    onClick={() => setReveal((shown) => !shown)}
+                  />
+                </div>
+              </FieldShell>
+              <FieldShell label="Confirm password" required={creating} error={errors.confirmPassword}>
+                <Input
+                  ref={confirmPasswordRef}
                   type={reveal ? 'text' : 'password'}
-                  value={draft.password}
+                  value={draft.confirmPassword}
                   maxLength={PASSWORD_MAX}
                   autoComplete="new-password"
                   spellCheck={false}
-                  aria-describedby={rulesId}
                   readOnly={reviewing}
-                  onChange={(event) => update('password', event.target.value)}
+                  onChange={(event) => update('confirmPassword', event.target.value)}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  iconOnly
-                  className={s.passwordToggle}
-                  leftIcon={reveal ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
-                  aria-label="Show passwords"
-                  aria-pressed={reveal}
-                  onClick={() => setReveal((shown) => !shown)}
-                />
-              </div>
-            </FieldShell>
-            <FieldShell label="Confirm password" required={creating} error={errors.confirmPassword}>
-              <Input
-                ref={confirmPasswordRef}
-                type={reveal ? 'text' : 'password'}
-                value={draft.confirmPassword}
-                maxLength={PASSWORD_MAX}
-                autoComplete="new-password"
-                spellCheck={false}
-                readOnly={reviewing}
-                onChange={(event) => update('confirmPassword', event.target.value)}
-              />
-            </FieldShell>
-          </div>
-          <ul id={rulesId} className={s.rules} aria-label="Password requirements">
-            {PASSWORD_RULES.map((rule) => {
-              const met = draft.password !== '' && !unmet.includes(rule.id);
-              return (
-                <li key={rule.id} className={met ? s.ruleMet : s.rule}>
-                  {met ? <Check size={12} aria-hidden /> : <Circle size={12} aria-hidden />}
-                  <span>{rule.label}</span>
-                  <span className={s.srOnly}>{met ? ', met' : ', not met yet'}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+              </FieldShell>
+            </div>
+            <ul id={rulesId} className={s.rules} aria-label="Password requirements">
+              {PASSWORD_RULES.map((rule) => {
+                const met = draft.password !== '' && !unmet.includes(rule.id);
+                return (
+                  <li key={rule.id} className={met ? s.ruleMet : s.rule}>
+                    {met ? <Check size={12} aria-hidden /> : <Circle size={12} aria-hidden />}
+                    <span>{rule.label}</span>
+                    <span className={s.srOnly}>{met ? ', met' : ', not met yet'}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
 
-        <GrantEditor
-          ref={grantsRef}
-          mode={mode}
-          value={draft.grants}
-          baseline={base.grants}
-          error={errors.grants}
-          disabled={reviewing}
-          onChange={(next) => update('grants', next)}
-        />
-      </form>
+          <GrantEditor
+            ref={grantsRef}
+            mode={mode}
+            value={draft.grants}
+            baseline={base.grants}
+            error={errors.grants}
+            disabled={reviewing}
+            onChange={(next) => update('grants', next)}
+          />
+        </form>
+      </DrawerPanels>
     </SidePanel>
   );
 }

@@ -112,6 +112,78 @@
   color: var(--fg-secondary);
 }
 
+.policyCard {
+  scroll-margin-top: var(--space-20);
+}
+
+.sectionHeading:focus {
+  outline: none;
+}
+
+.sectionHeading:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+}
+
+.policyBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.rosterLine {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+
+.rosterLink {
+  font-weight: var(--weight-medium);
+  color: var(--fg-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rosterLink:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+}
+
+.policyRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+
+.policyMeta {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-secondary);
+}
+
+.policyLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .providers {
   display: flex;
   flex-direction: column;
@@ -402,7 +474,8 @@
     flex: 1;
   }
 
-  .emergencyRow > * {
+  .emergencyRow > *,
+  .policyRow > * {
     flex: 1 1 100%;
   }
 

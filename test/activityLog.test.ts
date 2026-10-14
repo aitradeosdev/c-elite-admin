@@ -42,6 +42,14 @@ const AUDIT_CALLEE = /audit/i;
 const AUDIT_TYPE = /\bAuditInput\b/;
 const AUDIT_WRITE = /\bwriteAudit(?:OrFail)?\(|from\('audit_log'\)\s*\.insert\(/;
 const FOLLOW_DEPTH = 8;
+const WRITER_ROUTES: Readonly<Record<string, string>> = {
+  MFA_RECOVERY_CODES_REPLACED: 'account/mfa/recovery-codes/route.ts',
+  MFA_RESET: 'admin-accounts/[id]/mfa/route.ts',
+  ADMIN_SESSION_REVOKED: 'account/sessions/[id]/route.ts',
+  ADMIN_SESSIONS_SIGNED_OUT_OTHERS: 'account/sessions/sign-out-others/route.ts',
+  ADMIN_SESSIONS_SIGNED_OUT_EVERYWHERE: 'account/sessions/sign-out-everywhere/route.ts',
+  SECURITY_POLICY_CHANGED: 'admin-settings/security-policy/route.ts',
+};
 
 const EVENT_ID = '0b6f9a8e-2c1d-4e5f-8a9b-1c2d3e4f5a6b';
 const ADMIN_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
@@ -618,6 +626,57 @@ function rowValue(row: ts.ObjectLiteralExpression, key: string): ts.Expression |
   return null;
 }
 
+function isNothing(value: ts.Expression | null): boolean {
+  return value === null || value.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(value) && value.text === 'undefined');
+}
+
+function insertedActions(row: ts.ObjectLiteralExpression, key: string): DerivedInsert {
+  const scan = emptyScan();
+  const action = rowValue(row, key);
+  if (action) takeValue(action, scan);
+  return { at: where(row), actions: scan.dynamic.length > 0 ? [] : [...scan.actions] };
+}
+
+function parameterKey(value: ts.Expression, parameter: string): string | null {
+  let node = unwrapValue(value);
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) node = unwrapValue(node.left);
+  while (ts.isPropertyAccessExpression(node)) {
+    const owner = unwrapValue(node.expression);
+    if (ts.isIdentifier(owner)) return owner.text === parameter ? node.name.text : null;
+    node = owner;
+  }
+  return null;
+}
+
+function helperInserts(row: ts.ObjectLiteralExpression): DerivedInsert[] | null {
+  const action = rowValue(row, 'action');
+  const target = action ? unwrapValue(action) : null;
+  if (!target || !ts.isPropertyAccessExpression(target) || !ts.isIdentifier(target.expression)) return null;
+  const parameter = target.expression.text;
+  let fn: ts.Node | undefined = row.parent;
+  while (fn && !ts.isFunctionLike(fn)) fn = fn.parent;
+  if (!fn || !ts.isFunctionDeclaration(fn) || !fn.name) return null;
+  const helper = fn.name.text;
+  const index = fn.parameters.findIndex((entry) => ts.isIdentifier(entry.name) && entry.name.text === parameter);
+  if (index < 0) return null;
+  const adminValue = rowValue(row, 'admin_id');
+  const adminKey = adminValue ? parameterKey(adminValue, parameter) : null;
+  const found: DerivedInsert[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === helper) {
+      const argument = node.arguments[index];
+      if (!argument || !ts.isObjectLiteralExpression(argument)) {
+        found.push({ at: where(argument ?? node), actions: [] });
+      } else if (!(adminKey && isNothing(rowValue(argument, adminKey)))) {
+        found.push(insertedActions(argument, target.name.text));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(row.getSourceFile());
+  return found;
+}
+
 function edgeAdminInserts(file: string): DerivedInsert[] {
   const found: DerivedInsert[] = [];
   const visit = (node: ts.Node): void => {
@@ -629,12 +688,8 @@ function edgeAdminInserts(file: string): DerivedInsert[] {
           found.push({ at: where(row), actions: [] });
           continue;
         }
-        const admin = rowValue(row, 'admin_id');
-        if (admin === null || admin.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(admin) && admin.text === 'undefined')) continue;
-        const scan = emptyScan();
-        const action = rowValue(row, 'action');
-        if (action) takeValue(action, scan);
-        found.push({ at: where(row), actions: scan.dynamic.length > 0 ? [] : [...scan.actions] });
+        if (isNothing(rowValue(row, 'admin_id'))) continue;
+        found.push(...(helperInserts(row) ?? [insertedActions(row, 'action')]));
       }
     }
     ts.forEachChild(node, visit);
@@ -677,12 +732,17 @@ describe('action labels', () => {
     assert.deepEqual(silentWriters, [], 'these files write audit rows, but no action name could be read from them');
     assert.deepEqual(uncheckedWriters, [], 'these files write audit rows, but none of their rows was recognised as an AuditInput');
     for (const action of [
-      'APPROVE_WITHDRAWAL', 'DELETE_COUPON', 'LOGIN_FAILED', 'FREEZE_USER', 'UNFREEZE_USER', 'EXPORT_PDF',
+      'APPROVE_WITHDRAWAL', 'DELETE_COUPON', 'FREEZE_USER', 'UNFREEZE_USER', 'EXPORT_PDF',
       'DOWNLOAD_CARD_IMAGES', 'CREATE_CARD', 'UPDATE_RATE', 'UPDATE_SECURITY_LIMITS', 'OVERTURN_DISPUTE', 'REJECT_FLAG',
       'REVOKE_ADMIN_SESSIONS', 'EDIT_ADMIN', 'ENABLE_EMERGENCY_MODE', 'DISABLE_EMERGENCY_MODE', 'UPDATE_EMAIL_TEMPLATE',
-      'UPDATE_NOTIFICATION_TEMPLATE', 'UPDATE_PLATFORM_BALANCE',
+      'UPDATE_NOTIFICATION_TEMPLATE', 'UPDATE_PLATFORM_BALANCE', 'CREDIT_WALLET', 'DEBIT_WALLET',
+      'LOGIN', 'LOGOUT', 'MFA_CHALLENGE_FAILED', 'MFA_LOCKED', 'MFA_RECOVERY_CODE_USED', 'MFA_ENABLED', 'REAUTH',
+      'REAUTH_FAILED',
     ]) {
       assert.ok(actions.has(action), `${action} was not derived from the sources`);
+    }
+    for (const sqlOnly of ['LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED', 'ADMIN_AUTO_DEACTIVATION_SKIPPED', 'MFA_BREAK_GLASS_RESET']) {
+      assert.ok(!actions.has(sqlOnly), `${sqlOnly} is written by the database now, never by a console route`);
     }
   });
 
@@ -701,7 +761,11 @@ describe('action labels', () => {
       assert.deepEqual(catalogueGaps(insert.actions), [], insert.at);
     }
     const written = new Set([...sql, ...edge].flatMap((insert) => insert.actions));
-    for (const expected of ['APPROVE_CARD', 'APPROVE_CARD_CORRECTED', 'LOGIN', 'RESUME_WITHDRAWAL_OK', 'RESUME_WITHDRAWAL_FAILED']) {
+    for (const expected of [
+      'APPROVE_CARD', 'APPROVE_CARD_CORRECTED', 'LOGIN', 'RESUME_WITHDRAWAL_OK', 'RESUME_WITHDRAWAL_FAILED',
+      'LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED', 'ADMIN_AUTO_DEACTIVATION_SKIPPED', 'MFA_BREAK_GLASS_RESET',
+      'MFA_CHALLENGE_FAILED', 'MFA_LOCKED', 'LOGIN_MFA_SETUP_REQUIRED', 'LOGOUT',
+    ]) {
       assert.ok(written.has(expected), `${expected} was not derived from the SQL and edge functions`);
     }
     for (const unattributed of ['SEND_EMAIL', 'PIN_CHANGED']) assert.ok(!written.has(unattributed), unattributed);
@@ -715,9 +779,23 @@ describe('action labels', () => {
       for (const option of group.options) {
         if (group.label === RETIRED_GROUP) {
           assert.ok(!written.has(option.value), `${option.value} is written again; move it out of ${RETIRED_GROUP}`);
+        } else if (!written.has(option.value) && Object.prototype.hasOwnProperty.call(WRITER_ROUTES, option.value)) {
+          const route = join(APP_DIR, 'api', WRITER_ROUTES[option.value]);
+          assert.ok(!existsSync(route), `${option.value} must be written by ${route} with a literal action`);
         } else {
           assert.ok(written.has(option.value), `${option.value} is no longer written anywhere; move it to ${RETIRED_GROUP}`);
         }
+      }
+    }
+  });
+
+  test('ties each device and two-step action that a later route writes to that route', () => {
+    for (const [action, route] of Object.entries(WRITER_ROUTES)) {
+      assert.ok(rules.isListedAction(action), action);
+      assert.match(route, /^(?:account|admin-accounts|admin-settings)\/[\w[\]/-]+\/route\.ts$/, action);
+      const file = join(APP_DIR, 'api', route);
+      if (existsSync(file)) {
+        assert.ok(scanActions(file).actions.has(action), `${route} does not write ${action}`);
       }
     }
   });
@@ -825,6 +903,22 @@ describe('action labels', () => {
       { line: '4', actions: ['ZZ_EDGE_BATCH'] },
       { line: '5', actions: [] },
     ]);
+    const helper = join(FIXTURE_DIR, 'edgeHelper.ts');
+    virtualSources.set(helper, [
+      'async function audit(db, meta, row) {',
+      "  await db.from('audit_log').insert({ admin_id: row.admin?.id ?? null, action: row.action, entity: 'x', ip_address: meta.ip });",
+      '}',
+      'export async function record(db, meta, admin, locked, rows) {',
+      "  await audit(db, meta, { admin, action: locked ? 'ZZ_HELPER_LOCKED' : 'ZZ_HELPER_FAILED' });",
+      "  await audit(db, meta, { admin: null, action: 'ZZ_HELPER_NOBODY' });",
+      "  await audit(db, meta, { action: 'ZZ_HELPER_ANONYMOUS' });",
+      '  await audit(db, meta, rows[0]);',
+      '}',
+    ].join('\n'));
+    assert.deepEqual(edgeAdminInserts(helper).map((insert) => ({ line: insert.at.slice(insert.at.lastIndexOf(':') + 1), actions: insert.actions })), [
+      { line: '5', actions: ['ZZ_HELPER_LOCKED', 'ZZ_HELPER_FAILED'] },
+      { line: '8', actions: [] },
+    ]);
   });
 
   test('labels every catalogued action in plain words, once, under a named group', () => {
@@ -849,6 +943,82 @@ describe('action labels', () => {
     assert.equal(rules.actionLabel('CREATE_DENOMINATION'), 'Created rate range');
     assert.equal(rules.actionLabel('APPROVE_CARD_CORRECTED'), 'Approved card with corrections');
     assert.equal(rules.actionLabel('RESUME_WITHDRAWAL_FAILED'), 'Payout could not be sent');
+  });
+
+  test('names wallet adjustments under Users, in plain words', () => {
+    assert.equal(rules.actionLabel('CREDIT_WALLET'), 'Credited wallet');
+    assert.equal(rules.actionLabel('DEBIT_WALLET'), 'Debited wallet');
+    const users = rules.ACTION_GROUPS.find((group) => group.label === 'Users');
+    assert.ok(users?.options.some((option) => option.value === 'CREDIT_WALLET'));
+    assert.ok(users?.options.some((option) => option.value === 'DEBIT_WALLET'));
+    const wallet = rules.actionsMatching('wallet');
+    assert.ok(wallet.includes('CREDIT_WALLET') && wallet.includes('DEBIT_WALLET'));
+  });
+
+  test('names own password changes under Admins and sign-in, written by the password route', () => {
+    assert.equal(rules.actionLabel('PASSWORD_CHANGED'), 'Changed own password');
+    assert.equal(rules.actionLabel('PASSWORD_CHANGE_FAILED'), 'Password change failed');
+    const signIn = rules.ACTION_GROUPS.find((group) => group.label === 'Admins and sign-in');
+    const values = signIn?.options.map((option) => option.value) ?? [];
+    assert.ok(values.includes('PASSWORD_CHANGED') && values.includes('PASSWORD_CHANGE_FAILED'));
+    assert.ok(values.indexOf('LOGOUT') < values.indexOf('PASSWORD_CHANGED'));
+    const password = rules.actionsMatching('password');
+    assert.ok(password.includes('PASSWORD_CHANGED') && password.includes('PASSWORD_CHANGE_FAILED'));
+    const route = scanActions(join(APP_DIR, 'api', 'account', 'password', 'route.ts'));
+    assert.deepEqual([...route.actions].sort(), ['PASSWORD_CHANGED', 'PASSWORD_CHANGE_FAILED']);
+    assert.deepEqual(route.unresolved, []);
+    assert.equal(route.rows, 3);
+  });
+
+  test('names every two-step sign-in, identity check and device action under Admins and sign-in', () => {
+    const expected: Array<[string, string]> = [
+      ['LOGIN_MFA_SETUP_REQUIRED', 'Sign-in needed two-step setup'],
+      ['MFA_ENABLED', 'Turned on two-step sign-in'],
+      ['MFA_CHALLENGE_FAILED', 'Two-step code failed'],
+      ['MFA_LOCKED', 'Two-step sign-in locked'],
+      ['MFA_RECOVERY_CODE_USED', 'Signed in with a recovery code'],
+      ['MFA_RECOVERY_CODES_REPLACED', 'Replaced recovery codes'],
+      ['MFA_RESET', 'Reset admin two-step sign-in'],
+      ['MFA_BREAK_GLASS_RESET', 'Two-step sign-in reset in the database'],
+      ['REAUTH', 'Confirmed identity'],
+      ['REAUTH_FAILED', 'Security check failed'],
+      ['ADMIN_SESSION_REVOKED', 'Signed out a device'],
+      ['ADMIN_SESSIONS_SIGNED_OUT_OTHERS', 'Signed out other devices'],
+      ['ADMIN_SESSIONS_SIGNED_OUT_EVERYWHERE', 'Signed out everywhere'],
+      ['SECURITY_POLICY_CHANGED', 'Changed two-step requirement'],
+    ];
+    const signIn = rules.ACTION_GROUPS.find((group) => group.label === 'Admins and sign-in');
+    const values = signIn?.options.map((option) => option.value) ?? [];
+    for (const [action, label] of expected) {
+      assert.equal(rules.actionLabel(action), label, action);
+      assert.ok(values.includes(action), `${action} is not offered under Admins and sign-in`);
+    }
+    for (const action of ['LOGIN', 'LOGIN_FAILED', 'LOGOUT', 'ADMIN_AUTO_DEACTIVATED', 'ADMIN_AUTO_DEACTIVATION_SKIPPED']) {
+      assert.ok(values.includes(action), action);
+    }
+    const twoStep = rules.actionsMatching('two-step');
+    for (const action of ['MFA_CHALLENGE_FAILED', 'MFA_LOCKED', 'MFA_ENABLED', 'MFA_RESET', 'SECURITY_POLICY_CHANGED']) {
+      assert.ok(twoStep.includes(action), action);
+    }
+  });
+
+  test('derives the sign-in and identity-check actions from the routes and the shared session module', () => {
+    const sessionModule = scanActions(join(APP_DIR, 'lib', 'session.ts'));
+    assert.deepEqual(sessionModule.unresolved, []);
+    assert.deepEqual([...sessionModule.actions].sort(), ['LOGIN', 'MFA_CHALLENGE_FAILED', 'MFA_LOCKED', 'REAUTH_FAILED']);
+    const routes: Array<[string, string[]]> = [
+      ['auth/route.ts', ['MFA_CHALLENGE_FAILED']],
+      ['auth/logout/route.ts', ['LOGOUT']],
+      ['auth/mfa/verify/route.ts', ['MFA_CHALLENGE_FAILED', 'MFA_RECOVERY_CODE_USED']],
+      ['auth/mfa/enroll/confirm/route.ts', ['MFA_ENABLED']],
+      ['account/reauth/route.ts', ['REAUTH', 'REAUTH_FAILED']],
+    ];
+    for (const [route, actions] of routes) {
+      const scan = scanActions(join(APP_DIR, 'api', route));
+      assert.deepEqual(scan.unresolved, [], route);
+      assert.deepEqual(scan.dynamic, [], route);
+      assert.deepEqual([...scan.actions].sort(), actions, route);
+    }
   });
 
   test('keeps the labels of retired and renamed actions', () => {
@@ -925,6 +1095,8 @@ describe('results, sensitivity and record types', () => {
   test('labels record types without leaking object prototype names', () => {
     assert.equal(rules.entityLabel('card_submissions'), 'Card submission');
     assert.equal(rules.entityLabel('audit_log'), 'Audit log');
+    assert.equal(rules.entityLabel('wallet_adjustments'), 'Wallet adjustment');
+    assert.ok(rules.ENTITY_OPTIONS.some((option) => option.value === 'wallet_adjustments'));
     assert.equal(rules.entityLabel('some_new_table'), 'Some new table');
     assert.equal(rules.entityLabel('constructor'), 'Constructor');
     assert.equal(rules.entityLabel(null), '');

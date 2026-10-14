@@ -4,15 +4,17 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowUpRight, Lock } from 'lucide-react';
 import {
   Badge, Button, DetailRow, LinkButton, MaskedValue, Money, Notice, Ref, SectionLabel, Skeleton, StatusDot,
-  statusLabel,
+  statusLabel, statusTone,
 } from '../../_ui';
 import { formatAge, formatBusinessDateTime } from '../../lib/time';
 import {
-  EMERGENCY_PAUSED, EMERGENCY_REJECT_NOTE, EMERGENCY_TITLE, feeOf, grossOf, isActionable, isFrozen, isOpenFlag, netOf,
-  payoutDiffers, providerLabel,
+  EMERGENCY_PAUSED, EMERGENCY_REJECT_NOTE, EMERGENCY_TITLE, feeOf, grossOf, isActionable, isFrozen, isHeld, isOpenFlag,
+  netOf, payoutDiffers, providerLabel,
   type DetailPartial, type Withdrawal, type WithdrawalFlag, type WithdrawalUser,
 } from './model';
 import s from './page.module.css';
+
+const HELD_HINT = 'Held after a risk flag was escalated. It still needs a decision.';
 
 export interface Outcome {
   id: string;
@@ -21,6 +23,15 @@ export interface Outcome {
   message: string;
   requestId?: string | null;
   raisedInDrawer: boolean;
+}
+
+export function WithdrawalStatus({ status }: { status: string }) {
+  if (!isHeld(status)) return <StatusDot status={status} />;
+  return (
+    <Badge tone={statusTone(status)} dot title={HELD_HINT}>
+      Held
+    </Badge>
+  );
 }
 
 export function FrozenBadge({ user }: { user: WithdrawalUser | null | undefined }) {
@@ -191,7 +202,7 @@ export function DetailBody({
 
       <div className={s.section}>
         <SectionLabel>Processing</SectionLabel>
-        <DetailRow label="Status" value={<StatusDot status={withdrawal.status} />} />
+        <DetailRow label="Status" value={<WithdrawalStatus status={withdrawal.status} />} />
         {withdrawal.failure_reason ? <DetailRow label="Reason" value={withdrawal.failure_reason} wrap /> : null}
         {actionable && payoutDiffers(withdrawal.gateway, payoutGateway) ? (
           <>

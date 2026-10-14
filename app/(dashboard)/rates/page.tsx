@@ -302,7 +302,7 @@ export default function RatesPage() {
             setPhase('confirming');
             throw new Error(outcome.message);
           }
-          if (outcome.kind === 'saved' || outcome.kind === 'partial' || outcome.kind === 'unknown') {
+          if (outcome.kind === 'saved' || outcome.kind === 'conflict' || outcome.kind === 'unknown') {
             const after = await refreshRates();
             settled.snapshot = after && after.ok ? after.data : null;
           }

@@ -1,19 +1,22 @@
 import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { requireAdmin } from '../../lib/guard';
+import { requireAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, ok } from '../../lib/api';
+import { compareAndSet, pick, seenValues } from '../../lib/configCas';
 import {
   AUDIT_ACTION,
   AUDIT_WARNING,
   KEY_LABELS,
   READ_KEYS,
+  WRITABLE_KEYS,
+  changeAudit,
   conflictMessage,
-  guardedWrite,
   planPatch,
   presentBalance,
   readPatchRequest,
   storedValues,
+  type ChangeAudit,
   type PatchPlan,
   type StoredValues,
 } from '../../(dashboard)/platform-balance/model';
@@ -23,12 +26,9 @@ const PUBLIC_CACHE_KEY = 'app_config:public';
 const LOAD_FAILED = 'The platform balance could not be loaded.';
 const READ_FAILED = 'The current platform balance could not be read, so nothing was changed.';
 const NOT_SAVED = 'The platform balance could not be saved. Nothing was changed.';
+const UNCONFIRMED = 'The save could not be confirmed. Reload the platform balance to check it before trying again.';
 
 type ConfigRead = { ok: true; rows: unknown[] } | { ok: false };
-
-type WriteResult = { ok: true } | { ok: false; conflict: true } | { ok: false; conflict: false; message: string };
-
-const UNIQUE_VIOLATION = '23505';
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -57,30 +57,6 @@ async function runRpc(name: string, args: Record<string, unknown> | undefined, l
   }
 }
 
-async function writePlan(current: StoredValues, plan: PatchPlan, updatedAt: string): Promise<WriteResult> {
-  const guarded = guardedWrite(current, plan);
-  try {
-    if (!guarded) {
-      const { error } = await supabaseAdmin
-        .from('app_config')
-        .upsert(plan.changed.map((key) => ({ key, value: plan.updates[key], updated_at: updatedAt })), { onConflict: 'key' });
-      return error ? { ok: false, conflict: false, message: error.message } : { ok: true };
-    }
-    const row = { value: guarded.value, updated_at: updatedAt };
-    if (!guarded.exists) {
-      const { error } = await supabaseAdmin.from('app_config').insert({ key: guarded.key, ...row });
-      if (!error) return { ok: true };
-      return error.code === UNIQUE_VIOLATION ? { ok: false, conflict: true } : { ok: false, conflict: false, message: error.message };
-    }
-    const update = supabaseAdmin.from('app_config').update(row).eq('key', guarded.key);
-    const { data, error } = await (guarded.seen === null ? update.is('value', null) : update.eq('value', guarded.seen)).select('key');
-    if (error) return { ok: false, conflict: false, message: error.message };
-    return (data ?? []).length > 0 ? { ok: true } : { ok: false, conflict: true };
-  } catch (error) {
-    return { ok: false, conflict: false, message: describe(error) };
-  }
-}
-
 async function raceConflict(plan: PatchPlan) {
   const read = await readConfig('key, value');
   const latest: StoredValues = read.ok ? storedValues(read.rows) : {};
@@ -91,6 +67,18 @@ async function raceConflict(plan: PatchPlan) {
 async function refreshCaches(): Promise<void> {
   await runRpc('edge_cache_delete', { p_key: PUBLIC_CACHE_KEY }, 'cache clear');
   await runRpc('build_marketplace_feed_cache', undefined, 'feed rebuild');
+}
+
+function auditOf(admin: AdminContext, change: ChangeAudit): AuditInput {
+  return {
+    admin,
+    action: AUDIT_ACTION,
+    entity: ENTITY,
+    entity_id: change.entityId,
+    before: change.before,
+    after: change.after,
+    sensitivity: 'financial',
+  };
 }
 
 export async function GET() {
@@ -128,29 +116,32 @@ export async function PATCH(req: NextRequest) {
     return ok({ changed: [], unchanged: plan.unchanged, applied: {} });
   }
 
-  const audit: AuditInput = {
-    admin,
-    action: AUDIT_ACTION,
-    entity: ENTITY,
-    entity_id: plan.entityId,
-    before: plan.before,
-    after: plan.after,
-    sensitivity: 'financial',
-  };
-
-  const written = await writePlan(current, plan, new Date().toISOString());
-  if (!written.ok) {
-    if (written.conflict) return raceConflict(plan);
-    console.error('platform balance save failed:', written.message);
-    await writeAudit({ ...audit, result: 'failure', error: written.message });
-    return fail('INTERNAL_ERROR', NOT_SAVED);
+  const outcome = await compareAndSet({
+    changes: plan.updates,
+    expected: seenValues(current, plan.changed),
+    privateKeys: null,
+    order: WRITABLE_KEYS,
+  });
+  if (outcome.kind === 'conflict') return raceConflict(plan);
+  if (outcome.kind === 'failed') {
+    console.error('platform balance save failed:', outcome.message);
+    const audit = auditOf(admin, plan);
+    await writeAudit({ ...audit, result: 'failure', error: outcome.message });
+    return fail('INTERNAL_ERROR', outcome.outcomeUnknown ? UNCONFIRMED : NOT_SAVED);
   }
 
+  const changed = WRITABLE_KEYS.filter((key) => outcome.changed.includes(key));
+  const unchanged = WRITABLE_KEYS.filter((key) => plan.unchanged.includes(key) || outcome.unchanged.includes(key));
+  if (changed.length === 0) return ok({ changed, unchanged, applied: {} });
+
+  const applied = pick(plan.updates, changed);
+  const settled = { ...current, ...outcome.before, ...pick(plan.updates, outcome.unchanged) };
+  const audit = auditOf(admin, changeAudit(settled, applied));
   const [, recorded] = await Promise.all([refreshCaches(), writeAudit({ ...audit, result: 'success' })]);
   return ok({
-    changed: plan.changed,
-    unchanged: plan.unchanged,
-    applied: plan.updates,
+    changed,
+    unchanged,
+    applied,
     ...(recorded.ok ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING }),
   });
 }

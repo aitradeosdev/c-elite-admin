@@ -6,8 +6,7 @@ import {
 } from 'react';
 import Link from 'next/link';
 import {
-  ArrowDownToLine, ArrowLeftRight, ArrowRight, CreditCard, Flag, History, RotateCw, Search, TicketPercent,
-  UserRound, X,
+  ArrowDownToLine, ArrowLeftRight, ArrowRight, CreditCard, History, RotateCw, Search, TicketPercent, UserRound, X,
 } from 'lucide-react';
 import { apiRequest, type ApiBody, type ApiFailure } from '../lib/apiClient';
 import { MASK, maskForDisplay } from '../lib/mask';
@@ -143,7 +142,6 @@ const TEXT_LIMIT = 200;
 const HREF_LIMIT = 2048;
 const ECHO_LIMIT = 40;
 const RECENT_STORAGE_PREFIX = 'cardelite.admin.palette.recent:';
-const KIND_PATTERN = /^[a-z][a-z_]{0,31}$/;
 const UNSAFE_HREF = /[\u0000-\u001f\u007f\\]/;
 const WORD_BREAK = /[^\p{L}\p{N}]+/u;
 const MASKED_TAIL = new RegExp(`${MASK}(?: ?([0-9A-Za-z]+))?`, 'g');
@@ -156,7 +154,6 @@ const GROUP_ICONS: Readonly<Record<string, PaletteIcon>> = {
   transactions: ArrowLeftRight,
   card_submissions: CreditCard,
   coupons: TicketPercent,
-  flags: Flag,
 };
 
 const GROUP_LABELS: Readonly<Record<string, string>> = {
@@ -165,7 +162,6 @@ const GROUP_LABELS: Readonly<Record<string, string>> = {
   transactions: 'Transactions',
   card_submissions: 'Card submissions',
   coupons: 'Coupons',
-  flags: 'Flagged transactions',
 };
 
 const KIND_LABELS: Readonly<Record<string, string>> = {
@@ -175,8 +171,9 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   transactions: 'Transaction',
   card_submissions: 'Card submission',
   coupons: 'Coupon',
-  flags: 'Flag',
 };
+
+const RECENT_KINDS: ReadonlySet<string> = new Set(Object.keys(KIND_LABELS));
 
 const FOOTER_HINTS: ReadonlyArray<{ id: string; keys: ReadonlyArray<ShortcutKey>; text: string }> = [
   { id: 'move', keys: ['up', 'down'], text: 'to move' },
@@ -301,7 +298,7 @@ export function recentStorageKey(viewer: string): string {
 function readRecent(value: unknown): PaletteRecent | null {
   if (!isRecord(value) || !isSafeHref(value.href)) return null;
   const title = cleanText(value.title);
-  const kind = typeof value.kind === 'string' && KIND_PATTERN.test(value.kind) ? value.kind : null;
+  const kind = typeof value.kind === 'string' && RECENT_KINDS.has(value.kind) ? value.kind : null;
   if (!title || !kind) return null;
   return { href: value.href, title, subtitle: cleanText(value.subtitle), kind };
 }
@@ -412,7 +409,7 @@ function recentOption(recent: PaletteRecent, pages: readonly PaletteCommand[]): 
 }
 
 function searchOption(group: PaletteSearchGroup, item: PaletteSearchItem): PaletteOption {
-  const kind = KIND_PATTERN.test(group.key) ? group.key : 'record';
+  const remembered = group.key !== 'page' && RECENT_KINDS.has(group.key);
   return {
     key: `${group.key}:${item.id}`,
     type: 'link',
@@ -423,7 +420,7 @@ function searchOption(group: PaletteSearchGroup, item: PaletteSearchItem): Palet
     hint: null,
     href: item.href,
     icon: GROUP_ICONS[group.key] ?? Search,
-    recent: { href: item.href, title: item.title, subtitle: item.subtitle, kind },
+    recent: remembered ? { href: item.href, title: item.title, subtitle: item.subtitle, kind: group.key } : null,
     onSelect: null,
   };
 }

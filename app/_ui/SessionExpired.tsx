@@ -23,7 +23,7 @@ function isAdminApi(input: RequestInfo | URL): boolean {
     const url = new URL(raw, window.location.origin);
     if (url.origin !== window.location.origin) return false;
     if (!url.pathname.startsWith('/api/')) return false;
-    return !url.pathname.startsWith('/api/auth/');
+    return url.pathname !== '/api/auth' && !url.pathname.startsWith('/api/auth/');
   } catch {
     return false;
   }
@@ -75,8 +75,10 @@ export function SessionExpiredHandler() {
       footer={<Button variant="primary" onClick={signIn}>Sign in again</Button>}
     >
       <p className={s.message}>
-        For security, admin sessions end after a period of inactivity or when an
-        administrator revokes them. Sign in again and you will come back to this page.
+        For security, admin sessions end 8 hours after you sign in. A session also ends early if it is
+        signed out from Signed-in devices, if you sign out everywhere or change your password on another
+        device, or if a super administrator changes your access, resets your two-step sign-in or signs you
+        out. Sign in again and you will come back to this page.
       </p>
     </Modal>
   );

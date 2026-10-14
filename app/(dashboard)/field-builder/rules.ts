@@ -25,21 +25,7 @@ const COUNTRY_CODE = /^[A-Za-z]{2,3}$/;
 
 export type MoveDirection = 'up' | 'down';
 
-export interface Ordered {
-  id: string;
-  sort_order: number | null;
-}
-
-export interface SortUpdate {
-  id: string;
-  sort_order: number;
-}
-
 export type ReorderRefusal = 'empty' | 'too_many' | 'duplicate' | 'mismatch';
-
-export type ReorderPlan =
-  | { ok: true; order: string[]; updates: SortUpdate[] }
-  | { ok: false; reason: ReorderRefusal };
 
 export function isInputType(value: unknown): value is InputType {
   return typeof value === 'string' && (INPUT_TYPES as readonly string[]).includes(value);
@@ -105,26 +91,6 @@ export function parseSortOrder(value: unknown): number | null {
   const raw = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
   if (typeof raw !== 'number' || !Number.isInteger(raw)) return null;
   return raw >= 0 && raw <= SORT_ORDER_MAX ? raw : null;
-}
-
-export function planReorder(current: readonly Ordered[], requested: readonly string[]): ReorderPlan {
-  if (requested.length === 0) return { ok: false, reason: 'empty' };
-  if (requested.length > REORDER_MAX) return { ok: false, reason: 'too_many' };
-  const wanted = requested.map((id) => id.toLowerCase());
-  if (new Set(wanted).size !== wanted.length) return { ok: false, reason: 'duplicate' };
-  const known = new Map(current.map((item) => [item.id.toLowerCase(), item]));
-  if (known.size !== wanted.length || wanted.some((id) => !known.has(id))) {
-    return { ok: false, reason: 'mismatch' };
-  }
-  const order: string[] = [];
-  const updates: SortUpdate[] = [];
-  wanted.forEach((id, index) => {
-    const item = known.get(id);
-    if (!item) return;
-    order.push(item.id);
-    if (item.sort_order !== index) updates.push({ id: item.id, sort_order: index });
-  });
-  return { ok: true, order, updates };
 }
 
 export function moveId(ids: readonly string[], id: string, direction: MoveDirection): string[] | null {

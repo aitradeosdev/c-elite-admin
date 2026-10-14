@@ -13,6 +13,7 @@ import {
   SECTIONS, plural,
   type EmergencyState, type LiveNotice, type SecretDraft, type SecretState, type SettingField, type SettingSection,
 } from './model';
+import { POLICY_SUBTITLE, POLICY_TITLE } from './securityPolicy';
 import type { ConfigValues } from '../_config/ConfigForm';
 import s from './page.module.css';
 
@@ -457,6 +458,16 @@ export function SettingsSkeleton() {
           <div className={s.emergencyRow}>
             <Skeleton width="45%" height={12} />
             <Skeleton width={196} height={34} />
+          </div>
+        </CardBody>
+      </Card>
+      <Card aria-hidden>
+        <CardHeader title={POLICY_TITLE} subtitle={POLICY_SUBTITLE} />
+        <CardBody className={s.policyBody}>
+          <Skeleton width="55%" height={12} />
+          <div className={s.policyRow}>
+            <Skeleton width="40%" height={12} />
+            <Skeleton width={180} height={34} />
           </div>
         </CardBody>
       </Card>

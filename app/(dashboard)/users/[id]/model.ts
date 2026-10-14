@@ -208,6 +208,8 @@ const TYPE_LABELS: Readonly<Record<string, string>> = {
   referral_bonus: 'Referral bonus',
   level_bonus: 'Level bonus',
   bonus_redeem: 'Bonus redemption',
+  wallet_credit: 'Wallet credit',
+  wallet_debit: 'Wallet debit',
 };
 
 function text(value: unknown): string | null {
@@ -268,6 +270,10 @@ export function accountState(user: Pick<UserProfile, 'deleted_at' | 'is_frozen' 
   if (user.deleted_at) return 'deleted';
   if (user.is_frozen) return 'frozen';
   return user.is_active ? 'active' : 'inactive';
+}
+
+export function canAdjustWallet(user: Pick<UserProfile, 'deleted_at' | 'is_frozen' | 'is_active'>): boolean {
+  return accountState(user) !== 'deleted';
 }
 
 export function displayName(user: Pick<UserProfile, 'full_name' | 'username'>): string {

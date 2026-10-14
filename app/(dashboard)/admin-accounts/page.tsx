@@ -3,40 +3,44 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Eye, LogOut, MoreHorizontal, Pencil, RotateCw, ShieldCheck, Trash2, UserCheck, UserPlus, UserX,
+  Eye, KeyRound, LogOut, MoreHorizontal, Pencil, RotateCw, ShieldCheck, Trash2, UserCheck, UserPlus, UserX,
 } from 'lucide-react';
 import {
   AccessDenied, Badge, Button, Card, CardBody, ErrorState, FilterBar, Menu, MobileDataList, Notice, PageHeader,
   ResponsiveView, SearchInput, SidePanel, SkeletonLines, StatStrip, StatusDot, TBody, THead, Table, TableEmpty,
-  TableSkeleton, TableState, Tabs, Td, Th, Tr, combineCodecs, enumParam, useConfirm, usePermissions, useResource,
-  useTableSort, useToast, useUrlState, uuidParam,
+  TableSkeleton, TableState, Tabs, Td, Th, Tr, useConfirm, usePermissions, useResource, useTableSort, useToast,
+  useUrlState,
   type MenuEntryInput, type MobileDataListSortOption, type TableSkeletonColumn,
 } from '../../_ui';
 import { apiRequest, type ApiFailure } from '../../lib/apiClient';
 import { isUuid } from '../../lib/http';
 import { formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
+import { SecurityRequestError, reauthenticate } from '../../_security/reauth';
 import {
-  STATUS_LABEL, STATUS_TABS, STATUS_TAB_VALUES, STATUS_TONE, adminHandle, adminStats, allowsAction, capabilitiesFor,
-  classifyMutation, hasRowActions, isSelf, rowActionRequest, statusOf, tabCounts, toAdminList, toMutationResult,
-  visibleAdmins, withAdmin,
-  type AdminCapabilities, type AdminList, type AdminRow, type MutationOutcome, type RowActionKind, type StatusTab,
+  ACTOR_TWO_STEP_FIRST, ADMINS_URL, POLICY_OFF, STATUS_LABEL, STATUS_TABS, STATUS_TONE, TWO_STEP_SETTINGS_HREF,
+  TWO_STEP_STAT_UNAVAILABLE, actorCanReset, adminHandle, adminMfaPath, adminStats, allowsAction, capabilitiesFor,
+  classifyMutation, hasRowActions, hasSecurityPanel, isSelf, mfaCellState, resetBlockedText, rowActionRequest,
+  statusOf, tabCounts, toAdminList, toMutationResult, toResetResult, twoStepStat, twoStepStats, visibleAdmins,
+  withAdmin,
+  type AdminCapabilities, type AdminList, type AdminPanel, type AdminRow, type MutationOutcome, type ResetResult,
+  type RowActionKind, type SecurityPolicy, type StatusTab,
 } from './model';
-import { ROW_ACTION_PENDING, rowActionConfirm, rowActionSuccess } from './confirmOptions';
+import { ROW_ACTION_PENDING, resetMfaConfirm, resetSuccess, rowActionConfirm, rowActionSuccess } from './confirmOptions';
 import { AccessCell } from './GrantParts';
 import { AdminEditor } from './AdminEditor';
 import { AdminDetails } from './AdminDetails';
+import { MfaBadge, MfaCell } from './SecurityParts';
+import { AdminSecurityTab, type FocusTarget } from './SecurityTab';
 import s from './page.module.css';
 
 const TITLE = 'Admin accounts';
 const SUBTITLE = 'Who can sign in to the console, what each admin can do, and their sessions. Super administrators only; times are WAT.';
-const COLUMN_COUNT = 6;
+const COLUMN_COUNT = 7;
 const BAD_LINK = 'That admin link is not valid, so nothing was opened.';
 const MISSING_LINK = 'That admin account could not be found, so nothing was opened.';
-
-const ADMINS_URL = combineCodecs({
-  tab: enumParam('status', STATUS_TAB_VALUES, 'all'),
-  id: uuidParam('id'),
-});
+const RESET_AUDIT_WARNING = 'Two-step sign-in was reset, but the change could not be written to the audit log.';
+const STEP_UP_REASON_MIN = 3;
+const STEP_UP_REASON_SHORT = `Give a reason of at least ${STEP_UP_REASON_MIN} characters.`;
 
 const SKELETON_COLUMNS: readonly TableSkeletonColumn[] = [
   { width: 150, lines: 2 },
@@ -44,6 +48,7 @@ const SKELETON_COLUMNS: readonly TableSkeletonColumn[] = [
   { width: 170, lines: 2 },
   { width: 130, lines: 2 },
   { width: 96 },
+  { width: 110, lines: 2 },
   { width: 96, align: 'right', button: true },
 ];
 
@@ -78,6 +83,22 @@ function staleActionText(kind: RowActionKind, admin: AdminRow, self: boolean): s
 
 function signInText(value: string | null): string {
   return value ? `Signed in ${formatAge(value)} ago` : 'Never signed in';
+}
+
+function checkStepUpReason(reason: string): void {
+  if (Array.from(reason.trim()).length < STEP_UP_REASON_MIN) throw new Error(STEP_UP_REASON_SHORT);
+}
+
+async function confirmIdentity(code: string): Promise<'ok' | 'expired'> {
+  try {
+    await reauthenticate('otp', code);
+    return 'ok';
+  } catch (error) {
+    if (error instanceof SecurityRequestError && error.failure.kind === 'http' && error.failure.status === 401) {
+      return 'expired';
+    }
+    throw error;
+  }
 }
 
 export default function AdminAccountsPage() {
@@ -174,6 +195,7 @@ function AdminAccounts() {
   const { sort, setSort, toggle: toggleSort } = useTableSort(null);
   const [creating, setCreating] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
+  const [securityRevision, setSecurityRevision] = useState(0);
   const actingRef = useRef(false);
   const listRegionRef = useRef<HTMLDivElement>(null);
   const createButtonRef = useRef<HTMLButtonElement>(null);
@@ -186,9 +208,12 @@ function AdminAccounts() {
   const data = list.data;
   const admins = data?.admins ?? NO_ADMINS;
   const currentAdminId = data?.currentAdminId ?? null;
+  const policy: SecurityPolicy = data?.policy ?? POLICY_OFF;
+  const actorTwoStep = data?.actorTwoStep ?? null;
   const rows = useMemo(() => visibleAdmins(admins, url.tab, query, sort), [admins, url.tab, query, sort]);
   const counts = useMemo(() => tabCounts(admins), [admins]);
   const stats = useMemo(() => adminStats(admins), [admins]);
+  const twoStep = useMemo(() => twoStepStats(admins), [admins]);
   const openAdmin = url.id ? admins.find((row) => row.id === url.id) ?? null : null;
 
   const badLink = rawId !== null && rawId.trim() !== '' && !isUuid(rawId.trim());
@@ -202,7 +227,7 @@ function AdminAccounts() {
   useEffect(() => {
     if (!url.id || !data || list.isPreviousData || openAdmin) return;
     notify(MISSING_LINK, 'warning');
-    setUrl((value) => ({ ...value, id: null }));
+    setUrl((value) => ({ ...value, id: null, panel: 'account' }));
   }, [url.id, data, list.isPreviousData, openAdmin, notify, setUrl]);
 
   const readFresh = useCallback(async (): Promise<AdminList | null> => {
@@ -226,17 +251,21 @@ function AdminAccounts() {
 
   const openRow = useCallback((admin: AdminRow) => {
     setCreating(false);
-    setUrl((value) => ({ ...value, id: admin.id }));
+    setUrl((value) => ({ ...value, id: admin.id, panel: 'account' }));
   }, [setUrl]);
 
   const closePanel = useCallback(() => {
     setCreating(false);
-    setUrl((value) => (value.id === null ? value : { ...value, id: null }));
+    setUrl((value) => (value.id === null && value.panel === 'account' ? value : { ...value, id: null, panel: 'account' }));
   }, [setUrl]);
 
   const startCreate = useCallback(() => {
-    setUrl((value) => (value.id === null ? value : { ...value, id: null }));
+    setUrl((value) => (value.id === null && value.panel === 'account' ? value : { ...value, id: null, panel: 'account' }));
     setCreating(true);
+  }, [setUrl]);
+
+  const changePanel = useCallback((next: AdminPanel) => {
+    setUrl((value) => ({ ...value, panel: next }));
   }, [setUrl]);
 
   const changeTab = useCallback((next: StatusTab) => {
@@ -273,12 +302,15 @@ function AdminAccounts() {
         notify(outcome.message, 'error');
         router.refresh();
         return;
+      case 'reauth':
+        notify(outcome.message, 'warning');
+        return;
       case 'expired':
         return;
     }
   };
 
-  const runAction = async (kind: RowActionKind, target: AdminRow) => {
+  const runAction = async (kind: RowActionKind, target: AdminRow, returnFocusTo?: FocusTarget) => {
     if (actingRef.current) return;
     actingRef.current = true;
     setActing(target.id);
@@ -313,12 +345,86 @@ function AdminAccounts() {
           if (attempt.kind !== 'expired') await refreshList({ background: true });
           return attempt;
         },
-        returnFocusTo: rowFocus(live.id),
+        returnFocusTo: returnFocusTo ?? rowFocus(live.id),
       });
       if (decision?.value) report(kind, live, decision.value);
     } finally {
       actingRef.current = false;
       setActing(null);
+      if (sent) setSecurityRevision((value) => value + 1);
+      if (sent && !settled) refreshQuietly();
+    }
+  };
+
+  const reportReset = (admin: AdminRow, outcome: MutationOutcome<ResetResult>) => {
+    switch (outcome.kind) {
+      case 'done':
+        notify(resetSuccess(admin), 'success');
+        if (!outcome.result.auditRecorded) notify(outcome.result.warning ?? RESET_AUDIT_WARNING, 'warning');
+        return;
+      case 'unknown':
+        notify(outcome.message, 'error');
+        return;
+      case 'stale':
+      case 'reauth':
+        notify(outcome.message, 'warning');
+        return;
+      case 'refused':
+        notify(outcome.message, 'error');
+        router.refresh();
+        return;
+      case 'expired':
+        return;
+    }
+  };
+
+  const runReset = async (target: AdminRow, returnFocusTo?: FocusTarget) => {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setActing(target.id);
+    let sent = false;
+    let settled = false;
+    try {
+      const fresh = await readFresh();
+      if (!fresh) return;
+      const live = fresh.admins.find((row) => row.id === target.id);
+      if (!live) {
+        notify(`${adminHandle(target)} no longer exists, so nothing was changed.`, 'warning');
+        return;
+      }
+      if (!capabilitiesFor(live, fresh.currentAdminId).resetMfa) {
+        notify(resetBlockedText(live, isSelf(live, fresh.currentAdminId)), 'warning');
+        return;
+      }
+      if (!actorCanReset(fresh.actorTwoStep)) {
+        notify(ACTOR_TWO_STEP_FIRST, 'warning');
+        return;
+      }
+      const decision = await confirm<MutationOutcome<ResetResult>>({
+        ...resetMfaConfirm(live, fresh.policy),
+        action: async ({ reason, credential }) => {
+          checkStepUpReason(reason);
+          const identity = await confirmIdentity(credential ?? '');
+          if (identity === 'expired') return { kind: 'expired' };
+          sent = true;
+          const attempt = classifyMutation(await apiRequest(adminMfaPath(live.id), {
+            method: 'DELETE',
+            body: { reason },
+            select: toResetResult,
+          }));
+          if (attempt.kind === 'retry') throw new Error(attempt.message);
+          if (attempt.kind === 'reauth' && attempt.code === 'REAUTH_REQUIRED') throw new Error(attempt.message);
+          settled = true;
+          if (attempt.kind !== 'expired') await refreshList({ background: true });
+          return attempt;
+        },
+        returnFocusTo: returnFocusTo ?? rowFocus(live.id),
+      });
+      if (decision?.value) reportReset(live, decision.value);
+    } finally {
+      actingRef.current = false;
+      setActing(null);
+      if (sent) setSecurityRevision((value) => value + 1);
       if (sent && !settled) refreshQuietly();
     }
   };
@@ -328,6 +434,13 @@ function AdminAccounts() {
       label: 'Sign out everywhere',
       icon: <LogOut size={14} aria-hidden />,
       onSelect: () => void runAction('revoke', admin),
+    },
+    capabilities.resetMfa && {
+      label: 'Reset two-step sign-in',
+      icon: <KeyRound size={14} aria-hidden />,
+      description: actorCanReset(actorTwoStep) ? undefined : ACTOR_TWO_STEP_FIRST,
+      disabled: !actorCanReset(actorTwoStep),
+      onSelect: () => void runReset(admin),
     },
     capabilities.deactivate && {
       label: 'Deactivate',
@@ -421,6 +534,8 @@ function AdminAccounts() {
     label: item.label,
     count: loaded ? counts[item.value].toLocaleString('en-NG') : undefined,
   }));
+  const now = new Date();
+  const twoStepItem = twoStepStat(twoStep, policy, data?.securityLoaded ?? false, now);
 
   const staleNotice = listError && loaded ? (
     <Notice
@@ -445,6 +560,7 @@ function AdminAccounts() {
               <Th>Access</Th>
               <Th sortKey="last_login_at" sort={sort} onSort={toggleSort}>Last sign-in</Th>
               <Th>Status</Th>
+              <Th>Two-step</Th>
               <Th align="right"><span className={s.srOnly}>Actions</span></Th>
             </Tr>
           </THead>
@@ -472,6 +588,7 @@ function AdminAccounts() {
                   <Td><AccessCell admin={admin} /></Td>
                   <Td><SignInCell value={admin.last_login_at} /></Td>
                   <Td><StatusCell admin={admin} /></Td>
+                  <Td><MfaCell state={mfaCellState(admin, policy, now)} /></Td>
                   <Td align="right">{actionsFor(admin, true)}</Td>
                 </Tr>
               ))
@@ -501,7 +618,12 @@ function AdminAccounts() {
       renderRow={(admin) => ({
         primary: isSelf(admin, currentAdminId) ? `${adminHandle(admin)} · You` : adminHandle(admin),
         secondary: admin.role_title || 'No role title',
-        status: <StatusCell admin={admin} />,
+        status: (
+          <span className={s.statusStack}>
+            <StatusCell admin={admin} />
+            <MfaBadge state={mfaCellState(admin, policy, now)} />
+          </span>
+        ),
         meta: `${admin.email ?? 'No email'} · ${signInText(admin.last_login_at)}`,
         flag: !admin.email && !admin.deleted_at ? 'warning' : null,
         flagLabel: 'No email, so this admin cannot sign in',
@@ -512,6 +634,20 @@ function AdminAccounts() {
   );
 
   const panelFocus = rowFocus(url.id);
+
+  const securityTab = openAdmin && hasSecurityPanel(openAdmin) ? (
+    <AdminSecurityTab
+      admin={openAdmin}
+      currentAdminId={currentAdminId}
+      policy={policy}
+      actorTwoStep={actorTwoStep}
+      busy={acting !== null}
+      revision={securityRevision}
+      onResetMfa={(admin, focus) => void runReset(admin, focus)}
+      onSignOutEverywhere={(admin, focus) => void runAction('revoke', admin, focus)}
+      onChanged={refreshQuietly}
+    />
+  ) : undefined;
 
   return (
     <div>
@@ -558,6 +694,16 @@ function AdminAccounts() {
             label: 'Hold critical actions',
             value: stats.critical.toLocaleString('en-NG'),
             hint: 'Active admins, not counting super admins',
+            loading: showSkeleton,
+          },
+          {
+            label: 'Two-step sign-in',
+            value: twoStepItem.value,
+            hint: twoStepItem.hint,
+            tone: twoStepItem.tone,
+            href: TWO_STEP_SETTINGS_HREF,
+            unavailable: twoStepItem.unavailable,
+            unavailableHint: TWO_STEP_STAT_UNAVAILABLE,
             loading: showSkeleton,
           },
         ]}
@@ -609,6 +755,10 @@ function AdminAccounts() {
             refreshList={refreshQuietly}
             onClose={closePanel}
             returnFocusTo={panelFocus}
+            panel={url.panel}
+            onPanelChange={changePanel}
+            security={securityTab}
+            securityCount={openAdmin.security?.liveSessions ?? null}
           />
         ) : (
           <AdminDetails
@@ -616,6 +766,10 @@ function AdminAccounts() {
             admin={openAdmin}
             onClose={closePanel}
             returnFocusTo={panelFocus}
+            panel={url.panel}
+            onPanelChange={changePanel}
+            security={securityTab}
+            securityCount={openAdmin.security?.liveSessions ?? null}
           />
         )
       ) : url.id && !loaded ? (

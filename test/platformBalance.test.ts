@@ -139,6 +139,13 @@ describe('static amount parsing', () => {
       assert.deepEqual(model.checkStaticAmount(input), { ok: false, message }, String(input));
     }
   });
+
+  test('reads amounts with the shared strict naira parser the wallet adjustment panel also uses', () => {
+    const source = readFileSync(join(OWNED_DIR, 'model.ts'), 'utf8');
+    assert.match(source, /import \{ parseNaira, type NairaProblem \} from '\.\.\/\.\.\/lib\/naira';/);
+    assert.match(source, /const parsed = parseNaira\(raw, STATIC_MAX\);/);
+    assert.doesNotMatch(source, /PLAIN_AMOUNT|GROUPED_AMOUNT/);
+  });
 });
 
 describe('balance source', () => {
@@ -313,30 +320,34 @@ describe('PATCH request', () => {
     assert.ok(mobile.ok);
   });
 
-  test('a single change is written only if the stored value is still the one read', () => {
-    const planned = model.planPatch(STORED, { changes: { platform_balance_static: '50,000,000' }, expected: null });
-    assert.ok(planned.ok);
-    assert.deepEqual(model.guardedWrite(STORED, planned.plan), {
-      key: 'platform_balance_static', value: '50000000', exists: true, seen: '48350000',
+  test('the audit of a write records its keys and what users saw, against whatever state it replaced', () => {
+    assert.deepEqual(model.changeAudit(STORED, { platform_balance_static: '50000000' }), {
+      before: { platform_balance_static: '48350000', displayed_balance: 48350000 },
+      after: { platform_balance_static: '50000000', displayed_balance: 50000000 },
+      entityId: 'platform_balance_static',
     });
-    const blank = { ...STORED, platform_balance_static: null };
-    const fromNull = model.planPatch(blank, { changes: { platform_balance_static: '1' }, expected: null });
-    assert.ok(fromNull.ok);
-    assert.deepEqual(model.guardedWrite(blank, fromNull.plan), {
-      key: 'platform_balance_static', value: '1', exists: true, seen: null,
+    assert.deepEqual(model.changeAudit({ ...STORED, platform_balance_mode: 'live' }, { platform_balance_static: '50000000' }), {
+      before: { platform_balance_static: '48350000', displayed_balance: 12345.67 },
+      after: { platform_balance_static: '50000000', displayed_balance: 12345.67 },
+      entityId: 'platform_balance_static',
     });
     const missing = Object.fromEntries(Object.entries(STORED).filter(([key]) => key !== 'platform_balance_mode'));
-    const created = model.planPatch(missing, { changes: { platform_balance_mode: 'live' }, expected: null });
-    assert.ok(created.ok);
-    assert.deepEqual(model.guardedWrite(missing, created.plan), {
-      key: 'platform_balance_mode', value: 'live', exists: false, seen: null,
+    assert.deepEqual(model.changeAudit(missing, { platform_balance_mode: 'live' }).before, {
+      platform_balance_mode: null,
+      displayed_balance: 48350000,
     });
-    const both = model.planPatch(STORED, {
+    assert.equal(model.changeAudit(STORED, { platform_balance_mode: 'live', platform_balance_static: '1' }).entityId, 'batch');
+    assert.deepEqual(model.changeAudit(STORED, { platform_balance_live: '1' }), { before: {}, after: {}, entityId: 'batch' });
+  });
+
+  test('a plan carries exactly the audit of its own updates', () => {
+    const planned = model.planPatch(STORED, {
       changes: { platform_balance_mode: 'live', platform_balance_static: '1' },
       expected: null,
     });
-    assert.ok(both.ok);
-    assert.equal(model.guardedWrite(STORED, both.plan), null);
+    assert.ok(planned.ok);
+    const { before, after, entityId } = planned.plan;
+    assert.deepEqual({ before, after, entityId }, model.changeAudit(STORED, planned.plan.updates));
   });
 });
 
@@ -800,8 +811,11 @@ describe('hard rules', () => {
     assert.match(patch, /writeAudit\(\{ \.\.\.audit, result: 'success' \}\)/);
     assert.match(source, /sensitivity: 'financial'/);
     assert.match(source, /from '\.\.\/\.\.\/\(dashboard\)\/platform-balance\/model'/);
-    assert.match(patch, /writePlan\(current, plan,/);
-    assert.match(source, /update\.eq\('value', guarded\.seen\)/);
+    assert.match(patch, /changes: plan\.updates,/);
+    assert.match(patch, /expected: seenValues\(current, plan\.changed\),/);
+    assert.match(patch, /privateKeys: null,/);
     assert.match(source, /return raceConflict\(plan\)/);
+    assert.match(patch, /refreshCaches\(\)/);
+    assert.doesNotMatch(source, /guardedWrite|writePlan|\.upsert\(|\.update\(|\.insert\(/);
   });
 });

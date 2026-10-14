@@ -515,7 +515,7 @@ describe('/api/app-config planning', () => {
     assert.equal(config.readConfigPatch({ changes: { levels_active: 'true' }, expected: 'x' }, TEST_ALLOWED).ok, false);
   });
 
-  test('skips values already stored and plans the audit before and after', () => {
+  test('a referral value equal in meaning is held back as a precondition; every other value goes to the database', () => {
     const planned = config.planConfigWrite(
       {
         changes: { referral_referrer_bonus: '500', referral_referee_bonus: '700', coupon_terms_of_use: 'a' },
@@ -523,31 +523,60 @@ describe('/api/app-config planning', () => {
       },
       { referral_referrer_bonus: '500.00', referral_referee_bonus: '500', coupon_terms_of_use: 'a ' },
     );
-    assert.ok(planned.ok);
-    if (!planned.ok) return;
-    assert.deepEqual(planned.plan.unchanged, ['referral_referrer_bonus']);
-    assert.deepEqual(planned.plan.updates, { referral_referee_bonus: '700', coupon_terms_of_use: 'a' });
-    assert.deepEqual(planned.plan.before, { referral_referee_bonus: '500', coupon_terms_of_use: 'a ' });
-    assert.equal(planned.plan.entityId, 'batch');
-    assert.equal(planned.plan.sensitivity, 'financial');
-    const fresh = config.planConfigWrite({ changes: { referral_max_per_day: '12' }, expected: null }, {});
-    assert.ok(fresh.ok && fresh.plan.before.referral_max_per_day === null && fresh.plan.entityId === 'referral_max_per_day');
+    assert.deepEqual(planned, {
+      changes: { referral_referee_bonus: '700', coupon_terms_of_use: 'a' },
+      expected: { referral_referrer_bonus: '500.00' },
+      unchanged: ['referral_referrer_bonus'],
+    });
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { coupon_terms_of_use: 'a', withdraw_fee: '50' }, expected: null }, { coupon_terms_of_use: 'a', withdraw_fee: '50' }),
+      { changes: { coupon_terms_of_use: 'a', withdraw_fee: '50' }, expected: null, unchanged: [] },
+    );
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { referral_max_per_day: '12' }, expected: null }, {}),
+      { changes: { referral_max_per_day: '12' }, expected: null, unchanged: [] },
+    );
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { referral_active: 'true' }, expected: null }, { referral_active: null }),
+      { changes: { referral_active: 'true' }, expected: null, unchanged: [] },
+    );
   });
 
-  test('refuses a lost update when the caller sends what it last saw', () => {
-    const planned = config.planConfigWrite(
-      { changes: { referral_referrer_bonus: '900' }, expected: { referral_referrer_bonus: '500' } },
+  test('the caller\'s expected values go with the keys being written; a held-back value expects what was read', () => {
+    const sent = config.planConfigWrite(
+      {
+        changes: { referral_referrer_bonus: '900', terms_url: 'https://cardelite.ng/t' },
+        expected: { referral_referrer_bonus: '500', terms_url: '' },
+      },
       { referral_referrer_bonus: '700' },
     );
-    assert.equal(planned.ok, false);
-    if (planned.ok) return;
-    assert.match(planned.message, /Another admin changed Referrer bonus after you loaded it/);
-    assert.deepEqual(planned.conflicts, [{ key: 'referral_referrer_bonus', label: 'Referrer bonus', current: '700' }]);
+    assert.deepEqual(sent, {
+      changes: { referral_referrer_bonus: '900', terms_url: 'https://cardelite.ng/t' },
+      expected: { referral_referrer_bonus: '500', terms_url: '' },
+      unchanged: [],
+    });
     const alreadyLive = config.planConfigWrite(
       { changes: { referral_referrer_bonus: '700' }, expected: { referral_referrer_bonus: '500' } },
-      { referral_referrer_bonus: '700' },
+      { referral_referrer_bonus: '700.0' },
     );
-    assert.ok(alreadyLive.ok && alreadyLive.plan.unchanged.length === 1);
+    assert.deepEqual(alreadyLive, {
+      changes: {},
+      expected: { referral_referrer_bonus: '700.0' },
+      unchanged: ['referral_referrer_bonus'],
+    });
+  });
+
+  test('a lost update is named by label', () => {
+    assert.equal(
+      config.conflictMessage(['referral_referrer_bonus']),
+      'Another admin changed Referrer bonus after you loaded it, so nothing was saved. Reload to see the current values.',
+    );
+    assert.equal(
+      config.conflictMessage(['referral_referrer_bonus', 'terms_url']),
+      'Another admin changed Referrer bonus and terms_url after you loaded them, so nothing was saved. Reload to see the current values.',
+    );
+    assert.equal(config.configLabel('referral_max_per_day'), 'Referrals per referrer in 24 hours');
+    assert.equal(config.configLabel('withdraw_fee'), 'withdraw_fee');
   });
 
   test('classifies sensitivity by the most sensitive key', () => {
@@ -818,6 +847,11 @@ describe('route contracts', () => {
     assert.match(appConfig, /edge_cache_delete/);
     assert.match(appConfig, /writeAudit\(/);
     assert.match(appConfig, /UPDATE_APP_CONFIG/);
+  });
+
+  test('/api/app-config writes only through the compare-and-set call, with public rows', () => {
+    assert.match(appConfig, /compareAndSet\(\{ changes: plan\.changes, expected: plan\.expected, privateKeys: null, order: requested \}\)/);
+    assert.doesNotMatch(appConfig, /\.upsert\(|\.update\(|\.insert\(/);
   });
 
   test('/api/app-config keeps the ALLOWED_KEYS list exactly', () => {
