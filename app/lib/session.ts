@@ -38,7 +38,7 @@ export interface PolicyState {
 }
 
 export interface SecurityState {
-  session: SessionInfo | null;
+  session: SessionInfo;
   mfa: MfaState;
   policy: PolicyState;
 }
@@ -304,11 +304,11 @@ function lastAuthenticatedAt(session: SessionInfo): number {
 }
 
 export async function requireRecentAuth(
-  admin: { session: SessionInfo | null; mfa: MfaState },
+  admin: { session: SessionInfo; mfa: MfaState },
   maxAgeSecs: number = REAUTH_MAX_AGE_SECONDS,
   nowMs: number = Date.now(),
 ): Promise<NextResponse | null> {
-  if (admin.session && lastAuthenticatedAt(admin.session) >= nowMs - maxAgeSecs * 1000) return null;
+  if (lastAuthenticatedAt(admin.session) >= nowMs - maxAgeSecs * 1000) return null;
   return fail('REAUTH_REQUIRED', undefined, {
     details: { method: admin.mfa.status === 'active' ? 'otp' : 'password', max_age_secs: maxAgeSecs },
   });

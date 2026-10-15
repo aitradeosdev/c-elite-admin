@@ -1088,7 +1088,7 @@ describe('POST /api/auth/mfa/enroll/confirm', () => {
 });
 
 describe('POST /api/account/reauth', () => {
-  function signedInAdmin(mfa: 'none' | 'pending' | 'active', withSession = true): Record<string, unknown> {
+  function signedInAdmin(mfa: 'none' | 'pending' | 'active'): Record<string, unknown> {
     return {
       admin_id: ADMIN_ID,
       username: USERNAME,
@@ -1096,9 +1096,10 @@ describe('POST /api/account/reauth', () => {
       is_super_admin: false,
       page_permissions: [],
       token_version: 4,
-      session: withSession
-        ? { id: SID, client: 'web', amr: ['pwd'], createdAt: '2026-10-13T08:00:00Z', expiresAt: '2026-10-13T16:00:00Z', reauthAt: null, transport: 'cookie' }
-        : null,
+      session: {
+        id: SID, client: 'web', amr: ['pwd'], createdAt: '2026-10-13T08:00:00Z', expiresAt: '2026-10-13T16:00:00Z',
+        reauthAt: null, transport: 'cookie',
+      },
       mfa: { status: mfa, lockedUntil: null },
       policy: { mode: 'off', graceEndsAt: null, requiredNow: false },
     };
@@ -1112,14 +1113,10 @@ describe('POST /api/account/reauth', () => {
     state.requestAdmin = signedInAdmin(mfa);
   }
 
-  test('needs a signed-in session that has an id; anything else is the expired-session 401', async () => {
+  test('needs a signed-in session; without one it is the expired-session 401 and nothing is read', async () => {
     const none = await reauthWith({ otp: '123456' });
     assert.equal(none.status, 401);
-    reset();
-    state.requestAdmin = signedInAdmin('none', false);
-    const legacy = await reauthWith({ password: PASSWORD });
-    assert.equal(legacy.status, 401);
-    assert.equal((await bodyOf(legacy)).code, 'AUTH_REQUIRED');
+    assert.equal((await bodyOf(none)).code, 'AUTH_REQUIRED');
     assert.deepEqual(state.rpcs, []);
     assert.deepEqual(state.queries, []);
   });

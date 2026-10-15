@@ -25,11 +25,11 @@ export interface AdminJWTPayload {
   page_permissions: string[];
   username: string;
   token_version: number;
-  sid?: string;
-  amr?: AuthMethod[];
+  sid: string;
+  amr: AuthMethod[];
 }
 
-export interface VerifiedAdmin extends AdminJWTPayload, Partial<SecurityState> {}
+export interface VerifiedAdmin extends AdminJWTPayload, SecurityState {}
 
 export type SessionCheck =
   | ({ status: 'ok'; claims: AdminJWTPayload } & SecurityState)
@@ -44,8 +44,7 @@ export interface PresentedToken {
 interface TokenClaims {
   admin_id: string;
   token_version: number;
-  sid: string | null;
-  amr: AuthMethod[] | null;
+  sid: string;
 }
 
 type TokenRead = { kind: 'claims'; claims: TokenClaims } | { kind: 'invalid' } | { kind: 'unavailable' };
@@ -110,21 +109,13 @@ async function readToken(token: string): Promise<TokenRead> {
   } catch {
     return { kind: 'invalid' };
   }
+  const adminId = payload.admin_id;
+  const sid = payload.sid;
   const tokenVersion = payload.token_version;
-  if (!isUuid(payload.admin_id) || typeof tokenVersion !== 'number' || !Number.isInteger(tokenVersion)) {
+  if (!isUuid(adminId) || !isUuid(sid) || typeof tokenVersion !== 'number' || !Number.isInteger(tokenVersion)) {
     return { kind: 'invalid' };
   }
-  const hasSid = Object.prototype.hasOwnProperty.call(payload, 'sid');
-  if (hasSid && !isUuid(payload.sid)) return { kind: 'invalid' };
-  return {
-    kind: 'claims',
-    claims: {
-      admin_id: payload.admin_id,
-      token_version: tokenVersion,
-      sid: hasSid ? (payload.sid as string) : null,
-      amr: Array.isArray(payload.amr) ? normalizeAuthMethods(payload.amr) : null,
-    },
-  };
+  return { kind: 'claims', claims: { admin_id: adminId, token_version: tokenVersion, sid } };
 }
 
 function readMfa(value: unknown): MfaState {
@@ -160,7 +151,7 @@ async function authState(claims: TokenClaims): Promise<Record<string, unknown> |
   }
 }
 
-async function checkSession(token: string, transport: SessionTransport | null): Promise<SessionCheck> {
+export async function verifyAdminSession(token: string, transport: SessionTransport): Promise<SessionCheck> {
   const read = await readToken(token);
   if (read.kind !== 'claims') return read.kind === 'invalid' ? INVALID : UNAVAILABLE;
   const { claims } = read;
@@ -172,29 +163,23 @@ async function checkSession(token: string, transport: SessionTransport | null): 
   const currentVersion = typeof admin.token_version === 'number' ? admin.token_version : 0;
   if (claims.token_version !== currentVersion) return INVALID;
 
-  const mfa = readMfa(state.mfa);
-  let session: SessionInfo | null = null;
-  if (claims.sid !== null) {
-    const raw = isRecord(state.session) ? state.session : null;
-    if (!raw || raw.status !== 'active') return INVALID;
-    const client = raw.client === 'web' || raw.client === 'mobile' ? raw.client : null;
-    if (client === null || (transport !== null && client !== CLIENT_FOR[transport])) return INVALID;
-    if (typeof raw.created_at !== 'string' || typeof raw.expires_at !== 'string') {
-      console.error('admin session check failed:', 'the session was not described');
-      return UNAVAILABLE;
-    }
-    session = {
-      id: claims.sid,
-      client,
-      amr: normalizeAuthMethods(raw.auth_methods),
-      createdAt: raw.created_at,
-      expiresAt: raw.expires_at,
-      reauthAt: typeof raw.reauth_at === 'string' ? raw.reauth_at : null,
-      transport: transport ?? (client === 'web' ? 'cookie' : 'bearer'),
-    };
-  } else if (mfa.status === 'active') {
-    return INVALID;
+  const raw = isRecord(state.session) ? state.session : null;
+  if (!raw || raw.status !== 'active') return INVALID;
+  const client = raw.client === 'web' || raw.client === 'mobile' ? raw.client : null;
+  if (client === null || client !== CLIENT_FOR[transport]) return INVALID;
+  if (typeof raw.created_at !== 'string' || typeof raw.expires_at !== 'string') {
+    console.error('admin session check failed:', 'the session was not described');
+    return UNAVAILABLE;
   }
+  const session: SessionInfo = {
+    id: claims.sid,
+    client,
+    amr: normalizeAuthMethods(raw.auth_methods),
+    createdAt: raw.created_at,
+    expiresAt: raw.expires_at,
+    reauthAt: typeof raw.reauth_at === 'string' ? raw.reauth_at : null,
+    transport,
+  };
 
   const verified: AdminJWTPayload = {
     admin_id: admin.id,
@@ -205,21 +190,11 @@ async function checkSession(token: string, transport: SessionTransport | null): 
       : [],
     username: typeof admin.username === 'string' ? admin.username : '',
     token_version: currentVersion,
+    sid: claims.sid,
+    amr: session.amr,
   };
-  if (claims.sid !== null) verified.sid = claims.sid;
-  const amr = session ? session.amr : claims.amr;
-  if (amr) verified.amr = amr;
 
-  return { status: 'ok', claims: verified, session, mfa, policy: readPolicy(state.policy) };
-}
-
-export function verifyAdminSession(token: string, transport: SessionTransport): Promise<SessionCheck> {
-  return checkSession(token, transport);
-}
-
-export async function verifyAdminJWT(token: string, transport?: SessionTransport): Promise<AdminJWTPayload | null> {
-  const check = await checkSession(token, transport ?? null);
-  return check.status === 'ok' ? check.claims : null;
+  return { status: 'ok', claims: verified, session, mfa: readMfa(state.mfa), policy: readPolicy(state.policy) };
 }
 
 export async function sessionTokenFromRequest(): Promise<PresentedToken> {
@@ -235,7 +210,7 @@ export async function verifyAdminFromRequest(): Promise<VerifiedAdmin | null> {
   const { token, transport } = await sessionTokenFromRequest();
   if (!token) return null;
 
-  const check = await checkSession(token, transport);
+  const check = await verifyAdminSession(token, transport);
   if (check.status === 'unavailable') throw new SessionUnavailableError();
   if (check.status === 'invalid') return null;
   return { ...check.claims, session: check.session, mfa: check.mfa, policy: check.policy };

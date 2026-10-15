@@ -469,9 +469,14 @@ Two read-only scoping passes (code plus aggregate and catalog probes of live); e
   17 May, which alone explains the missing new-device emails. `admin_security_alert` was on from its 16 May seed until the
   sole super admin switched it off on 8 October (from a local run of the rebuilt console). In that period about 1.39
   million attempts passed the template and recipient checks and failed in the SMTP block of `send-email`; none was
-  marked sent or audited. The last successful sends were 17 alerts between 14 April and 16 May. Likely cause, unverified:
-  `SMTP_PORT` defaults to 587 and only 465 uses implicit TLS, while Supabase edge functions cannot connect out on 25 or
-  587. Four flagged-transaction alerts (1 October and three on 10 October) are retried every 5 minutes with no backoff.
+  marked sent or audited. The last successful sends were 17 alerts between 14 April and 16 May. **Cause found and fixed
+  (2026-10-14):** the function log showed "The specified from adress is not a valid email adress": the `SMTP_FROM` secret
+  held only the display name `CardElite` (the port was already 465). The owner set it to
+  `CardElite <noreply@getcardelite.com>` (checked by fingerprint, copied into `supabase.env`), and a test
+  `new_device_login` email to a user account was accepted by the mail server, audited (`SEND_EMAIL`, 11:58 WAT) and
+  received. The
+  owner had switched `new_device_login` back on at 11:44 WAT the same day, so new-device emails now reach users;
+  `admin_security_alert` is still off. Four flagged-transaction alerts (1 October and three on 10 October) are retried every 5 minutes with no backoff.
   Password reset and invitations need this fixed first; they also need a recipient rule that admits invitees, lowercase
   admin emails, visible link text (the plain-text part strips links) and server-side calls that report failures.
 - **Wallet balances do not all come from the ledger.** 7 of 43 wallets hold money with no transactions at all, and
@@ -591,10 +596,11 @@ D-29, D-30, D-39, D-40. **SQL live** (run 2026-10-13; the statements the SQL edi
 `prune-admin-auth` job. **Edge functions live** (2026-10-14 10:32 WAT, after a read-only pre-deploy gate on the live
 database, the secrets, the installed mobile app and the deployed console): `admin-mobile-api` v29 and
 `register-admin-push` v43, live code checked equal to the repo, both booted; `ADMIN_MFA_ENCRYPTION_KEY` was set on
-Supabase by the owner and checked by fingerprint against `admin/.env.local` (and copied into `supabase.env`). The console
-is built, reviewed and tested but **not deployed**: until it is, the live web console ignores two-step sign-in, while
-the phone already enforces it. The superadmin turned two-step sign-in on through a local copy of the new console
-(2026-10-13 21:57 WAT).
+Supabase by the owner and checked by fingerprint against `admin/.env.local` (and copied into `supabase.env`). **Console live**
+(2026-10-14 11:17 WAT, commit `28944f2` on `main`, which also shipped everything since 21 September: the 9 October
+rebuild and 1.7l–1.7s), with `ADMIN_MFA_ENCRYPTION_KEY` added on Vercel by the owner; checked signed out: new routes
+answer, security headers present, `/profile` redirects to sign-in. The superadmin turned two-step sign-in on through a
+local copy of the new console (2026-10-13 21:57 WAT); the requirement for all admins is still off.
 
 Sessions: every sign-in opens a database session per device (web 8 h, mobile 24 h, never sliding) whose id rides in the
 token; each request checks it with one `admin_auth_state` call, and an outage is a 500, never a sign-out. Log out ends
@@ -614,11 +620,20 @@ announced to screen readers, the lock sentence clears when the lock ends, a too-
 step-up code).
 
 Ship order (D-39, each step on the owner's instruction): ~~set `ADMIN_MFA_ENCRYPTION_KEY` as the `admin-mobile-api`
-secret~~, ~~deploy `admin-mobile-api` and `register-admin-push`~~ (done 2026-10-14), set the same key on the admin host
-(Vercel), deploy the console, run the smoke test, then switch the requirement on. Phone alerts reach only admins signed
+secret~~, ~~deploy `admin-mobile-api` and `register-admin-push`~~, ~~set the same key on Vercel~~, ~~deploy the
+console~~ (all 2026-10-14), run the smoke test, then switch the requirement on. Phone alerts reach only admins signed
 in through the new `admin-mobile-api`, so every admin signs in on the phone again after the edge deploy (no phone was
-registered on 2026-10-13). 24 hours after the console deploy, a follow-up release refuses tokens without a session id
-(D6).
+registered on 2026-10-13).
+
+D6 follow-up (built 2026-10-14, shipped early on purpose: a live check showed no token without a session id could still
+be valid — the only admin without two-step sign-in had last signed in on 8 October): the web verifier and the phone
+functions' `authenticateAdmin` refuse a token without a session id for every admin, before any database call; the
+legacy-only branches are gone (logout's "bump everything" path, the re-auth route's sid-less 401, the Profile copy for a
+device that is not listed) and so is the `verifyAdminJWT` export, whose null-on-outage contract was the D8 trap. Every
+token signer already includes a session id. Adversarial review passed with the change reverted to prove its tests (web
+and the edge harness, 216 checks); gate: 0 type errors (cache-free), **3,179 tests**. Left as is: `resume-withdrawal`
+still checks only `x-admin-secret`, the signature and `token_version` (it also needs `ADMIN_FUNCTION_SECRET`), and
+`admin_bump_token_version` no longer has a caller (dropping it is optional).
 
 Follow-ups from the reviews (D-41, 2026-10-14): `GET /api/auth/me` answers a failed account read with 500 (the guard's
 "Your session could not be checked" wording), not 401; the withdrawal approve route forwards the token the guard has
@@ -630,8 +645,7 @@ look and retries the server render (`unstable_retry`). Adversarial review passed
 test; gate: 0 type errors (cache-free), **3,177 tests**.
 
 Left as they are: a step-up code is used up when the identity check passes but the action after it fails with a
-retryable error (the admin waits for the next code); `verifyAdminJWT` is still exported but unused by routes (it turns an
-outage into a sign-out, so new code must use the session helpers); `(dashboard)/error.tsx` still retries with `reset()`; a cookie stolen within 5 minutes of sign-in passes the identity
+retryable error (the admin waits for the next code); `(dashboard)/error.tsx` still retries with `reset()`; a cookie stolen within 5 minutes of sign-in passes the identity
 re-check (by design, D3/D9); no browser pass was possible on this machine, so the smoke test covers the new screens at
 360, 375 and 390 px in light and dark before the requirement is switched on; click flows are pinned by source patterns
 because the test harness renders on the server only; the grace banner's days-left count refreshes on reload; if setup
@@ -882,6 +896,8 @@ Recorded as they are made, per prompt §42.
 | D-37 | **Owner decision (2026-10-11): `process-withdrawal`'s quick daily-limit check uses the Lagos day**, like `process_withdrawal_debit` and `get_withdrawal_daily_status`, and the function is redeployed with the withdrawal redesign. | It started the day at UTC midnight (01:00 Lagos), so between 00:00 and 01:00 Lagos a user who had reached the previous day's limit was refused after entering the PIN. |
 | D-38 | **Owner decision (2026-10-11): deleting a user account also deletes that user's saved bank accounts**, and the saved accounts already left behind by deleted users are removed. | Saved accounts are convenience data; the withdrawal records, which audits rely on, keep the payout details for 7 years. `finalize_account_deletion` left them in place (one live row belonged to a deleted user). |
 | D-39 | Admin security phase 2 design (2026-10-12, from the verified plan). Sessions are per device: web 8 h, mobile 24 h, never sliding; a session is live only while its token_version matches the admin's, so every existing "sign out everywhere" path still ends all of them. "Log out" ends this device only; Profile offers "Sign out other devices" and "Sign out everywhere"; a super admin can end any one device of another admin. Two-step sign-in: TOTP (RFC 6238, ±1 step, replay guard), 10 single-use recovery codes (web only), secrets encrypted with AES-256-GCM under one key, `ADMIN_MFA_ENCRYPTION_KEY`, held identically by the console hosts, `admin/.env.local` and the `admin-mobile-api` function secret; a missing key fails closed. No self-service authenticator replacement: a lost phone means a recovery code then a super-admin reset, or the SQL-editor break-glass reset for the sole super admin. The QR is drawn server-side with `qrcode-generator@2.0.4` (pinned, MIT, no dependencies). Enforcement is off until a super admin with two-step sign-in switches "required for all admins" on in Admin settings, which starts the 14-day grace (D-29). Ship order: SQL, secret, edge functions, console, then enforcement; each deploy on the owner's instruction. | Verified plan (four read-only verifications and a lead review); "share, never reimplement": the sign-in failure policy moves into SQL so the web and mobile paths count the same failures. |
+| D-43 | **Owner decisions (2026-10-14) on the D-26 realtime plan, narrowed to Withdrawals, the Card queue and their dashboard counts** (Platform balance, Signed-in devices, the Cards catalogue and the User activity monitor stay on timers). The console issues 5-minute listening passes signed with the project's legacy JWT secret (server-side, Vercel Production only), after a live canary; "Allow public access" in Realtime settings is switched off; sidebar badges come last as their own release; timings accepted (safety refresh 60 s on Withdrawals and 120 s on the Card queue while live; the frozen-account marker and emergency notice may lag up to 60 s, display only). | Plan verified sound by a security and a feasibility review (13 suggestions applied, nothing that had to be fixed); signals carry only id and status, pages refetch through their guarded routes, and anything failing falls back to today's polling. Realtime shows another reviewer's card decision instantly but does not stop two reviewers opening the same card; that needs a claim feature (out of scope). |
+| D-42 | **Owner decision (2026-10-14): deleting a user account wipes everything about their devices and sign-ins** — the device list (`device_logs`), the sign-in history (`login_history`, with IPs), fingerprint/face sign-in records (`biometric_sessions`), per-user rate-limit counters and `last_active_at` — in the same step as the existing anonymisation, and the same is done once for every account already deleted. The two accounts stuck "deletion in progress" since mid-September are finished, and `delete-account` no longer leaves a user frozen when the database step fails. **Applied 2026-10-14:** `schema.sql` 5056-5157 run on live (the editor's text matched the file byte for byte; live `finalize_account_deletion` equals canonical); the two stuck deletions finished with the owner's go-ahead using the app's own steps, and the one leftover May avatar file removed from storage; all 22 deleted accounts verified clean by count (no auth user or session, device, sign-in, biometric, rate-limit, push-token or saved-account row, personal field, last-active time or avatar file). The `delete-account` change (crash unfreeze plus a guard so an admin-frozen user cannot unfreeze themselves by attempting deletion) ships separately. | The owner chose the most private option over keeping a year of sign-in IPs for fraud checks. Transaction records (7 years, AML) and the audit log are unchanged. Found by a read-only check: 15 of 20 deleted accounts still had device records with IPs, and 3 accounts deleted on 31 May still had their name, phone and country. |
 | D-41 | Phase-2 review follow-ups (2026-10-14, owner's standing instruction): a database outage never signs anyone out on `/api/auth/me` or the mobile withdrawal approve (500, D8); recovery-code replacement gets the same fail-closed 5-per-15-minutes limit as the identity check (D10); a root error page keeps layout errors inside the console. Left: a step-up code is spent when the action after a passed identity check fails with a retryable error. | The reviews flagged these as the remaining ways an outage could sign an admin out or a code could be guessed without a count; the spent-code case is rare and fixing it would weaken the 5-minute re-check. |
 | D-40 | **Owner decision (2026-10-12): code guessing has a daily cap.** Besides the 15-minute lock after 10 wrong codes, 30 wrong codes in 24 hours lock two-step sign-in for 24 hours; it unlocks by itself and a super admin can reset it sooner. | With only the 15-minute lock, an attacker who already has the password could keep guessing at about an 8% chance a month; the cap cuts that to about 0.3% while a lock can never outlast a day. |
 | D-32 | Admin security defaults (2026-10-10). Invite links last 72 hours, reset links 30 minutes and sign-in challenges 5 minutes, all single use. Password policy: the current rules, plus at most 72 bytes and not the username, email or current password; no expiry. On the web, new admins join by invitation and reset links; the API keeps accepting passwords from the mobile app until its rebuild. `admin_*` email templates are editable by super admins only. Re-authentication applies to admin-security actions first. Idle timeout is deferred and the session-expired text corrected. A two-step reset does not force a password reset; the admin and the other super admins are notified. | Taken from the scoping report; each follows the specs where they speak and the safer common choice where they are silent. |
@@ -893,6 +909,6 @@ Recorded as they are made, per prompt §42.
 | # | Item | Blocker |
 |---|---|---|
 | B-1 | ~~MFA (SEC-09)~~ | **Resolved:** self-hosted TOTP (D-29, D-39), recovery codes and a break-glass reset for a locked-out super admin, built in 1.7s. |
-| B-2 | Password reset (SEC-08) | Needs a sending identity. The user-app SMTP config in `app_config` may be reusable — to confirm before building. |
+| B-2 | Password reset (SEC-08) | ~~Needs a sending identity.~~ Email works again (2026-10-14, `send-email` with `CardElite <noreply@getcardelite.com>`, see 1.7n). Still needed before building: a recipient rule that admits invitees, lowercase admin emails, visible link text and server-side calls that report failures (1.7n). |
 | B-3 | Provider health / latency (integrations) | Requires either provider status endpoints or a health-probe job. No probe infrastructure exists. |
 | B-4 | Reconciliation against Paystack / Monnify / Novac / VTPass | Requires provider settlement/transaction-list API access. Not present in the repo. |

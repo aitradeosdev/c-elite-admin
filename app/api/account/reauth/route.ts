@@ -127,8 +127,7 @@ export async function POST(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
   const { admin } = guard;
-  const session = admin.session;
-  if (!session) return fail('AUTH_REQUIRED');
+  const { session } = admin;
 
   const raw = await req.json().catch(() => null);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION_ERROR', MISSING_BODY);

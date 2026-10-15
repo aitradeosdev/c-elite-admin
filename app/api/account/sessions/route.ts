@@ -27,7 +27,7 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
 }
 
-function toDevice(raw: unknown, currentId: string | null): DeviceSession | null {
+function toDevice(raw: unknown, currentId: string): DeviceSession | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const row = raw as Record<string, unknown>;
   if (!isUuid(row.id)) return null;
@@ -71,7 +71,7 @@ export async function GET() {
   const listed = await listSessions(admin.admin_id.toLowerCase());
   if (!listed.ok) return fail('INTERNAL_ERROR', LIST_FAILED);
 
-  const currentId = admin.session ? admin.session.id.toLowerCase() : null;
+  const currentId = admin.session.id.toLowerCase();
   const sessions = listed.rows
     .map((row) => toDevice(row, currentId))
     .filter((row): row is DeviceSession => row !== null)

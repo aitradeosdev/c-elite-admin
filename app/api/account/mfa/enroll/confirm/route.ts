@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
     return twoStepUnavailable(error);
   }
 
-  const session = admin.session && admin.session.transport === 'cookie' ? admin.session : null;
+  const session = admin.session.transport === 'cookie' ? admin.session : null;
   const activated = await activate(adminId, step, hashes, session ? session.id : null);
   if (activated.kind === 'failed') return fail('INTERNAL_ERROR', SETUP_UNAVAILABLE);
   if (activated.kind === 'refused') {

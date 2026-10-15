@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { decodeJwt } from 'jose';
+import { SignJWT, decodeJwt } from 'jose';
 import ts from 'typescript';
 import { base32Encode, hashRecoveryCode, openSecret } from '../app/lib/mfa.ts';
 import { twoStepLockedMessage } from '../app/lib/http.ts';
@@ -677,14 +677,6 @@ describe('POST /api/account/mfa/enroll/start', () => {
     assert.deepEqual(state.rpcs, []);
   });
 
-  test('a cookie from before sessions had ids can never start a setup', async () => {
-    reset({}, signedIn({ session: null }));
-    const res = await startSetup();
-    assert.equal(res.status, 403);
-    assert.equal((await bodyOf(res)).code, 'REAUTH_REQUIRED');
-    assert.deepEqual(state.rpcs, []);
-  });
-
   test('a fresh check starts a new secret, sealed to this admin, and returns the QR code and key without caching', async () => {
     const res = await startSetup();
     assert.equal(res.status, 200);
@@ -867,21 +859,22 @@ describe('POST /api/account/mfa/enroll/confirm', () => {
     assert.equal((await confirmSetup({ code: currentCode().code })).status, 400);
   });
 
-  test('a bearer or a cookie without a session id is not kept: the codes still come back and the page is told', async () => {
-    for (const session of [webSession({ client: 'mobile', transport: 'bearer' }), null]) {
-      reset({
-        admin_mfa_get: pendingFactor(),
-        admin_mfa_activate: { data: { ok: true, token_version: 5, session_kept: false, sessions_revoked: 3, recovery_codes_left: 10 } },
-      }, signedIn({ session, mfa: { status: 'pending', lockedUntil: null } }));
-      const res = await confirmSetup({ otp: currentCode().code });
-      assert.equal(res.status, 200);
-      const body = await bodyOf(res);
-      assert.equal(body.session_renewed, false);
-      assert.equal((body.recovery_codes as string[]).length, 10);
-      assert.equal(callsTo('admin_mfa_activate')[0]?.p_keep_sid, null);
-      assert.deepEqual(state.signed, []);
-      assert.deepEqual(res.headers.getSetCookie(), []);
-    }
+  test('a mobile bearer session is not kept: the codes still come back and the page is told', async () => {
+    reset({
+      admin_mfa_get: pendingFactor(),
+      admin_mfa_activate: { data: { ok: true, token_version: 5, session_kept: false, sessions_revoked: 3, recovery_codes_left: 10 } },
+    }, signedIn({
+      session: webSession({ id: PHONE_SID, client: 'mobile', transport: 'bearer' }),
+      mfa: { status: 'pending', lockedUntil: null },
+    }));
+    const res = await confirmSetup({ otp: currentCode().code });
+    assert.equal(res.status, 200);
+    const body = await bodyOf(res);
+    assert.equal(body.session_renewed, false);
+    assert.equal((body.recovery_codes as string[]).length, 10);
+    assert.equal(callsTo('admin_mfa_activate')[0]?.p_keep_sid, null);
+    assert.deepEqual(state.signed, []);
+    assert.deepEqual(res.headers.getSetCookie(), []);
   });
 
   test('a session the database did not keep, or a signing failure, still hands over the codes without a cookie', async () => {
@@ -1177,10 +1170,10 @@ describe('GET /api/account/sessions', () => {
     assert.deepEqual(callsTo('admin_sessions_list'), [{ p_admin_id: ADMIN_ID }]);
   });
 
-  test('a cookie from before sessions had ids sees every session, none of them current', async () => {
-    reset({}, signedIn({ session: null }));
+  test('the mobile app, signed in with its own session, sees that session as the current one', async () => {
+    reset({}, signedIn({ session: webSession({ id: PHONE_SID, client: 'mobile', transport: 'bearer' }) }));
     const sessions = (await bodyOf(await listSessions())).sessions as Array<Record<string, unknown>>;
-    assert.deepEqual(sessions.map((row) => row.current), [false, false, false]);
+    assert.deepEqual(sessions.map((row) => [row.id, row.current]), [[PHONE_SID, true], [OTHER_SID, false], [SID, false]]);
   });
 
   test('missing fields read as null, unknown methods are dropped, and rows without an id are skipped', async () => {
@@ -1270,17 +1263,15 @@ describe('POST /api/account/sessions/sign-out-others', () => {
     })]);
   });
 
-  test('a bearer or a cookie without a session id keeps nothing, so the page is told the session ended', async () => {
-    for (const session of [webSession({ client: 'mobile', transport: 'bearer' }), null]) {
-      reset({
-        admin_sessions_revoke_all: { data: { sessions_revoked: 3, session_kept: false, token_version: 5, push_tokens_released: 0 } },
-      }, signedIn({ session }));
-      const res = await signOutOthers();
-      assert.equal((await bodyOf(res)).session_renewed, false);
-      assert.equal(callsTo('admin_sessions_revoke_all')[0]?.p_keep_sid, null);
-      assert.deepEqual(state.signed, []);
-      assert.deepEqual(res.headers.getSetCookie(), []);
-    }
+  test('a mobile bearer session keeps nothing, so the caller is told its session ended', async () => {
+    reset({
+      admin_sessions_revoke_all: { data: { sessions_revoked: 3, session_kept: false, token_version: 5, push_tokens_released: 0 } },
+    }, signedIn({ session: webSession({ id: PHONE_SID, client: 'mobile', transport: 'bearer' }) }));
+    const res = await signOutOthers();
+    assert.equal((await bodyOf(res)).session_renewed, false);
+    assert.equal(callsTo('admin_sessions_revoke_all')[0]?.p_keep_sid, null);
+    assert.deepEqual(state.signed, []);
+    assert.deepEqual(res.headers.getSetCookie(), []);
   });
 
   test('a session that ended meanwhile, a missing version or a signing failure gives no cookie and session_renewed false', async () => {
@@ -1470,6 +1461,34 @@ describe('the re-signed cookie against the real verifier', () => {
 
     assert.equal((await listWith(renewed)).status, 200);
     assert.equal((await listWith(old.token)).status, 401);
+  });
+
+  test('a token without a session id is the expired-session 401 on these routes, as the cookie or the bearer, before any database call', async () => {
+    const sidless = await new SignJWT({
+      admin_id: ADMIN_ID, role_title: ROLE, is_super_admin: false, page_permissions: GRANTS, username: USERNAME, token_version: 4,
+    }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(JWT_SECRET));
+    for (const transport of ['cookie', 'bearer'] as const) {
+      realWorld('none');
+      if (transport === 'cookie') {
+        state.cookies = new Map([['admin_token', sidless]]);
+      } else {
+        state.headers.set('authorization', `Bearer ${sidless}`);
+        state.headers.set('x-client', 'mobile-admin');
+      }
+      const calls = [
+        [realRoutes.sessions, 'GET', '/api/account/sessions'],
+        [realRoutes.others, 'POST', '/api/account/sessions/sign-out-others'],
+        [realRoutes.confirm, 'POST', '/api/account/mfa/enroll/confirm'],
+      ] as const;
+      for (const [route, method, path] of calls) {
+        const res = await call(route, method, path, method === 'POST' ? { otp: currentCode().code } : undefined);
+        assert.equal(res.status, 401, `${transport} ${path}`);
+        assert.equal((await bodyOf(res)).code, 'AUTH_REQUIRED', `${transport} ${path}`);
+        assert.deepEqual(res.headers.getSetCookie(), [], `${transport} ${path}`);
+      }
+      assert.deepEqual(state.rpcs, [], transport);
+      assert.deepEqual(audits(), [], transport);
+    }
   });
 
   test('a verifier outage on these routes is a 500, never the 401 that would sign the admin out', async () => {

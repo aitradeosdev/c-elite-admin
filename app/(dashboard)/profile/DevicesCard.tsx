@@ -12,8 +12,7 @@ import { signOutDevice, signOutOtherDevices } from './securityActions';
 import {
   DEVICES_ANCHOR, DEVICES_LOAD_FAILED, DEVICES_POLL_MS, DEVICES_SUBTITLE, DEVICES_TITLE, SESSIONS_PATH,
   SIGN_OUT_EVERYWHERE_HELP, SIGN_OUT_EVERYWHERE_LABEL, SIGN_OUT_LABEL, SIGN_OUT_OTHERS_LABEL,
-  deviceSignOutConfirm, deviceSignedOutText, hasThisDevice, otherDeviceCount, othersSignOutConfirm,
-  othersSignedOutText,
+  deviceSignOutConfirm, deviceSignedOutText, otherDeviceCount, othersSignOutConfirm, othersSignedOutText,
   type DeviceSignOut, type OthersSignOut,
 } from './securityModel';
 import { useSignOutEverywhere } from './signOut';
@@ -156,7 +155,7 @@ export function DevicesCard({ account, version = 0 }: DevicesCardProps) {
     busy.current = true;
     try {
       const decision = await confirm<OthersSignOut>({
-        ...othersSignOutConfirm(otherDeviceCount(sessions), hasThisDevice(sessions)),
+        ...othersSignOutConfirm(otherDeviceCount(sessions)),
         returnFocusTo: focusHeading,
         action: () => signOutOtherDevices(),
       });

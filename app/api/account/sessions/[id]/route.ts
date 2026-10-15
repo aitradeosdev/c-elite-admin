@@ -53,7 +53,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const { id: raw } = await ctx.params;
   const sessionId = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (!isUuid(sessionId)) return fail('VALIDATION_ERROR', INVALID_ID);
-  if (admin.session && admin.session.id.toLowerCase() === sessionId) return fail('STATE_CONFLICT', THIS_DEVICE);
+  if (admin.session.id.toLowerCase() === sessionId) return fail('STATE_CONFLICT', THIS_DEVICE);
 
   const outcome = await revoke(adminId, sessionId);
   if (outcome.kind === 'failed') {

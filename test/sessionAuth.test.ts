@@ -379,12 +379,14 @@ describe('signing session tokens', () => {
     const expiresAt = new Date('2031-01-02T03:04:05.678Z');
     const signed = await jwt.signAdminJWT({
       admin_id: ADMIN_ID, role_title: 'Ops', is_super_admin: false, page_permissions: [], username: 'ops', token_version: 3,
+      sid: SID, amr: ['pwd'],
     }, expiresAt);
     assert.equal(decodeProtectedHeader(signed).alg, 'HS256');
     const payload = decodeJwt(signed);
     assert.equal(payload.exp, Math.floor(expiresAt.getTime() / 1000));
     assert.equal(typeof payload.iat, 'number');
     assert.equal(payload.token_version, 3);
+    assert.equal(payload.sid, SID);
   });
 
   test('signSessionToken carries the session id, the sorted methods and the session expiry, never sliding it', async () => {
@@ -464,15 +466,20 @@ describe('verifyAdminSession', () => {
     assert.deepEqual(check.policy, { mode: 'all', graceEndsAt: '2026-10-27T10:00:00+00:00', requiredNow: false });
   });
 
-  test('an active mobile session presented as a bearer is ok', async () => {
+  test('an active mobile session presented as a bearer is ok, with identity and methods read fresh from the database', async () => {
     answer(stateFor({ session: { ...(stateFor().session as object), client: 'mobile', auth_methods: ['pwd'] } }));
     const check = await jwt.verifyAdminSession(await token(), 'bearer');
     assert.equal(check.status, 'ok');
     if (check.status === 'ok') {
-      assert.equal(check.session?.client, 'mobile');
-      assert.equal(check.session?.transport, 'bearer');
-      assert.deepEqual(check.session?.amr, ['pwd']);
+      assert.equal(check.session.client, 'mobile');
+      assert.equal(check.session.transport, 'bearer');
+      assert.deepEqual(check.session.amr, ['pwd']);
+      assert.equal(check.claims.username, 'ops.lead');
+      assert.equal(check.claims.role_title, 'Operations Lead');
+      assert.equal(check.claims.sid, SID);
+      assert.deepEqual(check.claims.amr, ['pwd']);
     }
+    assert.deepEqual(state.rpcs, [{ name: 'admin_auth_state', args: { p_admin_id: ADMIN_ID, p_sid: SID } }]);
   });
 
   test('a session that is revoked, expired, superseded by a version bump or unknown is invalid', async () => {
@@ -496,25 +503,28 @@ describe('verifyAdminSession', () => {
     }
   });
 
-  test('a token without a session id is accepted only while two-step sign-in is not active', async () => {
-    for (const status of ['none', 'pending']) {
-      reset();
-      answer(stateFor({ session: null, mfa: { status, locked_until: null } }));
-      const check = await jwt.verifyAdminSession(await token(withoutSid()), 'cookie');
-      assert.equal(check.status, 'ok', status);
-      if (check.status === 'ok') {
-        assert.equal(check.session, null);
-        assert.equal(check.claims.sid, undefined);
-        assert.equal(check.claims.amr, undefined);
+  test('a token without a session id is invalid on the cookie and the bearer for every admin, before any database call', async () => {
+    const sidless = [await token(withoutSid()), await token({ ...withoutSid(), amr: ['pwd'] })];
+    for (const status of ['none', 'pending', 'active']) {
+      for (const transport of ['cookie', 'bearer'] as const) {
+        for (const signed of sidless) {
+          reset();
+          answer(stateFor({ session: null, mfa: { status, locked_until: null } }));
+          assert.deepEqual(await jwt.verifyAdminSession(signed, transport), { status: 'invalid' }, `${status} ${transport}`);
+          assert.deepEqual(state.rpcs, [], `${status} ${transport}`);
+        }
       }
-      assert.deepEqual(state.rpcs, [{ name: 'admin_auth_state', args: { p_admin_id: ADMIN_ID, p_sid: null } }]);
     }
-    reset();
-    answer(stateFor({ session: null, mfa: { status: 'active', locked_until: null } }));
-    assert.deepEqual(await jwt.verifyAdminSession(await token(withoutSid()), 'cookie'), { status: 'invalid' });
-    reset();
-    answer(stateFor({ session: null, mfa: { status: 'active', locked_until: null } }));
-    assert.deepEqual(await jwt.verifyAdminSession(await token(withoutSid()), 'bearer'), { status: 'invalid' });
+  });
+
+  test('a token without a session id is invalid even while the database is down, so it never turns into an outage', async () => {
+    const signed = await token(withoutSid());
+    for (const outage of [{ error: { message: 'connection terminated' } }, 'throw'] as Reply[]) {
+      reset();
+      state.replies.set('admin_auth_state', outage);
+      assert.deepEqual(await jwt.verifyAdminSession(signed, 'cookie'), { status: 'invalid' }, JSON.stringify(outage));
+      assert.deepEqual(state.rpcs, []);
+    }
   });
 
   test('a missing or deactivated admin and a token from an older version are invalid', async () => {
@@ -561,7 +571,8 @@ describe('verifyAdminSession', () => {
       await token(claims({ sid: 'not-a-session' })),
       await token(claims({ token_version: '4' })),
       await token(claims({ token_version: 4.5 })),
-      await token(withoutSid({ token_version: undefined })),
+      await token(claims({ token_version: undefined })),
+      await token(claims({ sid: undefined })),
       'not.a.token',
       '',
     ];
@@ -582,22 +593,21 @@ describe('verifyAdminSession', () => {
     assert.ok(logs.some((line) => line.includes('ADMIN_JWT_SECRET is not set')));
   });
 
-  test('verifyAdminJWT keeps its null contract and binds the transport only when one is given', async () => {
-    state.replies.set('admin_auth_state', { error: { message: 'connection terminated' } });
-    assert.equal(await jwt.verifyAdminJWT(await token()), null);
-    for (const client of ['web', 'mobile']) {
-      reset();
-      answer(stateFor({ session: { ...(stateFor().session as object), client } }));
-      const claimsOk = await jwt.verifyAdminJWT(await token());
-      assert.equal(claimsOk?.admin_id, ADMIN_ID, client);
-      assert.equal(claimsOk?.username, 'ops.lead', client);
-    }
-    reset();
-    answer(stateFor({ session: { ...(stateFor().session as object), client: 'mobile' } }));
-    assert.equal(await jwt.verifyAdminJWT(await token(), 'cookie'), null);
-    reset();
-    answer({ admin: null, session: null, mfa: null, policy: null });
-    assert.equal(await jwt.verifyAdminJWT(await token()), null);
+  test('the verifier that answered null for an outage is gone, and nothing in the console asks for it', () => {
+    assert.deepEqual(Object.keys(jwt).sort(), [
+      'sessionTokenFromRequest', 'signAdminJWT', 'signSessionToken', 'verifyAdminFromRequest', 'verifyAdminSession',
+    ]);
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (/\.tsx?$/.test(entry.name)) files.push(path);
+      }
+    };
+    walk(APP_DIR);
+    assert.ok(files.length > 100, String(files.length));
+    for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /verifyAdminJWT/, file);
   });
 });
 
@@ -646,6 +656,22 @@ describe('verifyAdminFromRequest', () => {
   test('no token at all is null without a database call', async () => {
     assert.equal(await jwt.verifyAdminFromRequest(), null);
     assert.deepEqual(state.rpcs, []);
+  });
+
+  test('a token without a session id is null as the cookie and as the mobile bearer, without a database call', async () => {
+    const sidless = await token(withoutSid());
+    const requests: Array<[Record<string, string>, Record<string, string>]> = [
+      [{}, { admin_token: sidless }],
+      [{ authorization: `Bearer ${sidless}`, 'x-client': 'mobile-admin' }, {}],
+      [{ authorization: `Bearer ${sidless}`, 'x-client': 'mobile-admin' }, { admin_token: await token() }],
+    ];
+    for (const [headers, cookies] of requests) {
+      reset();
+      prepare(headers, cookies);
+      answer(stateFor({ session: null, mfa: { status: 'none', locked_until: null } }));
+      assert.equal(await jwt.verifyAdminFromRequest(), null, JSON.stringify(headers));
+      assert.deepEqual(state.rpcs, [], JSON.stringify(headers));
+    }
   });
 
   test('returns the claims with the session, two-step state and policy for the guard', async () => {
@@ -721,6 +747,22 @@ describe('the guard', () => {
     }
   });
 
+  test('a token without a session id answers 401 AUTH_REQUIRED on both transports, never the 500 of an outage', async () => {
+    const sidless = await token(withoutSid());
+    for (const [headers, cookies] of [
+      [{}, { admin_token: sidless }],
+      [{ authorization: `Bearer ${sidless}`, 'x-client': 'mobile-admin' }, {}],
+    ] as Array<[Record<string, string>, Record<string, string>]>) {
+      reset();
+      prepare(headers, cookies);
+      state.replies.set('admin_auth_state', { error: { message: 'connection terminated' } });
+      const result = await guard.requireAdmin();
+      assert.equal(result.ok ? 200 : result.response.status, 401, JSON.stringify(headers));
+      if (!result.ok) assert.equal((await bodyOf(result.response)).code, 'AUTH_REQUIRED');
+      assert.deepEqual(state.rpcs, []);
+    }
+  });
+
   test('the context carries the session, two-step state, policy and stored grants, and checks permissions as before', async () => {
     prepare({}, { admin_token: await token() });
     answer(stateFor());
@@ -760,7 +802,6 @@ describe('the guard', () => {
     const result = await stubbedGuard.requireAdmin('withdrawals.read');
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.equal(result.admin.session, null);
     assert.deepEqual(result.admin.mfa, { status: 'none', lockedUntil: null });
     assert.deepEqual(result.admin.policy, { mode: 'off', graceEndsAt: null, requiredNow: false });
     assert.deepEqual(result.admin.page_permissions, ['withdrawals']);
@@ -816,11 +857,11 @@ describe('requireRecentAuth', () => {
     }
   });
 
-  test('a session without an id can never pass, and an unreadable time counts as stale', async () => {
-    const res = await session.requireRecentAuth({ session: null, mfa: { status: 'none', lockedUntil: null } }, 300, NOW);
-    assert.equal(res?.status, 403);
+  test('an unreadable time counts as stale', async () => {
     const unreadable = await session.requireRecentAuth({ session: info('soon', null), mfa: { status: 'none', lockedUntil: null } }, 300, NOW);
     assert.equal(unreadable?.status, 403);
+    const both = await session.requireRecentAuth({ session: info('soon', 'later'), mfa: { status: 'none', lockedUntil: null } }, 300, NOW);
+    assert.equal(both?.status, 403);
   });
 
   test('requireTwoStep answers 403 MFA_REQUIRED unless two-step sign-in is on, and the guard re-exports both checks', async () => {

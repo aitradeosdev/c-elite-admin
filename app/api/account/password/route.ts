@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
   if (limit === 'limited') return fail('RATE_LIMITED', TOO_MANY_ATTEMPTS);
   if (limit === 'unavailable') return fail('RATE_LIMITED', LIMIT_UNAVAILABLE);
 
-  const session = admin.session && admin.session.transport === 'cookie' ? admin.session : null;
+  const session = admin.session.transport === 'cookie' ? admin.session : null;
   let hash: string | null = null;
 
   for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt += 1) {

@@ -24,42 +24,18 @@ async function revokeThisDevice(adminId: string, sessionId: string): Promise<str
   }
 }
 
-async function revokeEverywhere(adminId: string): Promise<string | null> {
-  try {
-    const { error } = await supabaseAdmin.rpc('admin_bump_token_version', { p_target_admin_id: adminId });
-    return error ? error.message : null;
-  } catch (error) {
-    return errorText(error);
-  }
-}
-
-async function endSession(req: NextRequest, claims: AdminJWTPayload, session: SessionInfo | null): Promise<void> {
+async function endSession(req: NextRequest, claims: AdminJWTPayload, session: SessionInfo): Promise<void> {
   const actor = actorFor({ id: claims.admin_id, role_title: claims.role_title }, await requestMeta(req.headers));
-  if (session) {
-    const revokeError = await revokeThisDevice(claims.admin_id, session.id);
-    if (revokeError) console.error('admin logout session revoke failed:', revokeError);
-    await writeAudit({
-      admin: actor,
-      action: 'LOGOUT',
-      entity: 'admin_users',
-      entity_id: claims.admin_id,
-      after: { scope: 'this_device', session_id: session.id },
-      result: revokeError ? 'partial' : 'success',
-      error: revokeError,
-      sensitivity: 'security',
-    });
-    return;
-  }
-  const bumpError = await revokeEverywhere(claims.admin_id);
-  if (bumpError) console.error('admin logout session revoke failed:', bumpError);
+  const revokeError = await revokeThisDevice(claims.admin_id, session.id);
+  if (revokeError) console.error('admin logout session revoke failed:', revokeError);
   await writeAudit({
     admin: actor,
     action: 'LOGOUT',
     entity: 'admin_users',
     entity_id: claims.admin_id,
-    after: { scope: 'everywhere_legacy' },
-    result: bumpError ? 'partial' : 'success',
-    error: bumpError,
+    after: { scope: 'this_device', session_id: session.id },
+    result: revokeError ? 'partial' : 'success',
+    error: revokeError,
     sensitivity: 'security',
   });
 }

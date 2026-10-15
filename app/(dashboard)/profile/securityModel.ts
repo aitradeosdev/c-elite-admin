@@ -381,13 +381,10 @@ export function deviceSignOutConfirm(
   };
 }
 
-export function othersSignOutConfirm(others: number, thisDeviceListed: boolean): ConfirmCopy {
-  const ends = 'Every other session ends straight away, on the web and in the CardElite Admin app.';
+export function othersSignOutConfirm(others: number): ConfirmCopy {
   return {
     title: 'Sign out your other devices?',
-    message: thisDeviceListed
-      ? `${ends} This device stays signed in.`
-      : `${ends} You will have to sign in again on this device too.`,
+    message: 'Every other session ends straight away, on the web and in the CardElite Admin app. This device stays signed in.',
     details: [{ label: 'Other devices', value: String(Math.max(0, others)) }],
     confirmLabel: SIGN_OUT_OTHERS_LABEL,
     pendingLabel: 'Signing out your other devices…',
@@ -427,10 +424,6 @@ export function othersSignedOutText(revoked: number): string {
 
 export function otherDeviceCount(sessions: readonly Pick<DeviceSession, 'current'>[]): number {
   return sessions.filter((session) => !session.current).length;
-}
-
-export function hasThisDevice(sessions: readonly Pick<DeviceSession, 'current'>[]): boolean {
-  return sessions.some((session) => session.current);
 }
 
 export function sessionPath(id: string): string {

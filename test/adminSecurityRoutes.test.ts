@@ -653,9 +653,6 @@ describe('DELETE /api/admin-accounts/[id]/mfa', () => {
       'REAUTH_REQUIRED', 'Confirm it is you to continue.', { method: 'otp', max_age_secs: 300 },
     ));
 
-    reset({}, superAdmin({ session: null }));
-    assert.equal((await bodyOf(await resetTwoStep(TARGET_ID, { reason: REASON }))).code, 'REAUTH_REQUIRED');
-
     reset();
     const self = await resetTwoStep(ACTOR_ID.toUpperCase(), { reason: REASON });
     assert.equal(self.status, 400);

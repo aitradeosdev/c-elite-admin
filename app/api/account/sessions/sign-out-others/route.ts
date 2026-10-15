@@ -51,7 +51,7 @@ export async function POST() {
   if (!guard.ok) return guard.response;
   const { admin } = guard;
   const adminId = admin.admin_id.toLowerCase();
-  const session = admin.session && admin.session.transport === 'cookie' ? admin.session : null;
+  const session = admin.session.transport === 'cookie' ? admin.session : null;
 
   const outcome = await revokeOthers(adminId, session ? session.id : null);
   if (outcome.kind === 'failed') {

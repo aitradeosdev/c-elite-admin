@@ -83,7 +83,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   if (!listed.ok) return fail('INTERNAL_ERROR', LIST_FAILED);
 
   const own = target === admin.admin_id.toLowerCase();
-  const currentId = own && admin.session ? admin.session.id.toLowerCase() : null;
+  const currentId = own ? admin.session.id.toLowerCase() : null;
   const sessions = listed.rows
     .map((row) => toDevice(row, currentId))
     .filter((row): row is DeviceSession => row !== null)

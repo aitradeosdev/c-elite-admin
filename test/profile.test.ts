@@ -84,7 +84,7 @@ interface Claims {
   is_super_admin: boolean;
   page_permissions: string[];
   token_version: number;
-  session?: SessionInfo | null;
+  session?: SessionInfo;
   mfa?: { status: string; lockedUntil: string | null };
   policy?: { mode: string; graceEndsAt: string | null; requiredNow: boolean };
 }
@@ -1000,16 +1000,6 @@ describe('POST /api/account/password: this session', () => {
     assert.deepEqual(res.headers.getSetCookie(), []);
     assert.deepEqual(state.signed, []);
     assert.equal(passwordSaves()[0]?.p_keep_sid, null);
-  });
-
-  test('a cookie from before sessions had ids is not kept either', async () => {
-    reset({ claims: signedInAs({ session: null }) });
-    const res = await change();
-    assert.equal(res.status, 200);
-    assert.equal((await bodyOf(res)).session_renewed, false);
-    assert.equal(passwordSaves()[0]?.p_keep_sid, null);
-    assert.deepEqual(state.signed, []);
-    assert.deepEqual(res.headers.getSetCookie(), []);
   });
 
   test('a session that ended while the password was saved is not re-issued, and the page is told', async () => {

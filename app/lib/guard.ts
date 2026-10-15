@@ -23,7 +23,7 @@ export interface AdminContext {
   is_super_admin: boolean;
   page_permissions: string[];
   permissions: Set<Permission>;
-  session: SessionInfo | null;
+  session: SessionInfo;
   mfa: MfaState;
   policy: PolicyState;
   ip: string;
@@ -50,7 +50,7 @@ async function buildContext(claims: VerifiedAdmin): Promise<AdminContext> {
     is_super_admin: claims.is_super_admin,
     page_permissions: pagePermissions,
     permissions,
-    session: claims.session ?? null,
+    session: claims.session,
     mfa: claims.mfa ? { ...claims.mfa } : { ...DEFAULT_MFA },
     policy: claims.policy ? { ...claims.policy } : { ...DEFAULT_POLICY },
     ip: clientIpFrom(get),

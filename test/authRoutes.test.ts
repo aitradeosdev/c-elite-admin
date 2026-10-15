@@ -131,7 +131,6 @@ interface Scenario {
   mfa: Reply;
   challenge: Reply;
   revoke: Reply;
-  bump: Reply;
   auditError: string | null;
   signError: string | null;
   compareError: string | null;
@@ -268,7 +267,6 @@ function baseScenario(): Scenario {
     mfa: activeFactor(),
     challenge: { data: { ok: true, challenge_id: '5d6e7f80-9a1b-4c2d-8e3f-405162738495' } },
     revoke: { data: { revoked: true, client: 'web', push_tokens_released: 0 } },
-    bump: { data: 5 },
     auditError: null,
     signError: null,
     compareError: null,
@@ -385,7 +383,6 @@ function rpc(name: string, args: Record<string, unknown>): Promise<DbResult> {
   if (name === 'admin_mfa_get') return settleReply(s.mfa);
   if (name === 'admin_challenge_create') return settleReply(s.challenge);
   if (name === 'admin_session_revoke') return settleReply(s.revoke);
-  if (name === 'admin_bump_token_version') return settleReply(s.bump);
   return Promise.reject(new Error(`unexpected rpc ${name}`));
 }
 
@@ -1196,16 +1193,6 @@ describe('POST /api/auth/logout', () => {
     };
   }
 
-  function legacySession(): unknown {
-    return {
-      status: 'ok',
-      claims: { ...SESSION },
-      session: null,
-      mfa: { status: 'none', lockedUntil: null },
-      policy: { mode: 'off', graceEndsAt: null, requiredNow: false },
-    };
-  }
-
   test('without a session cookie it still signs out: both cookies cleared, nothing checked, revoked or recorded', async () => {
     const res = await signOut();
     assert.equal(res.status, 200);
@@ -1249,15 +1236,6 @@ describe('POST /api/auth/logout', () => {
     assertSignedOutCookies(res);
   });
 
-  test('a cookie from before sessions had ids still signs out everywhere through the version bump', async () => {
-    state.checks[SESSION_COOKIE] = legacySession();
-    const res = await signOut({ cookie: SESSION_COOKIE });
-    assert.equal(res.status, 200);
-    assert.deepEqual(state.rpcs, [{ name: 'admin_bump_token_version', args: { p_target_admin_id: ADMIN_ID } }]);
-    assert.deepEqual(pick(audits()[0], AUDIT_KEYS), auditRow({ action: 'LOGOUT', after_value: { scope: 'everywhere_legacy' } }));
-    assertSignedOutCookies(res);
-  });
-
   test('the revoke targets the admin the cookie verifies as, and the audit names that admin', async () => {
     state.checks[SESSION_COOKIE] = liveSession(OTHER_ADMIN_ID, 'Payout Officer');
     await signOut({ cookie: SESSION_COOKIE });
@@ -1273,16 +1251,14 @@ describe('POST /api/auth/logout', () => {
     );
   });
 
-  test('a revoke or bump the database refuses, or that never arrives, still signs out and is recorded as partial', async () => {
-    const cases: Array<[Partial<Scenario>, () => unknown, string]> = [
-      [{ revoke: { error: { message: 'Not authorized', code: 'P0001' } } }, liveSession, 'Not authorized'],
-      [{ revoke: 'throw' }, liveSession, 'fetch failed'],
-      [{ bump: { error: { message: 'Admin not found', code: 'P0001' } } }, legacySession, 'Admin not found'],
-      [{ bump: 'throw' }, legacySession, 'fetch failed'],
+  test('a revoke the database refuses, or that never arrives, still signs out and is recorded as partial', async () => {
+    const cases: Array<[Partial<Scenario>, string]> = [
+      [{ revoke: { error: { message: 'Not authorized', code: 'P0001' } } }, 'Not authorized'],
+      [{ revoke: 'throw' }, 'fetch failed'],
     ];
-    for (const [patch, check, message] of cases) {
+    for (const [patch, message] of cases) {
       reset(patch);
-      state.checks[SESSION_COOKIE] = check();
+      state.checks[SESSION_COOKIE] = liveSession();
       const res = await signOut({ cookie: SESSION_COOKIE });
       assert.equal(res.status, 200, message);
       assert.deepEqual(await bodyOf(res), { success: true, request_id: REQUEST_ID }, message);
@@ -1521,6 +1497,15 @@ describe('route sources', () => {
     assert.match(sourceOf(ROUTES.logout), /action: 'LOGOUT'/);
     assert.match(sourceOf(ROUTES.theme), /action: 'UPDATE_ADMIN_THEME'/);
     assert.match(sourceOf(ROUTES.login), /signedIn\(admin, opened, actorFor\(admin, meta\)\)/);
+  });
+
+  test('log out only ever ends this device: the version bump for cookies without a session id is gone', () => {
+    const source = sourceOf(ROUTES.logout);
+    assert.equal(source.match(/supabaseAdmin\.rpc\(/g)?.length, 1);
+    assert.match(source, /supabaseAdmin\.rpc\('admin_session_revoke', \{/);
+    assert.match(source, /p_reason: 'logout',/);
+    assert.match(source, /after: \{ scope: 'this_device', session_id: session\.id \},/);
+    assert.doesNotMatch(source, /admin_bump_token_version|everywhere_legacy|SessionInfo \| null/);
   });
 
   test('the password step leaves the failure policy to the database and has no mobile branch', () => {

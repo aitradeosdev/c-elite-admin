@@ -426,18 +426,15 @@ describe('device confirms and toasts', () => {
     assert.equal(model.deviceSignOutConfirm(device(), 'x').tone, undefined);
   });
 
-  test('other devices: counted, and honest when this device has no listed session', () => {
-    assert.deepEqual(model.othersSignOutConfirm(2, true), {
+  test('other devices: counted, and this device stays signed in', () => {
+    assert.deepEqual(model.othersSignOutConfirm(2), {
       title: 'Sign out your other devices?',
       message: 'Every other session ends straight away, on the web and in the CardElite Admin app. This device stays signed in.',
       details: [{ label: 'Other devices', value: '2' }],
       confirmLabel: 'Sign out other devices',
       pendingLabel: 'Signing out your other devices…',
     });
-    assert.equal(
-      model.othersSignOutConfirm(1, false).message,
-      'Every other session ends straight away, on the web and in the CardElite Admin app. You will have to sign in again on this device too.',
-    );
+    assert.equal(model.othersSignOutConfirm(-1).details?.[0].value, '0');
   });
 
   test('everywhere is a danger confirm that ends this session too', () => {
@@ -459,10 +456,8 @@ describe('device confirms and toasts', () => {
     assert.equal(model.othersSignedOutText(0), 'No other devices were signed in.');
   });
 
-  test('counting other devices and finding this one', () => {
+  test('counting other devices', () => {
     assert.equal(model.otherDeviceCount([THIS_DEVICE, PHONE_APP, ANDROID_WEB]), 2);
-    assert.equal(model.hasThisDevice([THIS_DEVICE, PHONE_APP]), true);
-    assert.equal(model.hasThisDevice([PHONE_APP]), false);
     assert.equal(model.otherDeviceCount([]), 0);
   });
 });
