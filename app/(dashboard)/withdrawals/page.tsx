@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Download } from 'lucide-react';
+import { Download, RotateCw } from 'lucide-react';
 import {
   AccessDenied, Button, Card, CardBody, DateRangePicker, ErrorState, ExportModal, FilterBar, MaskedValue,
   MobileDataList, Money, Notice, PageHeader, Pagination, Ref, ResponsiveView, RowOpen, SearchInput, SidePanel, StatStrip,
@@ -11,14 +11,14 @@ import {
   uuidParam,
   type DateRangeValue, type ExportFiltersOption, type ExportRangeValue, type TableSkeletonColumn,
 } from '../../_ui';
-import { useRealtimeSignal } from '../../_ui/realtime/RealtimeSignals';
+import { livePauseText, useRealtimeSignal, useRealtimeStatus } from '../../_ui/realtime/RealtimeSignals';
 import { apiRequest, type ApiFailure } from '../../lib/apiClient';
 import { isUuid } from '../../lib/http';
 import { describeExportWindow, printTable, resolveExportRange } from '../../lib/printExport';
 import { businessDateKey, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
   EMERGENCY_UNCHECKED, REJECT_REASONS, TABS, approvalRefusal, classifyDecision, feeOf, formatTab, grossOf,
-  invalidateOnSignal, isActionable, isFrozen, isOpenFlag, messageOf, netOf, parseTab, payoutProviderNote, pollFor,
+  invalidateOnSignal, isActionable, isFrozen, isOpenFlag, messageOf, netOf, parseTab, payoutProviderNote,
   providerLabel, sameTabFilter, subtitleFor, tabFilter, tabSpec, toActionResult, toDetail, toListResult, userHandle,
   userSummary,
   type ApiEnvelope, type DetailResult, type ExportResponse, type SettledDecision, type Tab, type Withdrawal,
@@ -202,7 +202,8 @@ function WithdrawalsQueue() {
     return params.toString();
   }, [tab, query, range.from, range.to, sort, page]);
 
-  const { live } = useRealtimeSignal('withdrawals', (hint) => invalidateOnSignal(hint, openId, list, detail));
+  useRealtimeSignal('withdrawals', (hint) => invalidateOnSignal(hint, openId, list, detail));
+  const { live, pause } = useRealtimeStatus('withdrawals');
 
   const list = useResource(
     listQuery,
@@ -211,7 +212,7 @@ function WithdrawalsQueue() {
       signal,
       select: toListResult,
     }),
-    { pollMs: pollFor(live), keepPreviousData: sameTabFilter },
+    { keepPreviousData: sameTabFilter },
   );
 
   const detail = useResource(
@@ -261,6 +262,11 @@ function WithdrawalsQueue() {
   const retryList = useCallback(() => {
     void refreshList();
   }, [refreshList]);
+
+  const refreshNow = useCallback(() => {
+    void refreshList();
+    void refreshDetail();
+  }, [refreshDetail, refreshList]);
 
   const drawerReturn = useCallback(
     () => rowFocusTarget(listRegionRef.current, lastOpenRef.current, -1),
@@ -842,13 +848,36 @@ function WithdrawalsQueue() {
         title="Withdrawals"
         subtitle={subtitleFor(live)}
         actions={
-          canExport ? (
-            <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
-              Export
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<RotateCw size={14} />}
+              loading={list.isRefreshing}
+              onClick={refreshNow}
+            >
+              Refresh
             </Button>
-          ) : undefined
+            {canExport ? (
+              <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>
+                Export
+              </Button>
+            ) : null}
+          </>
         }
       />
+
+      {pause && !listError ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          meta={refreshedAt ? `Showing results from ${formatBusinessTime(new Date(refreshedAt))} WAT.` : undefined}
+          actions={<Button variant="ghost" size="sm" loading={list.isRefreshing} onClick={refreshNow}>Refresh</Button>}
+        >
+          {livePauseText(pause)}
+        </Notice>
+      ) : null}
 
       {emergencyOn ? <EmergencyNotice settingsLink={isSuperAdmin} /> : null}
 

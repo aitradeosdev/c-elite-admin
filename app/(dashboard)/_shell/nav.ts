@@ -9,12 +9,15 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+export type NavCountKey = 'withdrawals' | 'cards';
+
 export interface NavLeaf {
   key: string;
   label: string;
   href: string;
   icon: LucideIcon;
   detailLabel?: string;
+  countKey?: NavCountKey;
 }
 
 export interface NavGroup {
@@ -27,8 +30,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Operations',
     items: [
       { key: 'dashboard',              label: 'Dashboard',      href: '/dashboard',              icon: LayoutDashboard },
-      { key: 'card_queue',             label: 'Card Queue',     href: '/card-queue',             icon: ClipboardList },
-      { key: 'withdrawals',            label: 'Withdrawals',    href: '/withdrawals',            icon: ArrowDownToLine },
+      { key: 'card_queue',             label: 'Card Queue',     href: '/card-queue',             icon: ClipboardList, countKey: 'cards' },
+      { key: 'withdrawals',            label: 'Withdrawals',    href: '/withdrawals',            icon: ArrowDownToLine, countKey: 'withdrawals' },
       { key: 'transactions_overview',  label: 'Transactions',   href: '/transactions-overview',  icon: ClipboardList },
     ],
   },
@@ -160,6 +163,30 @@ export function isNavPathDenied(pathname: string, allowedKeys: readonly string[]
   if (isSuperAdmin || pathname === '/dashboard') return false;
   const key = findNavKey(pathname);
   return key !== null && !allowedKeys.includes(key);
+}
+
+export const NAV_COUNT_CAP = 99;
+
+export function navCountKeys(groups: readonly NavGroup[]): NavCountKey[] {
+  const keys: NavCountKey[] = [];
+  for (const group of groups) {
+    for (const leaf of group.items) {
+      if (leaf.countKey && !keys.includes(leaf.countKey)) keys.push(leaf.countKey);
+    }
+  }
+  return keys;
+}
+
+export function navCountText(count: number): string {
+  return count > NAV_COUNT_CAP ? `${NAV_COUNT_CAP}+` : String(count);
+}
+
+export function navCountLabel(count: number): string {
+  return `${count} waiting`;
+}
+
+export function navItemLabel(label: string, count: number | null): string {
+  return count === null ? label : `${label}, ${navCountLabel(count)}`;
 }
 
 export const SIDEBAR_COLLAPSED_COOKIE = 'admin_sidebar_collapsed';

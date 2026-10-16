@@ -2,9 +2,17 @@
 
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useRealtimeSignal, type SignalTopic } from '../../_ui/realtime/RealtimeSignals';
+import { Button, Notice } from '../../_ui';
+import {
+  livePauseText, useRealtimeSignal, useRealtimeStatus, type RealtimeStatus, type SignalPause, type SignalTopic,
+} from '../../_ui/realtime/RealtimeSignals';
+import { BUSINESS_TZ_LABEL, formatBusinessTime } from '../../lib/time';
+import { useServerRefresh } from './Refresh';
+import s from './page.module.css';
 
 export const SIGNAL_REFRESH_GAP_MS = 10000;
+
+export const LIVE_NOTE = 'Updates live';
 
 export interface RefreshEnvironment {
   now: () => number;
@@ -14,7 +22,6 @@ export interface RefreshEnvironment {
 }
 
 export interface AutoRefreshProps {
-  intervalMs?: number;
   topics: readonly SignalTopic[];
   generatedAt: string;
 }
@@ -26,25 +33,20 @@ const DEFAULT_ENVIRONMENT: RefreshEnvironment = {
   isHidden: () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
 };
 
-function periodOf(ms: number): number | null {
-  return Number.isFinite(ms) && ms > 0 ? ms : null;
-}
+const PAUSE_ORDER: readonly SignalPause[] = ['disabled', 'stopped', 'reconnecting'];
 
 export class RefreshSchedule {
   private readonly refresh: () => void;
   private readonly env: RefreshEnvironment;
-  private readonly intervalMs: number | null;
   private lastAt: number;
   private owed = false;
   private stopped = false;
   private timer: { handle: unknown; at: number } | null = null;
 
-  constructor(refresh: () => void, intervalMs: number, environment: Partial<RefreshEnvironment> = {}) {
+  constructor(refresh: () => void, environment: Partial<RefreshEnvironment> = {}) {
     this.refresh = refresh;
     this.env = { ...DEFAULT_ENVIRONMENT, ...environment };
-    this.intervalMs = periodOf(intervalMs);
     this.lastAt = this.env.now();
-    this.run();
   }
 
   signal(): void {
@@ -69,10 +71,7 @@ export class RefreshSchedule {
   }
 
   private dueAt(): number | null {
-    const times: number[] = [];
-    if (this.intervalMs !== null) times.push(this.lastAt + this.intervalMs);
-    if (this.owed) times.push(this.lastAt + SIGNAL_REFRESH_GAP_MS);
-    return times.length > 0 ? Math.min(...times) : null;
+    return this.owed ? this.lastAt + SIGNAL_REFRESH_GAP_MS : null;
   }
 
   private run(): void {
@@ -115,12 +114,39 @@ export class RefreshSchedule {
   }
 }
 
-export default function AutoRefresh({ intervalMs = 30000, topics, generatedAt }: AutoRefreshProps) {
+export function overviewStatus(statuses: readonly RealtimeStatus[]): RealtimeStatus {
+  const pause = PAUSE_ORDER.find((kind) => statuses.some((status) => status.pause === kind)) ?? null;
+  return { live: statuses.length > 0 && statuses.every((status) => status.live), pause };
+}
+
+function useOverviewStatus(topics: readonly SignalTopic[]): RealtimeStatus {
+  const withdrawals = topics.includes('withdrawals');
+  const cards = topics.includes('cards');
+  const withdrawalsStatus = useRealtimeStatus(withdrawals ? 'withdrawals' : null);
+  const cardsStatus = useRealtimeStatus(cards ? 'cards' : null);
+  return overviewStatus([
+    ...(withdrawals ? [withdrawalsStatus] : []),
+    ...(cards ? [cardsStatus] : []),
+  ]);
+}
+
+export function UpdatedStamp({ topics, generatedAt }: AutoRefreshProps) {
+  const { live } = useOverviewStatus(topics);
+  return (
+    <span className={s.updated} title={live ? LIVE_NOTE : undefined}>
+      Updated {formatBusinessTime(generatedAt)} {BUSINESS_TZ_LABEL}
+    </span>
+  );
+}
+
+export default function AutoRefresh({ topics, generatedAt }: AutoRefreshProps) {
   const router = useRouter();
   const schedule = useRef<RefreshSchedule | null>(null);
+  const { pending, refresh } = useServerRefresh(false, '');
+  const { pause } = useOverviewStatus(topics);
 
   useEffect(() => {
-    const next = new RefreshSchedule(() => router.refresh(), intervalMs);
+    const next = new RefreshSchedule(() => router.refresh());
     schedule.current = next;
     const onVisibility = () => next.visibilityChanged();
     document.addEventListener('visibilitychange', onVisibility);
@@ -129,7 +155,7 @@ export default function AutoRefresh({ intervalMs = 30000, topics, generatedAt }:
       next.dispose();
       schedule.current = null;
     };
-  }, [router, intervalMs]);
+  }, [router]);
 
   useEffect(() => {
     schedule.current?.refreshed();
@@ -138,5 +164,16 @@ export default function AutoRefresh({ intervalMs = 30000, topics, generatedAt }:
   const onSignal = () => schedule.current?.signal();
   useRealtimeSignal(topics.includes('withdrawals') ? 'withdrawals' : null, onSignal);
   useRealtimeSignal(topics.includes('cards') ? 'cards' : null, onSignal);
-  return null;
+
+  if (!pause) return null;
+  return (
+    <Notice
+      tone="warning"
+      compact
+      announce="polite"
+      actions={<Button variant="ghost" size="sm" loading={pending} onClick={refresh}>Refresh</Button>}
+    >
+      {livePauseText(pause)}
+    </Notice>
+  );
 }

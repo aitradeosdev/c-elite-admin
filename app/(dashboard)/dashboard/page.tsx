@@ -3,19 +3,16 @@ import { verifyAdminFromRequest } from '../../lib/jwt';
 import { resolveAdminPermissions } from '../../lib/permissions';
 import { getDashboardData, type RecentSubmission } from '../../lib/dashboard';
 import { realtimeTopicKeys } from '../../lib/realtimePass';
-import { BUSINESS_TZ_LABEL, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
+import { formatAge, formatBusinessDateTime } from '../../lib/time';
 import { Card, EmptyState, PageHeader, StatStrip } from '../../_ui';
-import AutoRefresh from './AutoRefresh';
+import AutoRefresh, { UpdatedStamp } from './AutoRefresh';
 import { ActionTiles, Band, OpenQueueLink } from './DashboardBands';
 import { RecentSubmissions, type RecentRow } from './RecentSubmissions';
 import { RefreshButton, RetryState } from './Refresh';
-import {
-  REFRESH_INTERVAL_MS, STRIP_BANDS, buildActionTiles, buildStripCells, overviewSubtitle,
-} from './metrics';
+import { STRIP_BANDS, buildActionTiles, buildStripCells, overviewSubtitle } from './metrics';
 import s from './page.module.css';
 
-const REFRESH_SECONDS = REFRESH_INTERVAL_MS / 1000;
-const RECENT_ERROR = `The latest card submissions could not be fetched. The overview retries on its own every ${REFRESH_SECONDS} seconds.`;
+const RECENT_ERROR = 'The latest card submissions could not be fetched.';
 
 function toRecentRow(row: RecentSubmission, now: Date): RecentRow {
   return {
@@ -48,28 +45,26 @@ export default async function DashboardPage() {
 
   return (
     <div className={s.page}>
-      <AutoRefresh intervalMs={REFRESH_INTERVAL_MS} topics={topics} generatedAt={data.generated_at} />
-
       <PageHeader
         title="Overview"
         subtitle={overviewSubtitle(data.range.from)}
         actions={
           <>
-            <span className={s.updated} title={`Refreshes automatically every ${REFRESH_SECONDS} seconds`}>
-              Updated {formatBusinessTime(now)} {BUSINESS_TZ_LABEL}
-            </span>
+            <UpdatedStamp topics={topics} generatedAt={data.generated_at} />
             <RefreshButton />
           </>
         }
       />
+
+      <AutoRefresh topics={topics} generatedAt={data.generated_at} />
 
       <div className={s.bands}>
         {failed && hasMetrics ? (
           <Card>
             <RetryState
               title="Metrics could not be calculated"
-              message={`Every figure below shows as unavailable rather than zero. The overview also retries on its own every ${REFRESH_SECONDS} seconds.`}
-              stillFailing="Metrics are still unavailable. The overview will keep retrying."
+              message="Every figure below shows as unavailable rather than zero."
+              stillFailing="Metrics are still unavailable. Try again in a moment."
             />
           </Card>
         ) : null}

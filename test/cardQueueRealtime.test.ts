@@ -20,6 +20,7 @@ const OTHER_ID = '0b8e7d6c-5a4b-4c3d-9e2f-1a0b9c8d7e6f';
 const LIST_KEY = 'status=pending&sort=created_at&dir=desc&page=1&limit=50';
 const RESYNC: RealtimeSignal = { kind: 'resync' };
 const NO_REFRESH: QueueRefresh = { list: false, detail: false };
+const HOUR_MS = 60 * 60 * 1000;
 
 type Outcome = 'recorded' | 'changed' | 'denied' | 'refused' | 'signedOut';
 
@@ -76,7 +77,9 @@ function flush(): Promise<void> {
 
 interface Clock {
   env: ResourceEnvironment;
+  hidden: boolean;
   advance: (ms: number) => void;
+  timers: () => number;
 }
 
 function createClock(): Clock {
@@ -86,7 +89,8 @@ function createClock(): Clock {
   const due = (until: number) => [...timers]
     .filter(([, timer]) => timer.at <= until)
     .sort(([leftId, left], [rightId, right]) => left.at - right.at || leftId - rightId)[0];
-  return {
+  const clock: Clock = {
+    hidden: false,
     env: {
       now: () => now,
       setTimer: (callback, ms) => {
@@ -97,7 +101,7 @@ function createClock(): Clock {
       clearTimer: (handle) => {
         timers.delete(handle as number);
       },
-      isHidden: () => false,
+      isHidden: () => clock.hidden,
     },
     advance: (ms) => {
       const until = now + ms;
@@ -111,7 +115,9 @@ function createClock(): Clock {
       }
       now = until;
     },
+    timers: () => timers.size,
   };
+  return clock;
 }
 
 interface Resource {
@@ -119,13 +125,12 @@ interface Resource {
   requests: Array<(result: ApiResult<string>) => void>;
 }
 
-function resource(clock: Clock, pollMs: number): Resource {
+function resource(clock: Clock): Resource {
   const requests: Array<(result: ApiResult<string>) => void> = [];
   const store = new resources.ResourceStore<string>(clock.env);
   store.setFetcher(() => new Promise<ApiResult<string>>((resolve) => {
     requests.push(resolve);
   }));
-  store.setPollMs(pollMs);
   return { store, requests };
 }
 
@@ -151,15 +156,14 @@ interface Queue {
   list: Resource;
   detail: Resource;
   gate: DecisionGate;
-  live: boolean;
   refreshFor: (refresh: QueueRefresh) => void;
   hint: (signal: RealtimeSignal) => void;
 }
 
-async function openQueue(openId: string | null, live = true): Promise<Queue> {
+async function openQueue(openId: string | null): Promise<Queue> {
   const clock = createClock();
-  const list = resource(clock, model.pollFor(live));
-  const detail = resource(clock, 0);
+  const list = resource(clock);
+  const detail = resource(clock);
   const gate = new model.DecisionGate();
   list.store.start(LIST_KEY, true);
   detail.store.start(openId ? `submission:${openId}` : null, true);
@@ -170,7 +174,7 @@ async function openQueue(openId: string | null, live = true): Promise<Queue> {
     if (refresh.list) list.store.invalidate({ minGapMs: model.SIGNAL_GAP_MS });
     if (refresh.detail) detail.store.invalidate({ minGapMs: model.SIGNAL_GAP_MS });
   };
-  return { clock, list, detail, gate, live, refreshFor, hint: (signal) => refreshFor(gate.signal(signal)) };
+  return { clock, list, detail, gate, refreshFor, hint: (signal) => refreshFor(gate.signal(signal)) };
 }
 
 function sent(queue: Queue): { list: number; detail: number } {
@@ -179,7 +183,6 @@ function sent(queue: Queue): { list: number; detail: number } {
 
 async function decideLikeThePage(queue: Queue, outcome: Outcome, whileRecording: () => Promise<void>): Promise<Outcome> {
   if (!queue.gate.begin()) throw new Error('Another decision is still being recorded.');
-  queue.list.store.setPollMs(model.pollFor(queue.live, true));
   try {
     await whileRecording();
     if (outcome === 'recorded') {
@@ -201,27 +204,23 @@ async function decideLikeThePage(queue: Queue, outcome: Outcome, whileRecording:
     return outcome;
   } finally {
     queue.refreshFor(queue.gate.end());
-    queue.list.store.setPollMs(model.pollFor(queue.live));
   }
 }
 
-describe('card queue cadence and copy', () => {
-  test('while live the queue polls every 120 s as a safety net, otherwise every 30 s, and never while a decision is recorded', () => {
-    assert.equal(model.pollFor(true), 120000);
-    assert.equal(model.pollFor(false), 30000);
-    assert.equal(model.pollFor(true, true), 0);
-    assert.equal(model.pollFor(false, true), 0);
-    assert.equal(model.LIVE_POLL_MS, 120000);
-    assert.equal(model.FALLBACK_POLL_MS, 30000);
+describe('the card queue without timers', () => {
+  test('the model keeps no polling cadence at all', () => {
+    for (const name of ['LIVE_POLL_MS', 'FALLBACK_POLL_MS', 'pollFor', 'refreshNote']) {
+      assert.equal(name in model, false, name);
+    }
   });
 
   test('signal loads start at least two seconds apart', () => {
     assert.equal(model.SIGNAL_GAP_MS, 2000);
   });
 
-  test('the updated stamp says the queue updates live only while it does, and keeps today’s copy otherwise', () => {
-    assert.equal(model.refreshNote(true), 'Updates live');
-    assert.equal(model.refreshNote(false), 'Refreshes automatically every 30 seconds');
+  test('the updated stamp says the queue updates live only while it does, and says nothing about timing otherwise', () => {
+    assert.equal(model.liveNote(true), 'Updates live');
+    assert.equal(model.liveNote(false), undefined);
   });
 });
 
@@ -340,7 +339,7 @@ describe('signals against the real resource store', () => {
     await flush();
     assert.equal(queue.list.requests.length - start.list, 2);
     await answer(queue.list, 'third page');
-    queue.clock.advance(model.SIGNAL_GAP_MS * 10);
+    queue.clock.advance(HOUR_MS);
     await flush();
     assert.equal(queue.list.requests.length - start.list, 2);
   });
@@ -379,7 +378,7 @@ describe('signals against the real resource store', () => {
       assert.equal(queue.list.requests.length - start.list, own + 1, `${outcome}: one list load follows the decision`);
       await answer(queue.list, 'after the follow-up');
       await answer(queue.detail, 'after the follow-up');
-      queue.clock.advance(model.SIGNAL_GAP_MS * 10);
+      queue.clock.advance(HOUR_MS);
       await flush();
       assert.equal(queue.list.requests.length - start.list, own + 1, `${outcome}: and nothing after it`);
       const detail = outcome === 'changed' ? 1 : outcome === 'recorded' ? 0 : 1;
@@ -391,7 +390,7 @@ describe('signals against the real resource store', () => {
     const queue = await openQueue(SUBMISSION_ID);
     const start = sent(queue);
     await assert.rejects(decideLikeThePage(queue, 'refused', async () => {}), /could not be saved/);
-    queue.clock.advance(model.SIGNAL_GAP_MS * 10);
+    queue.clock.advance(HOUR_MS);
     await flush();
     assert.deepEqual(sent(queue), start);
   });
@@ -405,50 +404,77 @@ describe('signals against the real resource store', () => {
     await refuse(queue.list, 401);
     queue.hint(change(OTHER_ID));
     queue.hint(RESYNC);
-    queue.clock.advance(model.LIVE_POLL_MS * 3);
+    queue.clock.advance(HOUR_MS);
     await flush();
     assert.deepEqual(sent(queue), after);
     assert.equal(queue.list.store.getSnapshot().error?.status, 401);
   });
 
-  test('the list polls every 120 s while live, every 30 s otherwise, and not at all while a decision is recorded', async () => {
-    for (const [live, every] of [[true, 120000], [false, 30000]] as const) {
-      const queue = await openQueue(null, live);
-      const start = queue.list.requests.length;
-      queue.clock.advance(every - 1);
+  test('the list never loads on a timer: not before a decision, not during a long one, not after it, shown or hidden', async () => {
+    for (const hidden of [false, true]) {
+      const queue = await openQueue(SUBMISSION_ID);
+      queue.clock.hidden = hidden;
+      queue.list.store.visibilityChanged();
+      const start = sent(queue);
+      assert.equal(queue.clock.timers(), 0, `hidden ${hidden}`);
+      queue.clock.advance(HOUR_MS * 8);
       await flush();
-      assert.equal(queue.list.requests.length, start, `live ${live}`);
-      queue.clock.advance(1);
+      assert.deepEqual(sent(queue), start, `hidden ${hidden}: before`);
+      await assert.rejects(decideLikeThePage(queue, 'refused', async () => {
+        queue.clock.advance(HOUR_MS);
+        await flush();
+        assert.deepEqual(sent(queue), start, `hidden ${hidden}: during`);
+      }), /could not be saved/);
+      queue.clock.advance(HOUR_MS * 8);
       await flush();
-      assert.equal(queue.list.requests.length, start + 1, `live ${live}`);
+      assert.deepEqual(sent(queue), start, `hidden ${hidden}: after`);
+      assert.equal(queue.clock.timers(), 0, `hidden ${hidden}`);
     }
-    const deciding = await openQueue(null);
-    const start = deciding.list.requests.length;
-    deciding.list.store.setPollMs(model.pollFor(true, true));
-    deciding.clock.advance(model.LIVE_POLL_MS * 10);
+  });
+
+  test('a failed list load is not retried on a timer; the next signal or the Refresh button loads it again', async () => {
+    const queue = await openQueue(null);
+    const start = sent(queue);
+    queue.hint(change(OTHER_ID));
+    await refuse(queue.list, 503);
+    queue.clock.advance(HOUR_MS);
     await flush();
-    assert.equal(deciding.list.requests.length, start);
+    assert.equal(queue.list.requests.length - start.list, 1);
+    assert.equal(queue.clock.timers(), 0);
+    queue.hint(RESYNC);
+    assert.equal(queue.list.requests.length - start.list, 2);
+    await answer(queue.list, 'after the reconnect');
+    const refreshed = queue.list.store.refresh();
+    assert.equal(queue.list.requests.length - start.list, 3);
+    await answer(queue.list, 'after Refresh');
+    await refreshed;
+    assert.equal(queue.list.store.getSnapshot().data, 'after Refresh');
   });
 });
 
 describe('the card queue wiring', () => {
-  test('the list hook takes the live flag and polls through pollFor', () => {
+  test('the list hook takes only the query and never polls', () => {
     const hook = source('useQueueList.ts');
-    assert.match(
-      hook,
-      /export function useQueueList\(query: QueueQuery, paused: boolean, live: boolean\): UseResourceResult<QueueListResult> \{/,
-    );
-    assert.match(hook, /pollMs: pollFor\(live, paused\),/);
-    assert.doesNotMatch(hook, /POLL_MS/);
+    assert.match(hook, /export function useQueueList\(query: QueueQuery\): UseResourceResult<QueueListResult> \{/);
+    assert.match(hook, /return useResource\(key, \(signal\) => fetchQueue\(key, signal\), \{ keepPreviousData: sameQueueTab \}\);/);
+    assert.doesNotMatch(hook, /pollMs|pollFor|POLL_MS|paused|live/);
   });
 
-  test('the page takes the hook from the realtime kit folder, listens on the cards topic and passes live to the list', () => {
+  test('the page takes the hooks and the wording from the realtime kit folder, listens on the cards topic and reads its status', () => {
     const page = source('CardQueue.tsx');
-    assert.match(page, /^import \{ useRealtimeSignal \} from '\.\.\/\.\.\/_ui\/realtime\/RealtimeSignals';$/m);
+    assert.match(
+      page,
+      /^import \{ livePauseText, useRealtimeSignal, useRealtimeStatus \} from '\.\.\/\.\.\/_ui\/realtime\/RealtimeSignals';$/m,
+    );
     assert.doesNotMatch(page, /@supabase|supabaseTransport|signalsCore/);
     assert.equal(count(page, 'useRealtimeSignal('), 1);
-    assert.match(page, /const \{ live \} = useRealtimeSignal\('cards', \(signal\) => refreshFor\(gate\.signal\(signal\)\)\);\n {2}const list = useQueueList\(/);
-    assert.match(page, /useQueueList\(\{ tab, search, from: range\.from, to: range\.to, page, sort \}, deciding, live\);/);
+    assert.equal(count(page, 'useRealtimeStatus('), 1);
+    assert.match(
+      page,
+      /\n {2}useRealtimeSignal\('cards', \(signal\) => refreshFor\(gate\.signal\(signal\)\)\);\n {2}const \{ live, pause \} = useRealtimeStatus\('cards'\);\n {2}const list = useQueueList\(/,
+    );
+    assert.match(page, /useQueueList\(\{ tab, search, from: range\.from, to: range\.to, page, sort \}\);/);
+    assert.doesNotMatch(page, /pollMs|pollFor|POLL_MS|setInterval/);
   });
 
   test('every signal becomes a coalesced invalidate, never a refresh, and the gate always knows the open submission', () => {
@@ -495,10 +521,44 @@ describe('the card queue wiring', () => {
     assert.equal(count(page, 'endDecision();'), 2);
   });
 
-  test('the updated stamp takes its copy from the model', () => {
+  test('the updated stamp takes its copy from the model and names no refresh interval', () => {
     const page = source('CardQueue.tsx');
-    assert.match(page, /<span className=\{s\.updated\} title=\{refreshNote\(live\)\}>/);
-    assert.doesNotMatch(page, /every 30 seconds/);
+    assert.match(page, /<span className=\{s\.updated\} title=\{liveNote\(live\)\}>/);
+    assert.doesNotMatch(page, /every 30 seconds|Refreshes automatically|refreshNote/);
+  });
+
+  test('while live updates are paused the queue says why under its header, with a Refresh that reloads the list', () => {
+    const page = source('CardQueue.tsx');
+    const notice = [
+      '      {pause && !list.error ? (',
+      '        <Notice',
+      '          tone="warning"',
+      '          compact',
+      '          announce="polite"',
+      '          meta={loadedAt ? `Showing results from ${formatBusinessTime(new Date(loadedAt))} ${BUSINESS_TZ_LABEL}.` : undefined}',
+      '          actions={<Button variant="ghost" size="sm" loading={list.isRefreshing} onClick={retryList}>Refresh</Button>}',
+      '        >',
+      '          {livePauseText(pause)}',
+      '        </Notice>',
+      '      ) : null}',
+    ].join('\n');
+    assert.equal(count(page, notice), 1);
+    assert.equal(count(page, 'livePauseText('), 1);
+    const header = page.indexOf('      <PageHeader\n        title="Card queue"');
+    assert.ok(header > 0);
+    const after = page.indexOf('\n      />\n', header) + '\n      />\n'.length;
+    assert.equal(page.slice(after, page.indexOf(notice)).trim(), '');
+    assert.ok(page.indexOf(notice) < page.indexOf('<div className={s.tabs}>'));
+    assert.match(page, /const retryList = \(\) => void refreshList\(\);/);
+  });
+
+  test('a failed list load keeps its own notice and retry, so the two notices never stack', () => {
+    const page = source('CardQueue.tsx');
+    assert.match(
+      page,
+      /\{list\.error && rows \? \(\s*<Notice\s+tone="warning"\s+compact\s+announce="polite"[\s\S]*?actions=\{<Button variant="ghost" size="sm" onClick=\{retryList\}>Retry<\/Button>\}\s*>\s*\{list\.error\.message\}\s*<\/Notice>/,
+    );
+    assert.match(page, /\{pause && !list\.error \? \(/);
   });
 
   test('the model imports types only, so the server page that imports it never pulls in the realtime client', () => {
@@ -527,7 +587,7 @@ describe('the card queue wiring', () => {
     const list = inPage('');
     assert.match(list, /Card queue/);
     assert.match(list, /Loading Card submissions/);
-    assert.doesNotMatch(list, /Updated/);
+    assert.doesNotMatch(list, /Updated|Live updates/);
     assert.match(inPage(`id=${SUBMISSION_ID}`), /Loading submission/);
   });
 });

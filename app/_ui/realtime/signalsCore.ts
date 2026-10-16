@@ -24,6 +24,8 @@ export type SignalListener = (signal: RealtimeSignal) => void;
 
 export type SignalStatus = 'off' | 'connecting' | 'live' | 'fallback';
 
+export type SignalPause = 'reconnecting' | 'disabled' | 'stopped';
+
 export type ChannelStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CHANNEL_ERROR' | 'CLOSED';
 
 export interface SignalsTransport {
@@ -256,7 +258,9 @@ export class SignalsEngine {
   private readonly states: readonly TopicState[] = TOPIC_KEYS.map((key) => this.topics[key]);
   private readonly watchers = new Set<() => void>();
   private readonly published: Record<SignalTopic, SignalStatus> = { withdrawals: 'off', cards: 'off' };
+  private readonly pauses: Record<SignalTopic, SignalPause | null> = { withdrawals: null, cards: null };
   private phase: 'active' | 'off' | 'disposed' = 'active';
+  private offReason: PassOffReason | null = null;
   private pass: SignalPass | null = null;
   private fetching = false;
   private passFailures = 0;
@@ -295,6 +299,10 @@ export class SignalsEngine {
 
   status(topic: SignalTopic): SignalStatus {
     return this.published[topic] ?? 'off';
+  }
+
+  pause(topic: SignalTopic): SignalPause | null {
+    return this.pauses[topic] ?? null;
   }
 
   watch(listener: () => void): () => void {
@@ -462,6 +470,7 @@ export class SignalsEngine {
 
   private applyPass(outcome: PassOutcome): void {
     if (outcome.kind === 'off') {
+      this.offReason = outcome.reason;
       this.goOff();
       return;
     }
@@ -601,12 +610,22 @@ export class SignalsEngine {
     return state.failed ? 'fallback' : 'connecting';
   }
 
+  private pauseOf(state: TopicState, status: SignalStatus): SignalPause | null {
+    if (status !== 'fallback') return null;
+    if (this.phase === 'off' && this.offReason === 'disabled') return 'disabled';
+    if (this.phase !== 'active' || state.terminal) return 'stopped';
+    if (this.pass !== null && !this.granted(state)) return 'stopped';
+    return 'reconnecting';
+  }
+
   private publish(): void {
     let changed = false;
     for (const state of this.states) {
       const next = this.statusOf(state);
-      if (this.published[state.key] === next) continue;
+      const pause = this.pauseOf(state, next);
+      if (this.published[state.key] === next && this.pauses[state.key] === pause) continue;
       this.published[state.key] = next;
+      this.pauses[state.key] = pause;
       changed = true;
     }
     if (!changed) return;

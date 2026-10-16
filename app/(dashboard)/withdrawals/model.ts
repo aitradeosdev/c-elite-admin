@@ -68,10 +68,6 @@ export const REJECT_REASONS = [
   'Gateway unavailable',
 ];
 
-export const LIVE_POLL_MS = 60000;
-
-export const FALLBACK_POLL_MS = 5000;
-
 export const SIGNAL_GAP_MS = 1000;
 
 const SUBTITLE_LEAD = 'Payout queue across every status.';
@@ -245,14 +241,8 @@ export function sameTabFilter(previousKey: string, nextKey: string): boolean {
   return FILTER_KEYS.every((key) => previous.get(key) === next.get(key));
 }
 
-export function pollFor(live: boolean): number {
-  return live ? LIVE_POLL_MS : FALLBACK_POLL_MS;
-}
-
 export function subtitleFor(live: boolean): string {
-  return live
-    ? `${SUBTITLE_LEAD} Updates live; times are WAT.`
-    : `${SUBTITLE_LEAD} Refreshes every ${FALLBACK_POLL_MS / 1000} seconds; times are WAT.`;
+  return live ? `${SUBTITLE_LEAD} Updates live; times are WAT.` : `${SUBTITLE_LEAD} Times are WAT.`;
 }
 
 export function signalReachesDetail(signal: RealtimeSignal, openId: string | null): boolean {

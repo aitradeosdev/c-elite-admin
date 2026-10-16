@@ -15,19 +15,10 @@ export const QUEUE_TABS: ReadonlyArray<{ value: QueueTab; label: string }> = [
 
 export const PAGE_SIZE = 50;
 
-export const LIVE_POLL_MS = 120000;
-
-export const FALLBACK_POLL_MS = 30000;
-
 export const SIGNAL_GAP_MS = 2000;
 
-export function pollFor(live: boolean, paused = false): number {
-  if (paused) return 0;
-  return live ? LIVE_POLL_MS : FALLBACK_POLL_MS;
-}
-
-export function refreshNote(live: boolean): string {
-  return live ? 'Updates live' : `Refreshes automatically every ${FALLBACK_POLL_MS / 1000} seconds`;
+export function liveNote(live: boolean): string | undefined {
+  return live ? 'Updates live' : undefined;
 }
 
 export interface QueueQuery {

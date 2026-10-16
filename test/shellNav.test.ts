@@ -1052,7 +1052,10 @@ describe('house rules for the shell files', () => {
   const files = [
     '(dashboard)/_shell/Shell.tsx',
     '(dashboard)/_shell/SecurityBanner.tsx',
+    '(dashboard)/_shell/NavCounts.tsx',
+    '(dashboard)/_shell/nav.ts',
     '(dashboard)/_shell/Shell.module.css',
+    '(dashboard)/_shell/NavCounts.module.css',
     '(dashboard)/layout.tsx',
     '_ui/SessionExpired.tsx',
     'error.tsx',
@@ -1069,8 +1072,8 @@ describe('house rules for the shell files', () => {
     assert.doesNotMatch(readFileSync(fileURLToPath(import.meta.url), 'utf8'), /\/\*|(^|[^:])\/\/(?!\/)/m);
   });
 
-  test('the banner and the root error boundary are client components that never import server code', () => {
-    for (const file of ['(dashboard)/_shell/SecurityBanner.tsx', 'error.tsx']) {
+  test('the banner, the counts island and the root error boundary are client components that never import server code', () => {
+    for (const file of ['(dashboard)/_shell/SecurityBanner.tsx', '(dashboard)/_shell/NavCounts.tsx', 'error.tsx']) {
       const source = appSource(file);
       assert.ok(source.startsWith("'use client';"), file);
       assert.doesNotMatch(source, /next\/headers|lib\/(jwt|session|supabase|mfa|qr)|qrcode-generator/, file);

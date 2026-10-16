@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAppModule, loadUi } from './support/uiHarness.ts';
+import * as model from '../app/(dashboard)/withdrawals/model.ts';
 import {
-  FALLBACK_POLL_MS, LIVE_POLL_MS, SIGNAL_GAP_MS, invalidateOnSignal, pollFor, signalReachesDetail, subtitleFor,
-  type SignalTarget,
+  SIGNAL_GAP_MS, invalidateOnSignal, signalReachesDetail, subtitleFor, type SignalTarget,
 } from '../app/(dashboard)/withdrawals/model.ts';
 import type { RealtimeSignal, SignalChange } from '../app/_ui/realtime/RealtimeSignals.tsx';
 import type { ResourceEnvironment, ResourceInvalidateOptions, ResourceStore } from '../app/_ui/useResource.ts';
@@ -24,6 +24,7 @@ const OTHER_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
 const FLAG_ID = '0f1e2d3c-4b5a-4968-8776-655443322110';
 const RESYNC: RealtimeSignal = { kind: 'resync' };
 const GAP: ResourceInvalidateOptions = { minGapMs: 1000 };
+const HOUR_MS = 60 * 60 * 1000;
 
 let mod: ResourceModule;
 
@@ -55,14 +56,17 @@ function recorder(): Recorder {
 
 interface Clock {
   env: ResourceEnvironment;
+  hidden: boolean;
   advance: (ms: number) => void;
+  timers: () => number;
 }
 
 function createClock(): Clock {
   let now = 1000;
   let sequence = 0;
   const pending = new Map<number, { at: number; callback: () => void }>();
-  return {
+  const clock: Clock = {
+    hidden: false,
     env: {
       now: () => now,
       setTimer: (callback, ms) => {
@@ -73,7 +77,7 @@ function createClock(): Clock {
       clearTimer: (handle) => {
         pending.delete(handle as number);
       },
-      isHidden: () => false,
+      isHidden: () => clock.hidden,
     },
     advance: (ms) => {
       now += ms;
@@ -84,7 +88,9 @@ function createClock(): Clock {
         timer.callback();
       }
     },
+    timers: () => pending.size,
   };
+  return clock;
 }
 
 interface Resource {
@@ -92,20 +98,19 @@ interface Resource {
   calls: Array<(result: ApiResult<string>) => void>;
 }
 
-function resource(clock: Clock, pollMs: number): Resource {
+function resource(clock: Clock): Resource {
   const calls: Array<(result: ApiResult<string>) => void> = [];
   const store = new mod.ResourceStore<string>(clock.env);
   store.setFetcher(() => new Promise<ApiResult<string>>((resolve) => {
     calls.push(resolve);
   }));
-  store.setPollMs(pollMs);
   return { store, calls };
 }
 
-function mount(openId: string | null, live = true) {
+function mount(openId: string | null) {
   const clock = createClock();
-  const list = resource(clock, pollFor(live));
-  const detail = resource(clock, 0);
+  const list = resource(clock);
+  const detail = resource(clock);
   list.store.start('review=1&page=1&limit=50', true);
   detail.store.start(openId ? `withdrawal:${openId}` : null, true);
   const hint = (signal: RealtimeSignal) => invalidateOnSignal(signal, openId, list.store, detail.store);
@@ -145,21 +150,19 @@ function block(source: string, start: string): string {
   return source.slice(from, source.indexOf('\n}\n', from) + 2);
 }
 
-describe('withdrawals cadence and copy', () => {
-  test('while live the list keeps a 60 s safety poll, otherwise today’s 5 s poll', () => {
-    assert.equal(LIVE_POLL_MS, 60000);
-    assert.equal(FALLBACK_POLL_MS, 5000);
-    assert.equal(pollFor(true), 60000);
-    assert.equal(pollFor(false), 5000);
+describe('withdrawals without timers', () => {
+  test('the model keeps no polling cadence at all', () => {
+    for (const name of ['LIVE_POLL_MS', 'FALLBACK_POLL_MS', 'pollFor']) assert.equal(name in model, false, name);
   });
 
   test('signal loads start at least a second apart', () => {
     assert.equal(SIGNAL_GAP_MS, 1000);
   });
 
-  test('the subtitle says the page updates live only while it does, and keeps today’s copy otherwise', () => {
+  test('the subtitle says the page updates live only while it does, and never names a refresh interval', () => {
     assert.equal(subtitleFor(true), 'Payout queue across every status. Updates live; times are WAT.');
-    assert.equal(subtitleFor(false), 'Payout queue across every status. Refreshes every 5 seconds; times are WAT.');
+    assert.equal(subtitleFor(false), 'Payout queue across every status. Times are WAT.');
+    for (const live of [true, false]) assert.doesNotMatch(subtitleFor(live), /refresh|every \d|second/i);
   });
 });
 
@@ -211,7 +214,7 @@ describe('hints against the real resource store', () => {
     await answer(list, 'second');
     clock.advance(2000);
     await answer(list, 'third');
-    clock.advance(30000);
+    clock.advance(HOUR_MS);
     assert.equal(list.calls.length, 3);
     assert.equal(detail.calls.length, 0);
     assert.equal(list.store.getSnapshot().data, 'third');
@@ -246,16 +249,22 @@ describe('hints against the real resource store', () => {
     clock.advance(1);
     assert.equal(list.calls.length, 3);
     await answer(list, 'c');
-    clock.advance(60000);
+    clock.advance(HOUR_MS);
+    assert.equal(list.calls.length, 3);
     assert.equal(detail.calls.length, 2);
   });
 
-  test('a resync reloads the list, and the drawer when one is open, because missed hints are not replayed', async () => {
+  test('a resync, which every reconnect sends, reloads the list once, and the drawer when one is open', async () => {
     for (const openId of [null, OPEN_ID]) {
-      const { list, detail, hint } = mount(openId);
+      const { clock, list, detail, hint } = mount(openId);
       await answer(list, 'a');
       await answer(detail, 'a');
       hint(RESYNC);
+      assert.equal(list.calls.length, 2, String(openId));
+      assert.equal(detail.calls.length, openId ? 2 : 0, String(openId));
+      await answer(list, 'b');
+      await answer(detail, 'b');
+      clock.advance(HOUR_MS);
       assert.equal(list.calls.length, 2, String(openId));
       assert.equal(detail.calls.length, openId ? 2 : 0, String(openId));
     }
@@ -269,7 +278,7 @@ describe('hints against the real resource store', () => {
     await answer(list, 'a');
     assert.equal(list.calls.length, 2);
     await answer(list, 'b');
-    clock.advance(30000);
+    clock.advance(HOUR_MS);
     assert.equal(list.calls.length, 2);
   });
 
@@ -280,38 +289,60 @@ describe('hints against the real resource store', () => {
       await refuse(detail, status);
       hint(changed(OPEN_ID));
       hint(RESYNC);
-      clock.advance(120000);
+      clock.advance(HOUR_MS);
       assert.equal(list.calls.length, 1, String(status));
       assert.equal(detail.calls.length, 1, String(status));
     }
   });
 
-  test('the list polls every 60 s while live, and at once when a drop to polling finds it overdue', async () => {
-    const { clock, list } = mount(null, true);
-    await answer(list, 'a');
-    clock.advance(59999);
-    assert.equal(list.calls.length, 1);
-    clock.advance(1);
-    assert.equal(list.calls.length, 2);
-    await answer(list, 'b');
-    clock.advance(6000);
-    assert.equal(list.calls.length, 2);
-    list.store.setPollMs(pollFor(false));
-    clock.advance(0);
-    assert.equal(list.calls.length, 3);
-    await answer(list, 'c');
-    clock.advance(4999);
-    assert.equal(list.calls.length, 3);
-    clock.advance(1);
-    assert.equal(list.calls.length, 4);
+  test('with no hint the list and the drawer never load again, and no timer is left armed, whether the tab is shown or hidden', async () => {
+    for (const hidden of [false, true]) {
+      const { clock, list, detail } = mount(OPEN_ID);
+      await answer(list, 'a');
+      await answer(detail, 'a');
+      clock.hidden = hidden;
+      list.store.visibilityChanged();
+      detail.store.visibilityChanged();
+      assert.equal(clock.timers(), 0, `hidden ${hidden}`);
+      clock.advance(HOUR_MS * 8);
+      assert.equal(list.calls.length, 1, `hidden ${hidden}`);
+      assert.equal(detail.calls.length, 1, `hidden ${hidden}`);
+      assert.equal(clock.timers(), 0, `hidden ${hidden}`);
+    }
   });
 
-  test('without live updates the list keeps today’s 5 s poll', async () => {
-    const { clock, list } = mount(null, false);
+  test('a failed list load is not retried on a timer; the next hint or the Refresh button loads it again', async () => {
+    const { clock, list, hint } = mount(null);
     await answer(list, 'a');
-    clock.advance(4999);
+    hint(changed(OTHER_ID));
+    await refuse(list, 500);
+    clock.advance(HOUR_MS);
+    assert.equal(list.calls.length, 2);
+    assert.equal(clock.timers(), 0);
+    clock.advance(SIGNAL_GAP_MS);
+    hint(changed(OTHER_ID));
+    assert.equal(list.calls.length, 3);
+    await answer(list, 'b');
+    const refreshed = list.store.refresh();
+    assert.equal(list.calls.length, 4);
+    await answer(list, 'c');
+    await refreshed;
+    assert.equal(list.store.getSnapshot().data, 'c');
+  });
+
+  test('a hint heard while the tab is hidden waits for the tab to return, then loads once', async () => {
+    const { clock, list, hint } = mount(null);
+    await answer(list, 'a');
+    clock.hidden = true;
+    hint(changed(OTHER_ID));
+    hint(changed(OTHER_ID));
+    clock.advance(HOUR_MS);
     assert.equal(list.calls.length, 1);
-    clock.advance(1);
+    clock.hidden = false;
+    list.store.visibilityChanged();
+    assert.equal(list.calls.length, 2);
+    await answer(list, 'b');
+    clock.advance(HOUR_MS);
     assert.equal(list.calls.length, 2);
   });
 });
@@ -322,32 +353,39 @@ describe('the withdrawals page wiring', () => {
     assert.equal(typeof pageModule.default, 'function');
   });
 
-  test('the page takes the hook from the realtime kit folder and never imports supabase-js', () => {
+  test('the page takes the hooks and the wording from the realtime kit folder and never imports supabase-js', () => {
     const page = read(PAGE_FILE);
     assert.ok(page.startsWith("'use client';\n"));
-    assert.match(page, /^import \{ useRealtimeSignal \} from '\.\.\/\.\.\/_ui\/realtime\/RealtimeSignals';$/m);
+    assert.match(
+      page,
+      /^import \{ livePauseText, useRealtimeSignal, useRealtimeStatus \} from '\.\.\/\.\.\/_ui\/realtime\/RealtimeSignals';$/m,
+    );
     assert.doesNotMatch(page, /@supabase|supabaseTransport|signalsCore|lib\/realtimePass|lib\/supabase/);
   });
 
-  test('the page listens on the withdrawals topic once, before the list, and hands every hint to the model', () => {
+  test('the page listens on the withdrawals topic once, reads its status once, before the list, and hands every hint to the model', () => {
     const page = read(PAGE_FILE);
-    const call = "const { live } = useRealtimeSignal('withdrawals', (hint) => invalidateOnSignal(hint, openId, list, detail));";
+    const call = "  useRealtimeSignal('withdrawals', (hint) => invalidateOnSignal(hint, openId, list, detail));\n";
+    const status = "  const { live, pause } = useRealtimeStatus('withdrawals');\n";
     assert.equal(count(page, call), 1);
+    assert.equal(count(page, status), 1);
+    assert.ok(page.includes(call + status));
     assert.equal(count(page, 'useRealtimeSignal('), 1);
-    assert.ok(page.indexOf(call) < page.indexOf('const list = useResource('));
+    assert.equal(count(page, 'useRealtimeStatus('), 1);
+    assert.ok(page.indexOf(status) < page.indexOf('const list = useResource('));
     assert.ok(page.indexOf('const list = useResource(') < page.indexOf('const detail = useResource('));
     assert.equal(count(page, '(hint)'), 1);
     assert.doesNotMatch(page, /\bhint\.|\bsignal\.(?:id|status|table|withdrawalId|kind)\b/);
   });
 
-  test('the list polls by the live state, and the drawer still never polls', () => {
+  test('neither the list nor the drawer polls, in any state', () => {
     const page = read(PAGE_FILE);
-    assert.equal(count(page, 'pollMs'), 1);
-    assert.match(page, /select: toListResult,\s*\}\),\s*\{ pollMs: pollFor\(live\), keepPreviousData: sameTabFilter \},\s*\);/);
+    assert.doesNotMatch(page, /pollMs|pollFor|setInterval|POLL_MS/);
+    assert.match(page, /select: toListResult,\s*\}\),\s*\{ keepPreviousData: sameTabFilter \},\s*\);/);
     const start = page.indexOf('const detail = useResource(');
     const detail = page.slice(start, page.indexOf('\n  );', start));
     assert.match(detail, /\{ keepPreviousData: false \},$/);
-    assert.doesNotMatch(page, /\bPOLL_MS\b|\bSUBTITLE\b/);
+    assert.doesNotMatch(page, /\bSUBTITLE\b/);
   });
 
   test('the header copy comes from the model in every state, and the fallback never claims to be live', () => {
@@ -358,6 +396,54 @@ describe('the withdrawals page wiring', () => {
     const fallback = page.slice(page.indexOf('function QueueFallback()'), page.indexOf('function WithdrawalsQueue()'));
     assert.match(fallback, /<PageHeader title="Withdrawals" subtitle=\{subtitleFor\(false\)\} \/>/);
     assert.match(page, /if \(denied\) \{\s*return \(\s*<div>\s*<PageHeader title="Withdrawals" subtitle=\{subtitleFor\(live\)\} \/>/);
+  });
+
+  test('while live updates are paused the page says why under its header, with a Refresh that reloads the list and the open withdrawal', () => {
+    const page = read(PAGE_FILE);
+    const notice = [
+      '      {pause && !listError ? (',
+      '        <Notice',
+      '          tone="warning"',
+      '          compact',
+      '          announce="polite"',
+      '          meta={refreshedAt ? `Showing results from ${formatBusinessTime(new Date(refreshedAt))} WAT.` : undefined}',
+      '          actions={<Button variant="ghost" size="sm" loading={list.isRefreshing} onClick={refreshNow}>Refresh</Button>}',
+      '        >',
+      '          {livePauseText(pause)}',
+      '        </Notice>',
+      '      ) : null}',
+    ].join('\n');
+    assert.equal(count(page, notice), 1);
+    const header = page.indexOf('      <PageHeader\n        title="Withdrawals"');
+    assert.ok(header > 0);
+    const between = page.slice(page.indexOf('\n      />\n', header) + '\n      />\n'.length, page.indexOf(notice));
+    assert.equal(between.trim(), '');
+    assert.ok(page.indexOf(notice) < page.indexOf('{emergencyOn ? <EmergencyNotice'));
+    assert.equal(count(page, 'livePauseText('), 1);
+    assert.match(
+      page,
+      /const refreshNow = useCallback\(\(\) => \{\n {4}void refreshList\(\);\n {4}void refreshDetail\(\);\n {2}\}, \[refreshDetail, refreshList\]\);/,
+    );
+    assert.equal(count(page, 'onClick={refreshNow}'), 2);
+  });
+
+  test('the header always offers a Refresh that reloads the list and the open withdrawal, live or not', () => {
+    const page = read(PAGE_FILE);
+    const header = page.slice(page.indexOf('      <PageHeader\n        title="Withdrawals"'), page.indexOf('{pause && !listError ? ('));
+    assert.match(
+      header,
+      /actions=\{\n\s+<>\n\s+<Button\n\s+variant="secondary"\n\s+size="sm"\n\s+leftIcon=\{<RotateCw size=\{14\} \/>\}\n\s+loading=\{list\.isRefreshing\}\n\s+onClick=\{refreshNow\}\n\s+>\n\s+Refresh\n\s+<\/Button>\n\s+\{canExport \? \(/,
+    );
+    assert.doesNotMatch(header, /live \?|pause \?/);
+  });
+
+  test('a failed list load keeps its own Live updates paused notice, so the two notices never stack', () => {
+    const page = read(PAGE_FILE);
+    assert.match(
+      page,
+      /\{listError && rows\.length > 0 \? \(\s*<Notice\s+tone="warning"\s+compact\s+announce="polite"\s+meta=\{refreshedAt \? `Showing results from \$\{formatBusinessTime\(new Date\(refreshedAt\)\)\} WAT\.` : undefined\}\s+actions=\{<Button variant="ghost" size="sm" onClick=\{retryList\}>Retry now<\/Button>\}\s*>\s*Live updates paused\. \{listError\.message\}\s*<\/Notice>/,
+    );
+    assert.match(page, /\{pause && !listError \? \(/);
   });
 
   test('the drawer status sync, the fresh read before deciding and the refusal handling are unchanged', () => {
@@ -371,15 +457,24 @@ describe('the withdrawals page wiring', () => {
     assert.match(page, /const reportRefusal = \(message: string, status: number \| null\) => \{\s*toast\.show\(message, 'error'\);\s*if \(status === 403\) router\.refresh\(\);\s*\};/);
   });
 
+  test('the after-decision refresh still reloads the list and the drawer in the background', () => {
+    const page = read(PAGE_FILE);
+    assert.match(
+      page,
+      /const refreshAfterDecision = \(\) => \{\n {4}void refreshList\(\{ background: true \}\);\n {4}void refreshDetail\(\{ background: true \}\);\n {2}\};/,
+    );
+    assert.match(page, /Promise\.all\(\[refreshList\(\{ background: true \}\), refreshDetail\(\{ background: true \}\)\]\)/);
+  });
+
   test('the model only invalidates, reads nothing from a hint but its kind and ids, and imports types only', () => {
-    const model = read(MODEL_FILE);
-    const imports = [...model.matchAll(/^import\b.*$/gm)].map((match) => match[0]);
+    const source = read(MODEL_FILE);
+    const imports = [...source.matchAll(/^import\b.*$/gm)].map((match) => match[0]);
     assert.ok(imports.length >= 2);
     for (const line of imports) assert.match(line, /^import type \{/, line);
     assert.ok(imports.includes("import type { RealtimeSignal } from '../../_ui/realtime/RealtimeSignals';"));
-    const helpers = block(model, 'export function signalReachesDetail(') + block(model, 'export function invalidateOnSignal(');
+    const helpers = block(source, 'export function signalReachesDetail(') + block(source, 'export function invalidateOnSignal(');
     assert.deepEqual([...new Set([...helpers.matchAll(/\bsignal\.(\w+)/g)].map((match) => match[1]))].sort(), ['id', 'kind', 'withdrawalId']);
-    const invalidate = block(model, 'export function invalidateOnSignal(');
+    const invalidate = block(source, 'export function invalidateOnSignal(');
     assert.equal(count(invalidate, '.invalidate({ minGapMs: SIGNAL_GAP_MS })'), 2);
     assert.doesNotMatch(invalidate, /refresh|mutate|load\(/);
   });

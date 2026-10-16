@@ -27,8 +27,10 @@ import { PROFILE_HREF, PROFILE_LABEL, ProfileLink, profileLinkLabel } from '../p
 import { NO_SECURITY_PROMPT, type ShellSecurity } from '../profile/securityModel';
 import { leaveConsole, useSignOutEverywhere } from '../profile/signOut';
 import {
-  breadcrumbTrail, filterNavByPermissions, findNavMatch, hrefMatches, isNavPathDenied, serializeSidebarCollapsed,
+  breadcrumbTrail, filterNavByPermissions, findNavMatch, hrefMatches, isNavPathDenied, navCountKeys, navItemLabel,
+  serializeSidebarCollapsed,
 } from './nav';
+import { NavCount, useNavCounts } from './NavCounts';
 import { SecurityBanner } from './SecurityBanner';
 import s from './Shell.module.css';
 
@@ -339,6 +341,8 @@ function ShellFrame({
     () => filterNavByPermissions(allowedKeys, isSuperAdmin),
     [allowedKeys, isSuperAdmin],
   );
+  const countKeys = useMemo(() => navCountKeys(navGroups), [navGroups]);
+  const navCounts = useNavCounts(countKeys);
 
   const navMatch = findNavMatch(pathname);
   const currentHref = navMatch?.leaf.href ?? null;
@@ -511,19 +515,21 @@ function ShellFrame({
                     {group.items.map((item) => {
                       const Icon = item.icon;
                       const active = navMatch?.leaf.href === item.href;
+                      const count = item.countKey ? navCounts[item.countKey] ?? null : null;
                       return (
                         <li key={`${item.href}-${item.label}`}>
                           <Link
                             href={item.href}
                             className={[s.navItem, active && s.active].filter(Boolean).join(' ')}
                             aria-current={active ? (navMatch?.exact ? 'page' : 'true') : undefined}
-                            aria-label={collapsed ? item.label : undefined}
+                            aria-label={collapsed || count !== null ? navItemLabel(item.label, count) : undefined}
                             title={collapsed && railTip.activeId !== item.href ? item.label : undefined}
                             onClick={drawerOpen ? closeDrawer : undefined}
                             {...(collapsed ? railTip.trigger(item.href, item.label) : {})}
                           >
                             <span className={s.navIcon} aria-hidden="true"><Icon size={16} /></span>
                             <span className={s.navLabel}>{item.label}</span>
+                            {count !== null ? <NavCount count={count} active={active} /> : null}
                           </Link>
                         </li>
                       );

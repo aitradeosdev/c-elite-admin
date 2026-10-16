@@ -5,8 +5,6 @@ import type { MetricMap } from '../../lib/dashboard';
 import { BUSINESS_TZ_LABEL, formatAge, formatBusinessDate } from '../../lib/time';
 import { formatNaira, type StatItem } from '../../_ui';
 
-export const REFRESH_INTERVAL_MS = 30000;
-
 export type MetricFormat = 'count' | 'money';
 export type MetricState = 'ready' | 'unavailable' | 'loading';
 

@@ -9,7 +9,7 @@ import {
   useResource, useTableSort, useToast, useUrlState, uuidParam,
   type ConfirmDetail, type DateRangeValue, type MobileDataListRow, type MobileDataListSortOption, type SortState,
 } from '../../_ui';
-import { useRealtimeSignal } from '../../_ui/realtime/RealtimeSignals';
+import { livePauseText, useRealtimeSignal, useRealtimeStatus } from '../../_ui/realtime/RealtimeSignals';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { BUSINESS_TZ_LABEL, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import { ApproveModal, type ApprovalRequest, type ExpectedCredit } from './ApproveModal';
@@ -20,7 +20,7 @@ import {
 } from './queueApi';
 import {
   DEFAULT_TAB, DecisionGate, PAGE_SIZE, QUEUE_TABS, REJECT_REASONS, SIGNAL_GAP_MS, cardDetail, cardName,
-  formatForeignAmount, refreshNote, statusText, toKobo, userHandle, type QueueRefresh, type QueueRow, type QueueTab,
+  formatForeignAmount, liveNote, statusText, toKobo, userHandle, type QueueRefresh, type QueueRow, type QueueTab,
   type Submission,
 } from './queueModel';
 import { useQueueList } from './useQueueList';
@@ -132,8 +132,9 @@ export function CardQueue() {
   const [gate] = useState(() => new DecisionGate());
 
   const page = paging.tab === tab ? paging.page : 1;
-  const { live } = useRealtimeSignal('cards', (signal) => refreshFor(gate.signal(signal)));
-  const list = useQueueList({ tab, search, from: range.from, to: range.to, page, sort }, deciding, live);
+  useRealtimeSignal('cards', (signal) => refreshFor(gate.signal(signal)));
+  const { live, pause } = useRealtimeStatus('cards');
+  const list = useQueueList({ tab, search, from: range.from, to: range.to, page, sort });
   const detail = useResource(
     openId ? `submission:${openId}` : null,
     (signal) => fetchSubmission(openId!, signal),
@@ -441,7 +442,7 @@ export function CardQueue() {
         actions={
           <>
             {loadedAt ? (
-              <span className={s.updated} title={refreshNote(live)}>
+              <span className={s.updated} title={liveNote(live)}>
                 Updated {formatBusinessTime(new Date(loadedAt))} {BUSINESS_TZ_LABEL}
               </span>
             ) : null}
@@ -457,6 +458,18 @@ export function CardQueue() {
           </>
         }
       />
+
+      {pause && !list.error ? (
+        <Notice
+          tone="warning"
+          compact
+          announce="polite"
+          meta={loadedAt ? `Showing results from ${formatBusinessTime(new Date(loadedAt))} ${BUSINESS_TZ_LABEL}.` : undefined}
+          actions={<Button variant="ghost" size="sm" loading={list.isRefreshing} onClick={retryList}>Refresh</Button>}
+        >
+          {livePauseText(pause)}
+        </Notice>
+      ) : null}
 
       <div className={s.tabs}>
         <Tabs<QueueTab>
