@@ -23,6 +23,10 @@ export interface ResourceRefreshOptions {
   background?: boolean;
 }
 
+export interface ResourceInvalidateOptions {
+  minGapMs?: number;
+}
+
 export interface ResourceSnapshot<T> {
   key: string | null;
   enabled: boolean;
@@ -46,6 +50,7 @@ export interface ResourceView<T> {
 export interface UseResourceResult<T> extends ResourceView<T> {
   refresh: (options?: ResourceRefreshOptions) => Promise<ApiResult<T> | null>;
   mutate: (next: ResourceUpdater<T>) => void;
+  invalidate: (options?: ResourceInvalidateOptions) => void;
 }
 
 export interface ResourceEnvironment {
@@ -60,6 +65,7 @@ interface InFlight<T> {
   reason: ResourceRequestReason;
   controller: AbortController;
   resolve: (result: ApiResult<T> | null) => void;
+  signals: number;
 }
 
 const REASON_WEIGHT: Readonly<Record<ResourceRequestReason, number>> = { background: 0, refresh: 1, load: 2 };
@@ -81,6 +87,10 @@ function emptySnapshot<T>(enabled: boolean): ResourceSnapshot<T> {
     pending: null,
     lastUpdatedAt: null,
   };
+}
+
+function positiveMs(ms: number | undefined): number {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0;
 }
 
 function isApiResult<T>(value: unknown): value is ApiResult<T> {
@@ -105,6 +115,11 @@ export class ResourceStore<T> {
   private active = false;
   private pollMs = 0;
   private settledAt = 0;
+  private signals = 0;
+  private coveredSignals = 0;
+  private signalGapMs = 0;
+  private signalLoadAt: number | null = null;
+  private signalTimer: { handle: unknown } | null = null;
 
   constructor(environment: Partial<ResourceEnvironment> = {}) {
     this.env = { ...DEFAULT_ENVIRONMENT, ...environment };
@@ -124,7 +139,7 @@ export class ResourceStore<T> {
   }
 
   setPollMs(ms: number): void {
-    const next = Number.isFinite(ms) && ms > 0 ? ms : 0;
+    const next = positiveMs(ms);
     if (next === this.pollMs) return;
     this.pollMs = next;
     this.schedule();
@@ -135,9 +150,13 @@ export class ResourceStore<T> {
     const current = this.snapshot;
     if (key !== current.key) {
       this.cancel();
+      this.dropSignals();
       this.commit(key === null ? emptySnapshot<T>(enabled) : { ...current, key, enabled, error: null, pending: null });
     } else if (enabled !== current.enabled) {
-      if (!enabled) this.cancel();
+      if (!enabled) {
+        this.cancel();
+        this.dropSignals();
+      }
       this.commit({ ...this.snapshot, enabled, pending: enabled ? this.snapshot.pending : null });
     }
     const next = this.snapshot;
@@ -146,11 +165,13 @@ export class ResourceStore<T> {
       return;
     }
     this.schedule();
+    this.flushSignals();
   }
 
   stop(): void {
     this.active = false;
     this.clearTimer();
+    this.clearSignalTimer();
     if (this.cancel()) this.commit({ ...this.snapshot, pending: null });
   }
 
@@ -158,6 +179,14 @@ export class ResourceStore<T> {
     const { key, enabled } = this.snapshot;
     if (!this.active || key === null || !enabled) return Promise.resolve(null);
     return this.load(options.background ? 'background' : 'refresh');
+  }
+
+  invalidate(options: ResourceInvalidateOptions = {}): void {
+    const { key, enabled, error } = this.snapshot;
+    if (!this.active || key === null || !enabled || isHalting(error)) return;
+    this.signals += 1;
+    this.signalGapMs = positiveMs(options.minGapMs);
+    this.flushSignals();
   }
 
   mutate(next: ResourceUpdater<T>): void {
@@ -180,10 +209,12 @@ export class ResourceStore<T> {
       lastUpdatedAt: current.dataKey === current.key && current.lastUpdatedAt !== null ? current.lastUpdatedAt : now,
     });
     this.schedule();
+    this.flushSignals();
   }
 
   visibilityChanged(): void {
     this.schedule();
+    this.flushSignals();
   }
 
   private load(reason: ResourceRequestReason): Promise<ApiResult<T> | null> {
@@ -196,12 +227,13 @@ export class ResourceStore<T> {
       : reason;
     this.cancel();
     this.clearTimer();
+    this.clearSignalTimer();
     const controller = new AbortController();
     let resolve: (result: ApiResult<T> | null) => void = () => {};
     const promise = new Promise<ApiResult<T> | null>((done) => {
       resolve = done;
     });
-    const request: InFlight<T> = { key, reason: effective, controller, resolve };
+    const request: InFlight<T> = { key, reason: effective, controller, resolve, signals: this.signals };
     this.inFlight = request;
     this.commit({ ...this.snapshot, pending: effective });
     let outcome: Promise<unknown>;
@@ -220,6 +252,7 @@ export class ResourceStore<T> {
   private settle(request: InFlight<T>, result: ApiResult<T>): void {
     if (this.inFlight !== request) return;
     this.inFlight = null;
+    this.coveredSignals = Math.max(this.coveredSignals, request.signals);
     this.settledAt = this.env.now();
     const current = this.snapshot;
     if (result.ok) {
@@ -238,6 +271,7 @@ export class ResourceStore<T> {
     }
     request.resolve(result);
     this.schedule();
+    this.flushSignals();
   }
 
   private cancel(): boolean {
@@ -274,6 +308,43 @@ export class ResourceStore<T> {
     const timer = this.timer;
     if (!timer) return;
     this.timer = null;
+    this.env.clearTimer(timer.handle);
+  }
+
+  private flushSignals(): void {
+    this.clearSignalTimer();
+    if (this.coveredSignals >= this.signals) return;
+    const { key, enabled, error } = this.snapshot;
+    if (key === null || !enabled || isHalting(error)) {
+      this.dropSignals();
+      return;
+    }
+    if (!this.active || this.inFlight !== null || this.env.isHidden()) return;
+    const now = this.env.now();
+    const wait = this.signalLoadAt === null ? 0 : this.signalLoadAt + this.signalGapMs - now;
+    if (wait <= 0) {
+      this.signalLoadAt = now;
+      void this.load('background');
+      return;
+    }
+    const timer: { handle: unknown } = { handle: null };
+    timer.handle = this.env.setTimer(() => {
+      if (this.signalTimer !== timer) return;
+      this.signalTimer = null;
+      this.flushSignals();
+    }, wait);
+    this.signalTimer = timer;
+  }
+
+  private dropSignals(): void {
+    this.coveredSignals = this.signals;
+    this.clearSignalTimer();
+  }
+
+  private clearSignalTimer(): void {
+    const timer = this.signalTimer;
+    if (!timer) return;
+    this.signalTimer = null;
     this.env.clearTimer(timer.handle);
   }
 
@@ -366,6 +437,7 @@ export function useResource<T>(
 
   const refresh = useCallback((options?: ResourceRefreshOptions) => store.refresh(options), [store]);
   const mutate = useCallback((next: ResourceUpdater<T>) => store.mutate(next), [store]);
+  const invalidate = useCallback((options?: ResourceInvalidateOptions) => store.invalidate(options), [store]);
 
-  return { ...resolveResourceView(snapshot, key, enabled, keepPreviousData), refresh, mutate };
+  return { ...resolveResourceView(snapshot, key, enabled, keepPreviousData), refresh, mutate, invalidate };
 }

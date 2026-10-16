@@ -11,14 +11,16 @@ import {
   uuidParam,
   type DateRangeValue, type ExportFiltersOption, type ExportRangeValue, type TableSkeletonColumn,
 } from '../../_ui';
+import { useRealtimeSignal } from '../../_ui/realtime/RealtimeSignals';
 import { apiRequest, type ApiFailure } from '../../lib/apiClient';
 import { isUuid } from '../../lib/http';
 import { describeExportWindow, printTable, resolveExportRange } from '../../lib/printExport';
 import { businessDateKey, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
   EMERGENCY_UNCHECKED, REJECT_REASONS, TABS, approvalRefusal, classifyDecision, feeOf, formatTab, grossOf,
-  isActionable, isFrozen, isOpenFlag, messageOf, netOf, parseTab, payoutProviderNote, providerLabel, sameTabFilter,
-  tabFilter, tabSpec, toActionResult, toDetail, toListResult, userHandle, userSummary,
+  invalidateOnSignal, isActionable, isFrozen, isOpenFlag, messageOf, netOf, parseTab, payoutProviderNote, pollFor,
+  providerLabel, sameTabFilter, subtitleFor, tabFilter, tabSpec, toActionResult, toDetail, toListResult, userHandle,
+  userSummary,
   type ApiEnvelope, type DetailResult, type ExportResponse, type SettledDecision, type Tab, type Withdrawal,
 } from './model';
 import {
@@ -27,12 +29,10 @@ import {
 import s from './page.module.css';
 
 const PAGE_SIZE = 50;
-const POLL_MS = 5000;
 const APPROVE_TIMEOUT_MS = 60000;
 const SETTLE_WAIT_MS = 3000;
 const ALL_TIME: DateRangeValue = { from: null, to: null };
 const DATE_PRESETS = ['today', '7d', '30d', 'month', 'all'] as const;
-const SUBTITLE = 'Payout queue across every status. Refreshes every 5 seconds; times are WAT.';
 const UNKNOWN_APPROVAL =
   'The approval was sent but no usable response came back. Check this withdrawal’s status before trying again; the payout may already be on its way.';
 const UNKNOWN_REJECTION =
@@ -116,7 +116,7 @@ function QueueFallback() {
   const canDecide = useCan(['withdrawals.approve', 'withdrawals.reject'], 'any');
   return (
     <div>
-      <PageHeader title="Withdrawals" subtitle={SUBTITLE} />
+      <PageHeader title="Withdrawals" subtitle={subtitleFor(false)} />
       <ResponsiveView
         desktop={
           <Card>
@@ -202,6 +202,8 @@ function WithdrawalsQueue() {
     return params.toString();
   }, [tab, query, range.from, range.to, sort, page]);
 
+  const { live } = useRealtimeSignal('withdrawals', (hint) => invalidateOnSignal(hint, openId, list, detail));
+
   const list = useResource(
     listQuery,
     (signal) => apiRequest('/api/withdrawals', {
@@ -209,7 +211,7 @@ function WithdrawalsQueue() {
       signal,
       select: toListResult,
     }),
-    { pollMs: POLL_MS, keepPreviousData: sameTabFilter },
+    { pollMs: pollFor(live), keepPreviousData: sameTabFilter },
   );
 
   const detail = useResource(
@@ -695,7 +697,7 @@ function WithdrawalsQueue() {
   if (denied) {
     return (
       <div>
-        <PageHeader title="Withdrawals" subtitle={SUBTITLE} />
+        <PageHeader title="Withdrawals" subtitle={subtitleFor(live)} />
         <AccessDenied required={['withdrawals.read']} />
       </div>
     );
@@ -838,7 +840,7 @@ function WithdrawalsQueue() {
     <div>
       <PageHeader
         title="Withdrawals"
-        subtitle={SUBTITLE}
+        subtitle={subtitleFor(live)}
         actions={
           canExport ? (
             <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={() => setExportOpen(true)}>

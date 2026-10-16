@@ -49,6 +49,7 @@ const RANGE_NOT_SATISFIABLE = 'PGRST103';
 const AVATAR_TTL_SECONDS = 3600;
 const REVIEW_STATES = ['pending_review', 'held'];
 const REASON_MAX = 500;
+const DELETION_FREEZE_REASON = 'Account deletion in progress';
 
 type Row = Record<string, unknown>;
 
@@ -334,6 +335,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const freezing = action === 'freeze';
   if (freezing && !reason) return fail('VALIDATION_ERROR', 'A reason is required to freeze an account.');
+  if (freezing && reason.toLowerCase() === DELETION_FREEZE_REASON.toLowerCase()) {
+    return fail('VALIDATION_ERROR', 'That reason is reserved. Use a different reason.');
+  }
   if (reason.length > REASON_MAX) {
     return fail('VALIDATION_ERROR', `The reason must be ${REASON_MAX} characters or fewer.`);
   }

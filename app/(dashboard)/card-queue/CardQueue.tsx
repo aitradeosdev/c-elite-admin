@@ -9,6 +9,7 @@ import {
   useResource, useTableSort, useToast, useUrlState, uuidParam,
   type ConfirmDetail, type DateRangeValue, type MobileDataListRow, type MobileDataListSortOption, type SortState,
 } from '../../_ui';
+import { useRealtimeSignal } from '../../_ui/realtime/RealtimeSignals';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { BUSINESS_TZ_LABEL, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import { ApproveModal, type ApprovalRequest, type ExpectedCredit } from './ApproveModal';
@@ -18,8 +19,9 @@ import {
   decisionFailureKind, fetchSubmission, postDecision, type DecisionRequest, type DecisionResult, type QueueListResult,
 } from './queueApi';
 import {
-  DEFAULT_TAB, PAGE_SIZE, QUEUE_TABS, REJECT_REASONS, cardDetail, cardName, formatForeignAmount, statusText, toKobo,
-  userHandle, type QueueRow, type QueueTab, type Submission,
+  DEFAULT_TAB, DecisionGate, PAGE_SIZE, QUEUE_TABS, REJECT_REASONS, SIGNAL_GAP_MS, cardDetail, cardName,
+  formatForeignAmount, refreshNote, statusText, toKobo, userHandle, type QueueRefresh, type QueueRow, type QueueTab,
+  type Submission,
 } from './queueModel';
 import { useQueueList } from './useQueueList';
 import s from './page.module.css';
@@ -35,6 +37,8 @@ const EMPTY_COPY: Readonly<Record<QueueTab, { title: string; hint: string }>> = 
 const DATE_PRESETS = ['today', '7d', '30d', 'all'] as const;
 
 const BUSY_MESSAGE = 'Another decision is still being recorded. Wait for it to finish, then try again.';
+
+const SIGNAL_REFRESH = { minGapMs: SIGNAL_GAP_MS };
 
 const QUEUE_TABS_ID = 'card-queue-status';
 
@@ -125,10 +129,11 @@ export function CardQueue() {
   }
   const panelRef = useRef<HTMLDivElement>(null);
   const warnedId = useRef<string | null>(null);
-  const decidingRef = useRef(false);
+  const [gate] = useState(() => new DecisionGate());
 
   const page = paging.tab === tab ? paging.page : 1;
-  const list = useQueueList({ tab, search, from: range.from, to: range.to, page, sort }, deciding);
+  const { live } = useRealtimeSignal('cards', (signal) => refreshFor(gate.signal(signal)));
+  const list = useQueueList({ tab, search, from: range.from, to: range.to, page, sort }, deciding, live);
   const detail = useResource(
     openId ? `submission:${openId}` : null,
     (signal) => fetchSubmission(openId!, signal),
@@ -137,6 +142,8 @@ export function CardQueue() {
   if (list.data && list.data !== lastList?.data) setLastList({ data: list.data, at: list.lastUpdatedAt });
   const refreshList = list.refresh;
   const refreshDetail = detail.refresh;
+  const invalidateList = list.invalidate;
+  const invalidateDetail = detail.invalidate;
   const rows = list.data?.rows ?? null;
   const total = list.data?.total ?? 0;
   const counts = (list.data ?? lastList?.data)?.counts ?? null;
@@ -147,6 +154,15 @@ export function CardQueue() {
 
   const setPage = useCallback((next: number) => setPaging({ tab, page: next }), [tab]);
   const focusList = useCallback(() => panelRef.current, []);
+
+  const refreshFor = useCallback((refresh: QueueRefresh) => {
+    if (refresh.list) invalidateList(SIGNAL_REFRESH);
+    if (refresh.detail) invalidateDetail(SIGNAL_REFRESH);
+  }, [invalidateDetail, invalidateList]);
+
+  useEffect(() => {
+    gate.setOpenId(openId);
+  }, [gate, openId]);
 
   useEffect(() => {
     const params = new URLSearchParams(observedQuery);
@@ -250,13 +266,23 @@ export function CardQueue() {
     if (result.warning) notify(result.warning, 'warning');
   }, [notify]);
 
-  const runDecision = useCallback(async (target: QueueRow, request: DecisionRequest): Promise<DecisionOutcome> => {
-    if (decidingRef.current) throw new Error(BUSY_MESSAGE);
-    decidingRef.current = true;
+  const beginDecision = useCallback((): boolean => {
+    if (!gate.begin()) return false;
     setDeciding(true);
+    return true;
+  }, [gate]);
+
+  const endDecision = useCallback(() => {
+    setDeciding(false);
+    refreshFor(gate.end());
+  }, [gate, refreshFor]);
+
+  const runDecision = useCallback(async (target: QueueRow, request: DecisionRequest): Promise<DecisionOutcome> => {
+    if (!beginDecision()) throw new Error(BUSY_MESSAGE);
     try {
       const result = await postDecision({ ...request, submission_id: target.id });
       if (result.ok) {
+        gate.settle(target.id);
         announce(target, request, result.data);
         await refreshList();
         return { kind: 'recorded' };
@@ -264,13 +290,15 @@ export function CardQueue() {
       const kind = decisionFailureKind(result.error);
       if (kind === 'refused') throw new Error(result.error.message);
       if (kind === 'signedOut') return { kind };
-      if (kind === 'changed') await Promise.all([refreshList(), refreshDetail()]);
+      if (kind === 'changed') {
+        gate.settle(target.id);
+        await Promise.all([refreshList(), refreshDetail()]);
+      }
       return { kind, message: result.error.message };
     } finally {
-      decidingRef.current = false;
-      setDeciding(false);
+      endDecision();
     }
-  }, [announce, refreshDetail, refreshList]);
+  }, [announce, beginDecision, endDecision, gate, refreshDetail, refreshList]);
 
   const finishDecision = useCallback((target: QueueRow, outcome: DecisionOutcome | undefined) => {
     if (!outcome || outcome.kind === 'signedOut') return;
@@ -329,12 +357,11 @@ export function CardQueue() {
   }, [confirm, finishDecision, focusList, runDecision]);
 
   const decide = useCallback(async (target: Submission, request: DecisionRequest, expected: ExpectedCredit) => {
-    if (decidingRef.current) return;
-    decidingRef.current = true;
-    setDeciding(true);
+    if (!beginDecision()) return;
     try {
       const result = await postDecision({ ...request, submission_id: target.id });
       if (result.ok) {
+        gate.settle(target.id);
         announce(target, request, result.data, expected);
         await refreshList();
         closeDecided(target.id);
@@ -347,15 +374,15 @@ export function CardQueue() {
         setApproval(null);
         router.refresh();
       } else if (kind === 'changed') {
+        gate.settle(target.id);
         setApproval(null);
         void refreshDetail();
         void refreshList();
       }
     } finally {
-      decidingRef.current = false;
-      setDeciding(false);
+      endDecision();
     }
-  }, [announce, closeDecided, notify, refreshDetail, refreshList, router]);
+  }, [announce, beginDecision, closeDecided, endDecision, gate, notify, refreshDetail, refreshList, router]);
 
   const approveFromRow = useCallback((row: QueueRow) => {
     setApproval(null);
@@ -414,7 +441,7 @@ export function CardQueue() {
         actions={
           <>
             {loadedAt ? (
-              <span className={s.updated} title="Refreshes automatically every 30 seconds">
+              <span className={s.updated} title={refreshNote(live)}>
                 Updated {formatBusinessTime(new Date(loadedAt))} {BUSINESS_TZ_LABEL}
               </span>
             ) : null}

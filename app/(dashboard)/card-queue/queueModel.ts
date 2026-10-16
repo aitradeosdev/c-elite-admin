@@ -1,4 +1,5 @@
 import type { SortState, TableSkeletonColumn } from '../../_ui';
+import type { RealtimeSignal } from '../../_ui/realtime/RealtimeSignals';
 
 export type QueueTab = 'pending' | 'disputed' | 'approved' | 'rejected' | 'all';
 
@@ -14,7 +15,20 @@ export const QUEUE_TABS: ReadonlyArray<{ value: QueueTab; label: string }> = [
 
 export const PAGE_SIZE = 50;
 
-export const POLL_MS = 30000;
+export const LIVE_POLL_MS = 120000;
+
+export const FALLBACK_POLL_MS = 30000;
+
+export const SIGNAL_GAP_MS = 2000;
+
+export function pollFor(live: boolean, paused = false): number {
+  if (paused) return 0;
+  return live ? LIVE_POLL_MS : FALLBACK_POLL_MS;
+}
+
+export function refreshNote(live: boolean): string {
+  return live ? 'Updates live' : `Refreshes automatically every ${FALLBACK_POLL_MS / 1000} seconds`;
+}
 
 export interface QueueQuery {
   tab: QueueTab;
@@ -42,6 +56,54 @@ export function queueParams(query: QueueQuery): string {
 
 export function sameQueueTab(previousKey: string, nextKey: string): boolean {
   return new URLSearchParams(previousKey).get('status') === new URLSearchParams(nextKey).get('status');
+}
+
+export interface QueueRefresh {
+  readonly list: boolean;
+  readonly detail: boolean;
+}
+
+export class DecisionGate {
+  private openId: string | null = null;
+  private deciding = false;
+  private stale = false;
+  private settledId: string | null = null;
+  private readonly changedIds = new Set<string>();
+
+  setOpenId(id: string | null): void {
+    this.openId = id?.toLowerCase() ?? null;
+  }
+
+  begin(): boolean {
+    if (this.deciding) return false;
+    this.deciding = true;
+    return true;
+  }
+
+  signal(signal: RealtimeSignal): QueueRefresh {
+    const id = signal.kind === 'signal' ? signal.id.toLowerCase() : null;
+    if (!this.deciding) return { list: true, detail: id !== null && id === this.openId };
+    this.stale = true;
+    if (id !== null) this.changedIds.add(id);
+    return { list: false, detail: false };
+  }
+
+  settle(id: string): void {
+    if (this.deciding) this.settledId = id.toLowerCase();
+  }
+
+  end(): QueueRefresh {
+    const openId = this.openId;
+    const refresh: QueueRefresh = {
+      list: this.stale,
+      detail: openId !== null && openId !== this.settledId && this.changedIds.has(openId),
+    };
+    this.deciding = false;
+    this.stale = false;
+    this.settledId = null;
+    this.changedIds.clear();
+    return refresh;
+  }
 }
 
 export const QUEUE_SKELETON_COLUMNS: ReadonlyArray<TableSkeletonColumn> = [

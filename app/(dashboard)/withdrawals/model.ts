@@ -1,4 +1,6 @@
 import type { ApiBody, ApiResult } from '../../lib/apiClient';
+import type { UseResourceResult } from '../../_ui';
+import type { RealtimeSignal } from '../../_ui/realtime/RealtimeSignals';
 
 export type Tab = 'pending_review' | 'processing' | 'success' | 'failed' | 'all';
 
@@ -65,6 +67,16 @@ export const REJECT_REASONS = [
   'Duplicate withdrawal',
   'Gateway unavailable',
 ];
+
+export const LIVE_POLL_MS = 60000;
+
+export const FALLBACK_POLL_MS = 5000;
+
+export const SIGNAL_GAP_MS = 1000;
+
+const SUBTITLE_LEAD = 'Payout queue across every status.';
+
+export type SignalTarget = Pick<UseResourceResult<unknown>, 'invalidate'>;
 
 const ACTIONABLE = new Set(REVIEW_STATUSES);
 const OPEN_FLAG = new Set(['pending_review', 'escalated']);
@@ -231,6 +243,33 @@ export function sameTabFilter(previousKey: string, nextKey: string): boolean {
   const previous = new URLSearchParams(previousKey);
   const next = new URLSearchParams(nextKey);
   return FILTER_KEYS.every((key) => previous.get(key) === next.get(key));
+}
+
+export function pollFor(live: boolean): number {
+  return live ? LIVE_POLL_MS : FALLBACK_POLL_MS;
+}
+
+export function subtitleFor(live: boolean): string {
+  return live
+    ? `${SUBTITLE_LEAD} Updates live; times are WAT.`
+    : `${SUBTITLE_LEAD} Refreshes every ${FALLBACK_POLL_MS / 1000} seconds; times are WAT.`;
+}
+
+export function signalReachesDetail(signal: RealtimeSignal, openId: string | null): boolean {
+  if (!openId) return false;
+  if (signal.kind === 'resync') return true;
+  const open = openId.toLowerCase();
+  return signal.id.toLowerCase() === open || signal.withdrawalId?.toLowerCase() === open;
+}
+
+export function invalidateOnSignal(
+  signal: RealtimeSignal,
+  openId: string | null,
+  list: SignalTarget,
+  detail: SignalTarget,
+): void {
+  list.invalidate({ minGapMs: SIGNAL_GAP_MS });
+  if (signalReachesDetail(signal, openId)) detail.invalidate({ minGapMs: SIGNAL_GAP_MS });
 }
 
 export function isActionable(status: string | null | undefined): boolean {

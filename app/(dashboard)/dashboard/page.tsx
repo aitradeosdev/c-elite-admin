@@ -2,6 +2,7 @@ import { LayoutDashboard } from 'lucide-react';
 import { verifyAdminFromRequest } from '../../lib/jwt';
 import { resolveAdminPermissions } from '../../lib/permissions';
 import { getDashboardData, type RecentSubmission } from '../../lib/dashboard';
+import { realtimeTopicKeys } from '../../lib/realtimePass';
 import { BUSINESS_TZ_LABEL, formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import { Card, EmptyState, PageHeader, StatStrip } from '../../_ui';
 import AutoRefresh from './AutoRefresh';
@@ -43,10 +44,11 @@ export default async function DashboardPage() {
     .filter((entry) => entry.cells.length > 0);
   const canSeeCards = permissions.has('cards.read');
   const hasMetrics = actionTiles.length > 0 || strips.length > 0;
+  const topics = realtimeTopicKeys((permission) => permissions.has(permission));
 
   return (
     <div className={s.page}>
-      <AutoRefresh intervalMs={REFRESH_INTERVAL_MS} />
+      <AutoRefresh intervalMs={REFRESH_INTERVAL_MS} topics={topics} generatedAt={data.generated_at} />
 
       <PageHeader
         title="Overview"

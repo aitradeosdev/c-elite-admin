@@ -21,6 +21,7 @@ import { CommandPalette, KeyboardShortcutsDialog, type PaletteCommand, type Pale
 import { findPageSearchInput, paletteChordHint, useApplePlatform, useHotkeys } from '../../_ui/useHotkeys';
 import { useFocusTrap } from '../../_ui/useFocusTrap';
 import { popOverlay, pushOverlay } from '../../_ui/overlayStack';
+import { RealtimeSignalsProvider } from '../../_ui/realtime/RealtimeSignals';
 import type { Permission } from '../../lib/permissions';
 import { PROFILE_HREF, PROFILE_LABEL, ProfileLink, profileLinkLabel } from '../profile/ProfileLink';
 import { NO_SECURITY_PROMPT, type ShellSecurity } from '../profile/securityModel';
@@ -261,7 +262,9 @@ export function Shell(props: ShellProps) {
     <PermissionsProvider permissions={props.permissions} isSuperAdmin={props.isSuperAdmin}>
       <ToastProvider>
         <ConfirmProvider>
-          <ShellFrame {...props} />
+          <RealtimeSignalsProvider>
+            <ShellFrame {...props} />
+          </RealtimeSignalsProvider>
         </ConfirmProvider>
         <SessionExpiredHandler />
       </ToastProvider>

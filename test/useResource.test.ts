@@ -1,10 +1,11 @@
 import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { loadUi, render } from './support/uiHarness.ts';
 import type { ApiFailureKind, ApiResult } from '../app/lib/apiClient.ts';
 import type {
-  KeepPreviousData, ResourceEnvironment, ResourceFetcher, ResourceStore, ResourceView,
+  KeepPreviousData, ResourceEnvironment, ResourceFetcher, ResourceInvalidateOptions, ResourceStore, ResourceView,
 } from '../app/_ui/useResource.ts';
 
 type ResourceModule = typeof import('../app/_ui/useResource.ts');
@@ -81,6 +82,13 @@ function failed(status: number | null, kind: ApiFailureKind = 'http'): ApiResult
 function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
+
+function answer<T>(calls: Call<T>[], data: T): Promise<void> {
+  for (const call of calls) call.resolve(ok(data));
+  return flush();
+}
+
+const GAP: ResourceInvalidateOptions = { minGapMs: 1000 };
 
 function setup<T>(pollMs = 0): { clock: Clock; calls: Call<T>[]; store: ResourceStore<T> } {
   const clock = createClock();
@@ -749,5 +757,499 @@ describe('useResource (server render)', () => {
 
   test('a null key renders idle', () => {
     assert.equal(probe(null, async () => ok('x')), '<output>idle|false|none</output>');
+  });
+});
+
+describe('invalidate: coalescing', () => {
+  test('a signal reloads a settled key once in the background, with no spinner', async () => {
+    const { calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    assert.equal(calls.length, 2);
+    assert.equal(store.getSnapshot().pending, 'background');
+    const during = view(store, 'k1');
+    assert.equal(during.status, 'success');
+    assert.equal(during.isRefreshing, false);
+    assert.equal(during.data, 'a');
+    await answer(calls, 'b');
+    assert.equal(view(store, 'k1').data, 'b');
+    assert.equal(store.getSnapshot().pending, null);
+  });
+
+  test('ten signals in 100 ms give at most two loads, and the last signal is never lost', async () => {
+    for (const quick of [true, false]) {
+      const { clock, calls, store } = setup<string>();
+      store.start('k1', true);
+      await answer(calls, 'a');
+      for (let index = 0; index < 10; index += 1) {
+        store.invalidate(GAP);
+        if (quick) await answer(calls, 'b');
+        clock.advance(10);
+      }
+      await answer(calls, 'c');
+      clock.advance(2000);
+      await answer(calls, 'd');
+      clock.advance(60000);
+      const label = quick ? 'quick responses' : 'one slow response';
+      assert.equal(calls.length, 3, label);
+      assert.equal(view(store, 'k1').data, 'd', label);
+    }
+  });
+
+  test('a request in flight is never aborted by a signal and gets exactly one follow-up', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    store.invalidate(GAP);
+    store.invalidate(GAP);
+    store.invalidate(GAP);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].signal.aborted, false);
+    assert.equal(store.getSnapshot().pending, 'load');
+    assert.equal(clock.timers(), 0);
+    await answer(calls, 'a');
+    assert.equal(calls.length, 2);
+    assert.equal(store.getSnapshot().pending, 'background');
+    await answer(calls, 'b');
+    clock.advance(60000);
+    assert.equal(calls.length, 2);
+    assert.equal(view(store, 'k1').data, 'b');
+  });
+
+  test('a signal during a poll is answered by one more load once the poll lands', async () => {
+    const { clock, calls, store } = setup<string>(5000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    clock.advance(5000);
+    assert.equal(calls.length, 2);
+    store.invalidate(GAP);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].signal.aborted, false);
+    await answer(calls, 'b');
+    assert.equal(calls.length, 3);
+    await answer(calls, 'c');
+    clock.advance(4999);
+    assert.equal(calls.length, 3);
+    clock.advance(1);
+    assert.equal(calls.length, 4);
+  });
+
+  test('a manual refresh covers signals waiting on the gap', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    await answer(calls, 'b');
+    store.invalidate(GAP);
+    assert.equal(clock.timers(), 1);
+    void store.refresh();
+    assert.equal(calls.length, 3);
+    assert.equal(clock.timers(), 0);
+    await answer(calls, 'c');
+    clock.advance(60000);
+    assert.equal(calls.length, 3);
+  });
+
+  test('mutate keeps a signal whose load it cancelled, and reloads after the gap', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    store.mutate('local');
+    assert.equal(calls[1].signal.aborted, true);
+    assert.equal(view(store, 'k1').data, 'local');
+    assert.equal(clock.timers(), 1);
+    clock.advance(999);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+    await answer(calls, 'server');
+    assert.equal(view(store, 'k1').data, 'server');
+  });
+});
+
+describe('invalidate: minimum gap', () => {
+  test('signal loads start at least minGapMs apart, the trailing one on its own timer', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    assert.equal(calls.length, 2);
+    clock.advance(300);
+    await answer(calls, 'b');
+    store.invalidate(GAP);
+    assert.equal(calls.length, 2);
+    assert.equal(clock.timers(), 1);
+    clock.advance(699);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+    assert.equal(store.getSnapshot().pending, 'background');
+  });
+
+  test('the follow-up to a signal load still in flight also waits out the gap', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    clock.advance(200);
+    store.invalidate(GAP);
+    clock.advance(100);
+    await answer(calls, 'b');
+    assert.equal(calls.length, 2);
+    assert.equal(clock.timers(), 1);
+    clock.advance(699);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+  });
+
+  test('with no gap, or a gap that is not a positive number, a signal after a landed load reloads at once', async () => {
+    const { calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    const gaps: [string, ResourceInvalidateOptions | undefined][] = [
+      ['omitted', undefined], ['empty', {}], ['zero', { minGapMs: 0 }], ['negative', { minGapMs: -5 }],
+      ['not a number', { minGapMs: Number.NaN }],
+    ];
+    let expected = 1;
+    for (const [label, options] of gaps) {
+      store.invalidate(options);
+      expected += 1;
+      assert.equal(calls.length, expected, label);
+      await answer(calls, label);
+    }
+  });
+});
+
+describe('invalidate: hidden pages', () => {
+  test('a signal while hidden waits for the page to be shown, then loads once', async () => {
+    const { clock, calls, store } = setup<string>(5000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    clock.hidden = true;
+    store.visibilityChanged();
+    store.invalidate(GAP);
+    store.invalidate(GAP);
+    assert.equal(calls.length, 1);
+    assert.equal(clock.timers(), 0);
+    clock.advance(60000);
+    assert.equal(calls.length, 1);
+    clock.hidden = false;
+    store.visibilityChanged();
+    assert.equal(calls.length, 2);
+    clock.advance(0);
+    assert.equal(calls.length, 2);
+    await answer(calls, 'b');
+    assert.equal(view(store, 'k1').data, 'b');
+    assert.equal(clock.timers(), 1);
+  });
+
+  test('a trailing signal load is held while hidden, and showing the page waits only what is left of the gap', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    await answer(calls, 'b');
+    clock.advance(100);
+    store.invalidate(GAP);
+    assert.equal(clock.timers(), 1);
+    clock.hidden = true;
+    store.visibilityChanged();
+    assert.equal(clock.timers(), 0);
+    clock.advance(200);
+    clock.hidden = false;
+    store.visibilityChanged();
+    assert.equal(calls.length, 2);
+    clock.advance(699);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+  });
+
+  test('a signal timer that fires while the page is hidden waits for it to be shown', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    await answer(calls, 'b');
+    store.invalidate(GAP);
+    clock.hidden = true;
+    clock.advance(5000);
+    assert.equal(calls.length, 2);
+    assert.equal(clock.timers(), 0);
+    clock.hidden = false;
+    store.visibilityChanged();
+    assert.equal(calls.length, 3);
+  });
+
+  test('a follow-up that falls due while hidden waits for the page to be shown', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    store.invalidate(GAP);
+    clock.hidden = true;
+    store.visibilityChanged();
+    await answer(calls, 'a');
+    assert.equal(calls.length, 1);
+    assert.equal(clock.timers(), 0);
+    clock.hidden = false;
+    store.visibilityChanged();
+    assert.equal(calls.length, 2);
+  });
+});
+
+describe('invalidate: halts and resets', () => {
+  test('after a 401 or 403 a signal does nothing until a request succeeds again', async () => {
+    for (const status of [401, 403]) {
+      const { clock, calls, store } = setup<string>(5000);
+      store.start('k1', true);
+      await answer(calls, 'a');
+      void store.refresh();
+      calls[1].resolve(failed(status));
+      await flush();
+      store.invalidate(GAP);
+      assert.equal(calls.length, 2, `status ${status}`);
+      assert.equal(clock.timers(), 0, `status ${status}`);
+      clock.advance(60000);
+      assert.equal(calls.length, 2, `status ${status}`);
+      const retry = store.refresh();
+      calls[2].resolve(ok('b'));
+      await retry;
+      store.invalidate(GAP);
+      assert.equal(calls.length, 4, `status ${status}`);
+    }
+  });
+
+  test('a signal that arrived during a request answered 401 or 403 is dropped, never retried', async () => {
+    for (const status of [401, 403]) {
+      const { clock, calls, store } = setup<string>();
+      store.start('k1', true);
+      await answer(calls, 'a');
+      void store.refresh({ background: true });
+      store.invalidate(GAP);
+      calls[1].resolve(failed(status));
+      await flush();
+      assert.equal(calls.length, 2, `status ${status}`);
+      assert.equal(clock.timers(), 0, `status ${status}`);
+      const retry = store.refresh();
+      calls[2].resolve(ok('b'));
+      await retry;
+      clock.advance(60000);
+      assert.equal(calls.length, 3, `status ${status}`);
+    }
+  });
+
+  test('a signal load that fails is not retried by the signal path, and the poll keeps its cadence', async () => {
+    const { clock, calls, store } = setup<string>(60000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    calls[1].resolve(failed(503));
+    await flush();
+    assert.equal(view(store, 'k1').status, 'error');
+    assert.equal(view(store, 'k1').data, 'a');
+    assert.equal(clock.timers(), 1);
+    clock.advance(59999);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+  });
+
+  test('changing the key drops signals still waiting, and their timer', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    store.invalidate(GAP);
+    changeKey(store, 'k2');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].signal.aborted, true);
+    await answer(calls, 'b');
+    clock.advance(60000);
+    assert.equal(calls.length, 2);
+    store.invalidate(GAP);
+    await answer(calls, 'c');
+    store.invalidate(GAP);
+    assert.equal(clock.timers(), 1);
+    changeKey(store, 'k3');
+    assert.equal(calls.length, 4);
+    assert.equal(clock.timers(), 0);
+    await answer(calls, 'd');
+    clock.advance(60000);
+    assert.equal(calls.length, 4);
+    assert.equal(view(store, 'k3').data, 'd');
+  });
+
+  test('a key change clears pending signals even when it returns to a key whose data is still held', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    assert.equal(calls.length, 2);
+    changeKey(store, 'k2');
+    changeKey(store, 'k1');
+    assert.equal(calls.length, 3);
+    assert.equal(calls[1].signal.aborted, true);
+    assert.equal(calls[2].signal.aborted, true);
+    assert.equal(view(store, 'k1').data, 'a');
+    assert.equal(clock.timers(), 0);
+    clock.advance(60000);
+    assert.equal(calls.length, 3);
+  });
+
+  test('disabling drops signals still waiting', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    await answer(calls, 'b');
+    store.invalidate(GAP);
+    assert.equal(clock.timers(), 1);
+    changeKey(store, 'k1', false);
+    assert.equal(clock.timers(), 0);
+    changeKey(store, 'k1', true);
+    clock.advance(60000);
+    assert.equal(calls.length, 2);
+  });
+
+  test('a store that is not started, has no key, is disabled or is stopped ignores signals', async () => {
+    const idle = setup<string>();
+    idle.store.invalidate(GAP);
+    assert.equal(idle.calls.length, 0);
+    assert.equal(idle.clock.timers(), 0);
+
+    const keyless = setup<string>();
+    keyless.store.start(null, true);
+    keyless.store.invalidate(GAP);
+    assert.equal(keyless.calls.length, 0);
+    assert.equal(keyless.clock.timers(), 0);
+
+    const disabled = setup<string>();
+    disabled.store.start('k1', false);
+    disabled.store.invalidate(GAP);
+    assert.equal(disabled.calls.length, 0);
+    changeKey(disabled.store, 'k1', true);
+    await answer(disabled.calls, 'a');
+    assert.equal(disabled.calls.length, 1);
+
+    const stopped = setup<string>();
+    stopped.store.start('k1', true);
+    await answer(stopped.calls, 'a');
+    stopped.store.stop();
+    stopped.store.invalidate(GAP);
+    assert.equal(stopped.calls.length, 1);
+    assert.equal(stopped.clock.timers(), 0);
+    stopped.store.start('k1', true);
+    assert.equal(stopped.calls.length, 1);
+  });
+
+  test('stopping clears the signal timer, and starting the same key again picks the signal back up', async () => {
+    const { clock, calls, store } = setup<string>();
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.invalidate(GAP);
+    await answer(calls, 'b');
+    store.invalidate(GAP);
+    assert.equal(clock.timers(), 1);
+    store.stop();
+    assert.equal(clock.timers(), 0);
+    clock.advance(5000);
+    assert.equal(calls.length, 2);
+    store.start('k1', true);
+    assert.equal(calls.length, 3);
+    assert.equal(store.getSnapshot().pending, 'background');
+  });
+});
+
+describe('invalidate: the safety poll', () => {
+  test('a signal load pushes the safety poll back to a full interval from when it lands', async () => {
+    const { clock, calls, store } = setup<string>(60000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    clock.advance(30000);
+    store.invalidate(GAP);
+    assert.equal(calls.length, 2);
+    clock.advance(500);
+    await answer(calls, 'b');
+    clock.advance(59999);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+    assert.equal(store.getSnapshot().pending, 'background');
+  });
+
+  test('a trailing signal load leaves the poll timer alone and is covered by a poll that runs first', async () => {
+    const { clock, calls, store } = setup<string>(5000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    const wide: ResourceInvalidateOptions = { minGapMs: 10000 };
+    store.invalidate(wide);
+    await answer(calls, 'b');
+    store.invalidate(wide);
+    assert.equal(clock.timers(), 2);
+    clock.advance(4999);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+    assert.equal(clock.timers(), 0);
+    await answer(calls, 'c');
+    assert.equal(clock.timers(), 1);
+    clock.advance(4999);
+    assert.equal(calls.length, 3);
+  });
+
+  test('switching between the live safety interval and the fallback interval measures from the last response', async () => {
+    const { clock, calls, store } = setup<string>(5000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    store.setPollMs(60000);
+    clock.advance(30000);
+    assert.equal(calls.length, 1);
+    store.setPollMs(5000);
+    clock.advance(0);
+    assert.equal(calls.length, 2);
+    await answer(calls, 'b');
+    store.setPollMs(60000);
+    clock.advance(59999);
+    assert.equal(calls.length, 2);
+    clock.advance(1);
+    assert.equal(calls.length, 3);
+  });
+
+  test('without signals the poll runs exactly as before', async () => {
+    const { clock, calls, store } = setup<string>(5000);
+    store.start('k1', true);
+    await answer(calls, 'a');
+    for (let round = 1; round <= 3; round += 1) {
+      assert.equal(clock.timers(), 1);
+      clock.advance(4999);
+      assert.equal(calls.length, round);
+      clock.advance(1);
+      assert.equal(calls.length, round + 1);
+      assert.equal(clock.timers(), 0);
+      await answer(calls, `p${round}`);
+    }
+  });
+});
+
+describe('useResource invalidate (server render)', () => {
+  test('the hook returns invalidate, and a signal during a server render never fetches', () => {
+    let called = 0;
+    function Probe() {
+      const resource = mod.useResource<string>('k1', async () => {
+        called += 1;
+        return ok('x');
+      }, { pollMs: 1000 });
+      resource.invalidate(GAP);
+      return createElement('output', null, `${typeof resource.invalidate}|${resource.status}`);
+    }
+    assert.equal(render(createElement(Probe)), '<output>function|loading</output>');
+    assert.equal(called, 0);
+  });
+});
+
+describe('house rules', () => {
+  test('the module and this test carry no prose comments', () => {
+    for (const url of [new URL('../app/_ui/useResource.ts', import.meta.url), new URL(import.meta.url)]) {
+      assert.doesNotMatch(readFileSync(url, 'utf8'), /\/\*|(^|[^:])\/\/(?!\/)/m, url.pathname);
+    }
   });
 });
