@@ -1298,20 +1298,15 @@ describe('rendered access section', () => {
     base: { role_id: null, direct_permissions: ['withdrawals'], page_permissions: ['withdrawals'] },
     draft: { roleId: null, direct: ['withdrawals'], folded: [] },
     onRole: noop,
-    onDirect: noop,
     onReview: noop,
     ...props,
   }));
+  const checkboxes = (html: string) => tagsOf(html, 'input').filter((input) => input.type === 'checkbox');
   const optionsOf = (html: string) => [...html.matchAll(/<option\b([^>]*)>([^<]*)<\/option>/g)].map((match) => ({
     value: tagsOf(`<option${match[1]}>`, 'option')[0].value,
     label: match[2],
     selected: 'selected' in tagsOf(`<option${match[1]}>`, 'option')[0],
   }));
-  const boxFor = (html: string, key: string) => {
-    const found = tagsOf(html, 'input').filter((input) => input.value === key);
-    assert.equal(found.length, 1, key);
-    return found[0];
-  };
 
   test('offers No role and the active roles, and Review access waits for a change', () => {
     const html = section();
@@ -1326,30 +1321,26 @@ describe('rendered access section', () => {
     assert.equal(optionsOf(changed).find((option) => option.selected)?.value, ROLE_ID);
     const ready = buttonByText(changed, 'Review access');
     assert.ok(ready && !('disabled' in ready));
-    assert.match(textOf(changed), /Actions on top of the role Manager\./);
+    assert.equal(checkboxes(changed).length, 0);
   });
 
-  test('the role’s actions are ticked and locked as From role, while direct grants stay editable', () => {
+  test('the Access step shows only the role picker: permissions are shown and edited on the Roles page', () => {
     const html = section({ draft: { roleId: ROLE_ID, direct: ['coupons'], folded: [] } });
-    const approve = boxFor(html, 'withdrawals.approve');
-    assert.ok('checked' in approve && 'disabled' in approve);
-    assert.match(textOf(html), /From role Manager/);
-    const coupons = boxFor(html, 'coupons.write');
-    assert.ok('checked' in coupons && !('disabled' in coupons));
-    const rates = boxFor(html, 'rates.write');
-    assert.ok(!('checked' in rates) && !('disabled' in rates));
+    const text = textOf(html);
+    assert.equal(checkboxes(html).length, 0);
+    assert.doesNotMatch(text, /From role|Additional access|Not in use yet|Super administrators only/);
+    assert.match(text, /The Roles page shows and edits them\./);
   });
 
-  test('stored keys the matrix cannot show are listed for removal, and a notice is shown above them', () => {
+  test('a change made elsewhere is announced above the role picker', () => {
     const html = section({
       base: { role_id: null, direct_permissions: ['coupons', 'giftbox'], page_permissions: ['coupons', 'giftbox'] },
       draft: { roleId: null, direct: ['coupons', 'giftbox'], folded: [] },
       notice: model.ACCESS_CHANGED_ELSEWHERE,
     });
     const text = textOf(html);
-    assert.match(text, /Other stored keys/);
     assert.match(text, /Another admin changed this account’s access while you were editing/);
-    assert.ok('checked' in boxFor(html, 'giftbox'));
+    assert.doesNotMatch(text, /Other stored keys/);
   });
 
   test('creating has no Review access button, and the roles list has its loading and error states', () => {
@@ -1362,12 +1353,10 @@ describe('rendered access section', () => {
     assert.equal(tagsOf(failed, 'select').length, 0);
   });
 
-  test('while a save runs, the role picker and the matrix are frozen', () => {
+  test('while a save runs, the role picker is frozen', () => {
     const html = section({ disabled: true, draft: { roleId: ROLE_ID, direct: [], folded: [] } });
     assert.ok('disabled' in tagsOf(html, 'select')[0]);
-    const boxes = tagsOf(html, 'input').filter((input) => input.type === 'checkbox');
-    assert.ok(boxes.length > 0);
-    assert.ok(boxes.every((input) => 'disabled' in input));
+    assert.equal(checkboxes(html).length, 0);
   });
 });
 
@@ -1865,7 +1854,7 @@ describe('the Access step wiring', () => {
     assert.match(source('page.tsx'), /import \{ AccessCell \} from '\.\.\/_access';/);
     assert.match(source('AdminDetails.tsx'), /import \{ ActionBreakdown, GrantList \} from '\.\.\/_access';/);
     assert.match(source('confirmOptions.tsx'), /import \{ Change, GrantDiff \} from '\.\.\/_access';/);
-    assert.match(source('AdminEditor.tsx'), /import \{ PermissionMatrix \} from '\.\.\/_access';/);
+    assert.doesNotMatch(source('AdminEditor.tsx'), /from '\.\.\/_access'/);
   });
 
   test('account saves go to /api/admin-accounts with no access fields, and access goes to its own route', () => {
@@ -1895,13 +1884,11 @@ describe('the Access step wiring', () => {
     assert.match(source('confirmOptions.tsx'), /export function accessIdentityConfirm[\s\S]*?credential: \{ kind: 'otp' \}/);
   });
 
-  test('the Access section is a role picker and the shared matrix of direct grants, with the role locked', () => {
+  test('the Access section is a role picker only; permissions live on the Roles page', () => {
     const editor = source('AdminEditor.tsx');
     assert.match(editor, /<option value="">No role<\/option>/);
     assert.match(editor, /roleChoices\(roles, base\.role_id, currentRoleName\)/);
-    assert.match(editor, /locked=\{locked\}/);
-    assert.match(editor, /onDirect\(keysFromMatrix\(draft\.direct, next, true\)\)/);
-    assert.match(editor, /storedKeys=\{\{ value: draft\.direct, baseline: base\.direct_permissions, onChange: onDirect \}\}/);
+    assert.doesNotMatch(editor, /PermissionMatrix|keysFromMatrix|storedKeys=|onDirect/);
     assert.match(editor, /pickRole\(current, roleId, role \? role\.permissions : \[\]\)/);
     assert.match(editor, /proposedTitle\(draft\.roleTitle, previous, role \? role\.name : null\)/);
     assert.match(editor, /<FieldShell label="Title"/);

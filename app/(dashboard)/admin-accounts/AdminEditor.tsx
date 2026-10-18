@@ -6,14 +6,12 @@ import {
 import { useRouter } from 'next/navigation';
 import { Check, Circle, Eye, EyeOff } from 'lucide-react';
 import {
-  Button, ErrorState, FieldShell, Input, Notice, SectionLabel, Select, SidePanel, SkeletonLines, useConfirm,
+  Button, ErrorState, FieldShell, Input, Notice, Select, SidePanel, SkeletonLines, useConfirm,
   useResource, useToast,
 } from '../../_ui';
 import { apiRequest, type ApiFailure } from '../../lib/apiClient';
-import { keysFromMatrix, matrixFromKeys } from '../../lib/grants';
 import type { RoleRow } from '../../lib/roles';
 import { formatAge } from '../../lib/time';
-import { PermissionMatrix } from '../_access';
 import {
   PASSWORD_MAX,
   PASSWORD_RULES,
@@ -52,7 +50,6 @@ import {
   rebaseAccess,
   rebaseValues,
   roleChoices,
-  roleLocks,
   statusOf,
   toAccessPreview,
   toAccessResult,
@@ -95,9 +92,7 @@ const CREATE_ACCESS_HINT = 'Saved right after the account is created, as a secon
 const EDIT_ACCESS_HINT =
   'Saved on its own with Review access, with a reason and a recent identity check. The account details above are saved separately.';
 
-const ROLE_HELP = 'The admin gets every action the role holds. Those actions are ticked and locked below.';
-
-const NO_ROLE_HINT = 'Actions this admin gets without a role.';
+const ROLE_HELP = 'The admin gets every action the role holds. The Roles page shows and edits them.';
 
 const fetchRoles = (signal: AbortSignal) => apiRequest(ROLES_PATH, { signal, select: toRoleList });
 
@@ -114,7 +109,6 @@ export interface AccessSectionProps {
   disabled?: boolean;
   reviewing?: boolean;
   onRole: (roleId: string | null) => void;
-  onDirect: (direct: string[]) => void;
   onReview?: () => void;
   sectionRef?: Ref<HTMLElement>;
   reviewRef?: Ref<HTMLButtonElement>;
@@ -122,13 +116,10 @@ export interface AccessSectionProps {
 
 export function AccessSection({
   mode, roles, rolesError, rolesRetrying, onRetryRoles, base, draft, currentRoleName = null, notice = null,
-  disabled = false, reviewing = false, onRole, onDirect, onReview, sectionRef, reviewRef,
+  disabled = false, reviewing = false, onRole, onReview, sectionRef, reviewRef,
 }: AccessSectionProps) {
   const headingId = useId();
   const roleFieldId = useId();
-  const selected = roles?.find((role) => role.id === draft.roleId) ?? null;
-  const value = useMemo(() => matrixFromKeys(draft.direct), [draft.direct]);
-  const locked = useMemo(() => roleLocks(selected), [selected]);
   const choices = roles ? roleChoices(roles, base.role_id, currentRoleName) : [];
   const dirty = isAccessDirty(base, draft);
 
@@ -170,15 +161,6 @@ export function AccessSection({
               </Select>
             </FieldShell>
           </div>
-          <SectionLabel as="h4" flush>Additional access</SectionLabel>
-          <p className={s.formHint}>{selected ? `Actions on top of the role ${selected.name}.` : NO_ROLE_HINT}</p>
-          <PermissionMatrix
-            value={value}
-            locked={locked}
-            readOnly={disabled}
-            onChange={(next) => onDirect(keysFromMatrix(draft.direct, next, true))}
-            storedKeys={{ value: draft.direct, baseline: base.direct_permissions, onChange: onDirect }}
-          />
           {onReview ? (
             <div className={s.accessActions}>
               <Button
@@ -320,10 +302,6 @@ export function AdminEditor({
     setAccess((current) => pickRole(current, roleId, role ? role.permissions : []));
     const title = proposedTitle(draft.roleTitle, previous, role ? role.name : null);
     if (title !== null) update('roleTitle', title);
-  };
-
-  const changeDirect = (direct: string[]) => {
-    setAccess((current) => ({ ...current, direct }));
   };
 
   const accessFocus = () => {
@@ -844,7 +822,6 @@ export function AdminEditor({
               disabled={busy}
               reviewing={reviewingAccess}
               onRole={chooseRole}
-              onDirect={changeDirect}
               onReview={creating ? undefined : () => void reviewAccess()}
               sectionRef={accessRef}
               reviewRef={reviewAccessRef}
