@@ -1908,13 +1908,10 @@ describe('the Access step wiring', () => {
     assert.doesNotMatch(editor, /label="Role title"/);
   });
 
-  test('a web create that cannot save its access hands the editor to the new account with the notice', () => {
+  test('the create form shows no Access section, so a new account is created without access and given it afterwards', () => {
     const editor = source('AdminEditor.tsx');
-    assert.match(editor, /onHandoff\(created, \{ adminId: created\.id, access: planned, notice: createdNotice\(step\) \}\)/);
-    assert.match(editor, /runAccessStep\(created, accessOf\(created\), planned, false/);
-    const page = source('page.tsx');
-    assert.match(page, /onHandoff=\{handOff\}/);
-    assert.match(page, /handoff=\{handoff\?\.adminId === openAdmin\.id \? handoff : undefined\}/);
+    assert.match(editor, /const showsAccess = !creating && admin !== null && !admin\.is_super_admin;/);
+    assert.match(editor, /useResource<RoleRow\[\]>\(showsAccess \? 'admin-roles' : null, fetchRoles\)/);
   });
 
   test('the table shows each admin’s role, and the page shares the identity check with the editor', () => {

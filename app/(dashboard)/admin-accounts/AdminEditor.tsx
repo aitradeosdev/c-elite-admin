@@ -256,7 +256,7 @@ export function AdminEditor({
   const reviewAccessRef = useRef<HTMLButtonElement>(null);
 
   const creating = mode === 'create';
-  const showsAccess = creating || (admin !== null && !admin.is_super_admin);
+  const showsAccess = !creating && admin !== null && !admin.is_super_admin;
   const roles = useResource<RoleRow[]>(showsAccess ? 'admin-roles' : null, fetchRoles);
   const { refresh: refreshRoles } = roles;
   const roleList = roles.data;
