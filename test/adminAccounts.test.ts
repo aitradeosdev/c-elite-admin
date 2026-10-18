@@ -1,7 +1,7 @@
 import { afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { createElement, type ElementType, type ReactNode } from 'react';
@@ -10,6 +10,7 @@ import {
   ALL_PERMISSIONS,
   LEGACY_PERMISSION_MAP,
   PERMISSION_CATALOG,
+  permissionStatus,
   resolvePermissions,
   type Permission,
 } from '../app/lib/permissions.ts';
@@ -17,6 +18,7 @@ import type {
   AdminList, AdminRow, AdminSecurity, MfaCellState, MutationResult, SecurityPolicy,
 } from '../app/(dashboard)/admin-accounts/model.ts';
 import type { AdminState, EditInput } from '../app/(dashboard)/admin-accounts/rules.ts';
+import type { RoleRow } from '../app/lib/roles.ts';
 import type { ApiFailure, ApiResult } from '../app/lib/apiClient.ts';
 import type { DeviceSession } from '../app/lib/adminSecurity.ts';
 
@@ -25,13 +27,18 @@ type ModelModule = typeof import('../app/(dashboard)/admin-accounts/model.ts');
 type ConfirmModule = typeof import('../app/(dashboard)/admin-accounts/confirmOptions.tsx');
 type SecurityPartsModule = typeof import('../app/(dashboard)/admin-accounts/SecurityParts.tsx');
 type NavModule = typeof import('../app/(dashboard)/_shell/nav.ts');
+type EditorModule = typeof import('../app/(dashboard)/admin-accounts/AdminEditor.tsx');
+type DetailsModule = typeof import('../app/(dashboard)/admin-accounts/AdminDetails.tsx');
+type AccessModule = typeof import('../app/(dashboard)/_access/index.ts');
 
 let rules: RulesModule;
 let model: ModelModule;
 let confirmOptions: ConfirmModule;
 let securityParts: SecurityPartsModule;
 let nav: NavModule;
-let GrantEditor: ElementType;
+let editorModule: EditorModule;
+let detailsModule: DetailsModule;
+let accessParts: AccessModule;
 let GrantDiff: ElementType;
 
 before(async () => {
@@ -40,13 +47,16 @@ before(async () => {
   confirmOptions = await loadAppModule<ConfirmModule>('(dashboard)/admin-accounts/confirmOptions.tsx');
   securityParts = await loadAppModule<SecurityPartsModule>('(dashboard)/admin-accounts/SecurityParts.tsx');
   nav = await loadAppModule<NavModule>('(dashboard)/_shell/nav.ts');
-  GrantEditor = (await loadAppModule<Record<string, ElementType>>('(dashboard)/admin-accounts/GrantEditor.tsx')).GrantEditor;
-  GrantDiff = (await loadAppModule<Record<string, ElementType>>('(dashboard)/admin-accounts/GrantParts.tsx')).GrantDiff;
+  accessParts = await loadAppModule<AccessModule>('(dashboard)/_access/index.ts');
+  GrantDiff = (await loadAppModule<Record<string, ElementType>>('(dashboard)/_access/index.ts')).GrantDiff;
+  editorModule = await loadAppModule<EditorModule>('(dashboard)/admin-accounts/AdminEditor.tsx');
+  detailsModule = await loadAppModule<DetailsModule>('(dashboard)/admin-accounts/AdminDetails.tsx');
 });
 
 const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
 const ADMIN_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
 const SELF_ID = '11111111-2222-4333-8444-555555555555';
+const ROLE_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 
 const LEGACY_ROUTE_ACCEPTED = [
   'dashboard', 'card_queue', 'card_management', 'card_type_builder', 'rates_management',
@@ -80,6 +90,9 @@ function row(patch: Partial<AdminRow> = {}): AdminRow {
     email: 'ada@cardelite.ng',
     role_title: 'Card Reviewer',
     page_permissions: ['card_queue', 'users'],
+    role_id: null,
+    role: null,
+    direct_permissions: ['card_queue', 'users'],
     last_login_at: '2026-09-30T10:00:00.000Z',
     is_active: true,
     is_super_admin: false,
@@ -140,16 +153,6 @@ function refusal(input: Record<string, unknown>, patch: Partial<AdminState> = {}
   return result.ok ? null : result;
 }
 
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...sourceFiles(path));
-    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(path);
-  }
-  return out;
-}
-
 describe('grant sets', () => {
   test('additional permissions are exactly the catalog keys that no page key grants', () => {
     const granted = new Set(Object.values(LEGACY_PERMISSION_MAP).flat());
@@ -164,23 +167,28 @@ describe('grant sets', () => {
     }
   });
 
-  test('every key the previous route accepted is still accepted', () => {
-    const checked = rules.checkGrants(LEGACY_ROUTE_ACCEPTED);
+  test('every key the previous route accepted can still be sent back while the account stores it', () => {
+    const checked = rules.checkGrants(LEGACY_ROUTE_ACCEPTED, { stored: LEGACY_ROUTE_ACCEPTED });
     assert.ok(checked.ok);
     assert.deepEqual(new Set(checked.ok ? checked.keys : []), new Set(LEGACY_ROUTE_ACCEPTED));
   });
 
-  test('accepts every page key and every additional permission together', () => {
+  test('accepts every grantable page as new, and every page key and additional permission once stored', () => {
+    assert.ok(rules.checkGrants(rules.GRANTABLE_PAGE_KEYS).ok);
     const all = [...rules.PAGE_KEYS, ...rules.ADDITIONAL_PERMISSIONS];
-    const checked = rules.checkGrants(all);
-    assert.ok(checked.ok);
+    assert.ok(rules.checkGrants(all, { stored: all }).ok);
   });
 
-  test('refuses a catalog key that a page key already grants, so payouts cannot be stranded', () => {
+  test('a catalog key is only ever echoed on the phone path, now that payouts check withdrawals.approve', () => {
     for (const key of ['withdrawals.approve', 'withdrawals.read', 'users.freeze', 'cards.review']) {
-      const checked = rules.checkGrants(['withdrawals', key]);
-      assert.equal(checked.ok, false, key);
-      assert.equal(checked.ok ? '' : checked.message, `Unknown permission key: ${key}`);
+      const added = rules.checkGrants(['withdrawals', key]);
+      assert.equal(added.ok, false, key);
+      assert.equal(added.ok ? '' : added.code, 'STATE_CONFLICT', key);
+      assert.equal(added.ok ? '' : added.message, 'This admin’s access changed since you opened it. Reload and try again.');
+      assert.deepEqual(rules.checkGrants(['withdrawals', key], { stored: ['withdrawals', key] }), {
+        ok: true,
+        keys: ['withdrawals', key],
+      });
     }
   });
 
@@ -195,6 +203,48 @@ describe('grant sets', () => {
   test('drops duplicate keys and keeps the first order', () => {
     const checked = rules.checkGrants(['users', 'coupons', 'users']);
     assert.deepEqual(checked.ok ? checked.keys : null, ['users', 'coupons']);
+  });
+
+  test('a newly added restricted, retired or unknown page key is refused by name, with the keys for the console', () => {
+    for (const [key, message] of [
+      ['admin_accounts', 'This permission cannot be granted: admin_accounts.'],
+      ['giftbox', 'This permission cannot be granted: giftbox.'],
+      ['transfers', 'This permission cannot be granted: transfers.'],
+    ] as const) {
+      const checked = rules.checkGrants(['coupons', key], { stored: ['coupons'] });
+      assert.equal(checked.ok, false, key);
+      if (checked.ok) continue;
+      assert.equal(checked.code, 'VALIDATION_ERROR');
+      assert.equal(checked.message, message);
+      assert.deepEqual(checked.details, { reason: 'not_grantable', keys: [key] });
+    }
+    const two = rules.checkGrants(['admin_accounts', 'giftbox']);
+    assert.equal(two.ok ? '' : two.message, 'These permissions cannot be granted: admin_accounts, giftbox.');
+  });
+
+  test('stored keys may be sent back, including the super admin’s transfers and manual_wallet_credit', () => {
+    const held = ['dashboard', 'card_queue', 'withdrawals', 'admin_accounts', 'transfers', 'manual_wallet_credit'];
+    assert.deepEqual(rules.checkGrants([...held].reverse(), { stored: held }), { ok: true, keys: [...held].reverse() });
+  });
+
+  test('unticking a key that comes from the role answers 409 naming the role, and an echo of it passes', () => {
+    const held = { stored: ['users', 'withdrawals', 'coupons'], roleKeys: ['withdrawals', 'coupons'], roleName: 'Manager' };
+    const one = rules.checkGrants(['users', 'coupons'], held);
+    assert.equal(one.ok ? '' : one.code, 'STATE_CONFLICT');
+    assert.equal(one.ok ? '' : one.message, 'withdrawals comes from the role Manager. Change it in the web console.');
+    const both = rules.checkGrants(['users'], held);
+    assert.equal(both.ok ? '' : both.message, 'withdrawals, coupons come from the role Manager. Change them in the web console.');
+    assert.ok(rules.checkGrants(['coupons', 'users', 'withdrawals'], held).ok);
+    assert.ok(rules.checkGrants(['withdrawals', 'coupons'], held).ok);
+  });
+
+  test('dotted keys must match the stored ones, so a stale phone list cannot add or drop one', () => {
+    const held = { stored: ['users', 'withdrawals.read', 'sensitive_data.share'] };
+    for (const sent of [['users', 'withdrawals.read'], ['users', 'withdrawals.read', 'sensitive_data.share', 'flags.read']]) {
+      const checked = rules.checkGrants(sent, held);
+      assert.equal(checked.ok ? '' : checked.code, 'STATE_CONFLICT', JSON.stringify(sent));
+    }
+    assert.ok(rules.checkGrants(['sensitive_data.share', 'users', 'withdrawals.read', 'coupons'], held).ok);
   });
 
   test('classifies keys by how they are stored', () => {
@@ -298,16 +348,16 @@ describe('field rules', () => {
     assert.equal(rules.checkReason('x'.repeat(rules.REASON_MAX + 1)).ok, false);
   });
 
-  test('creating an admin keeps the required fields and validates grants', () => {
+  test('creating an admin keeps the required fields and takes grantable pages only, since catalog keys are set in the Access step', () => {
     const base = {
       username: 'tolu',
       email: 'tolu@cardelite.ng',
       password: 'Correct-Horse-9',
       role_title: 'Payout Officer',
     };
-    const created = rules.checkCreate({ ...base, page_permissions: ['withdrawals', 'sensitive_data.share'] });
+    const created = rules.checkCreate({ ...base, page_permissions: ['withdrawals', 'card_queue', 'withdrawals'] });
     assert.ok(created.ok);
-    assert.deepEqual(created.ok ? created.value.page_permissions : null, ['withdrawals', 'sensitive_data.share']);
+    assert.deepEqual(created.ok ? created.value.page_permissions : null, ['withdrawals', 'card_queue']);
     const bare = rules.checkCreate(base);
     assert.deepEqual(bare.ok ? bare.value.page_permissions : null, []);
     assert.equal(rules.checkCreate({ ...base, email: '' }).ok, false);
@@ -315,7 +365,17 @@ describe('field rules', () => {
     assert.equal(rules.checkCreate({ ...base, password: 'weak' }).ok, false);
     assert.equal(rules.checkCreate({ ...base, username: 'ab' }).ok, false);
     assert.equal(rules.checkCreate({ ...base, role_title: 'x' }).ok, false);
-    assert.equal(rules.checkCreate({ ...base, page_permissions: ['withdrawals.approve'] }).ok, false);
+    const missing = rules.checkCreate({ ...base, email: '' });
+    assert.equal(missing.ok ? '' : missing.code, 'VALIDATION_ERROR');
+    for (const key of ['withdrawals.approve', 'sensitive_data.share']) {
+      const dotted = rules.checkCreate({ ...base, page_permissions: ['withdrawals', key] });
+      assert.equal(dotted.ok ? '' : dotted.code, 'STATE_CONFLICT', key);
+    }
+    for (const key of ['admin_accounts', 'giftbox', 'mystery']) {
+      const refused = rules.checkCreate({ ...base, page_permissions: ['withdrawals', key] });
+      assert.equal(refused.ok ? '' : refused.code, 'VALIDATION_ERROR', key);
+      assert.deepEqual(refused.ok ? null : refused.details, { reason: 'not_grantable', keys: [key] }, key);
+    }
   });
 });
 
@@ -342,17 +402,21 @@ describe('planEdit', () => {
     assert.deepEqual(result.updates, {});
   });
 
-  test('a grant change is recorded with its diff and signs the admin out', () => {
-    const result = plan({ page_permissions: ['card_queue', 'users', 'users_freeze', 'sensitive_data.share'], reason: 'x' });
+  test('a grant change is recorded with its diff, and the database decides the sign-out, not the route', () => {
+    const result = plan({ page_permissions: ['card_queue', 'users', 'users_freeze', 'coupons'], reason: 'x' });
     assert.equal(result.action, 'EDIT_ADMIN');
     assert.deepEqual(result.changed, ['page_permissions']);
-    assert.equal(result.revokesSessions, true);
-    assert.equal(result.updates.token_version, 5);
-    assert.deepEqual(result.grants?.added, ['users_freeze', 'sensitive_data.share']);
-    const after = result.after as { grant_changes: { added: string[]; actions_gained: string[] } };
-    assert.deepEqual(after.grant_changes.added, ['users_freeze', 'sensitive_data.share']);
+    assert.equal(result.revokesSessions, false);
+    assert.deepEqual(result.updates, { page_permissions: ['card_queue', 'users', 'users_freeze', 'coupons'] });
+    assert.deepEqual(result.grants?.added, ['users_freeze', 'coupons']);
+    const after = result.after as { grant_changes: { added: string[]; actions_gained: string[] }; token_version_bumped?: boolean };
+    assert.deepEqual(after.grant_changes.added, ['users_freeze', 'coupons']);
     assert.ok(after.grant_changes.actions_gained.includes('users.freeze'));
+    assert.equal(after.token_version_bumped, undefined);
     assert.deepEqual((result.before as { page_permissions: string[] }).page_permissions, ['card_queue', 'users']);
+    const titled = plan({ role_title: 'Lead', page_permissions: ['card_queue', 'users', 'coupons'] });
+    assert.equal(titled.revokesSessions, true);
+    assert.equal(titled.updates.token_version, 5);
   });
 
   test('a mobile edit that sends back keys the mobile screen does not list keeps them', () => {
@@ -431,9 +495,70 @@ describe('planEdit', () => {
     assert.equal(plan({ revoke_sessions: true }, { token_version: null }).updates.token_version, 1);
   });
 
-  test('refuses catalog keys that page keys already grant and treats null grants as none', () => {
-    assert.equal(refusal({ page_permissions: ['withdrawals.approve'] })?.code, 'VALIDATION_ERROR');
+  test('a catalog key the phone never loaded answers 409, and null grants are treated as none', () => {
+    const added = refusal({ page_permissions: ['withdrawals.approve'] });
+    assert.equal(added?.code, 'STATE_CONFLICT');
+    assert.equal(added?.message, 'This admin’s access changed since you opened it. Reload and try again.');
     assert.deepEqual(plan({ page_permissions: null }).updates.page_permissions, []);
+  });
+
+  test('a page the role grants cannot be unticked from the phone, and an unrelated phone save keeps it', () => {
+    const roleState = {
+      page_permissions: ['users', 'withdrawals'],
+      role_id: ROLE_ID,
+      direct_permissions: ['users'],
+      role: { id: ROLE_ID, name: 'Manager', archived_at: null, permissions: ['withdrawals'] },
+    };
+    const unticked = refusal({ email: 'ada@cardelite.ng', role_title: 'Card Reviewer', page_permissions: ['users'] }, roleState);
+    assert.equal(unticked?.code, 'STATE_CONFLICT');
+    assert.equal(unticked?.message, 'withdrawals comes from the role Manager. Change it in the web console.');
+    const unnamed = refusal({ page_permissions: ['users'] }, { ...roleState, role: { ...roleState.role, name: null } });
+    assert.equal(unnamed?.message, 'withdrawals comes from their role. Change it in the web console.');
+    const echo = plan({ email: 'ada.obi@cardelite.ng', role_title: 'Card Reviewer', page_permissions: ['withdrawals', 'users'] }, roleState);
+    assert.deepEqual(echo.changed, ['email']);
+    assert.equal(echo.updates.page_permissions, undefined);
+    const dropDirect = plan({ page_permissions: ['withdrawals'] }, roleState);
+    assert.deepEqual(dropDirect.updates, { page_permissions: ['withdrawals'] });
+  });
+
+  test('a newly added restricted page is refused by name, while stored retired and unknown keys may be echoed', () => {
+    const restricted = refusal({ page_permissions: ['card_queue', 'users', 'admin_accounts'] });
+    assert.equal(restricted?.code, 'VALIDATION_ERROR');
+    assert.deepEqual(restricted?.details, { reason: 'not_grantable', keys: ['admin_accounts'] });
+    const held = ['card_queue', 'users', 'giftbox', 'transfers'];
+    assert.deepEqual(plan({ page_permissions: [...held] }, { page_permissions: held }).changed, []);
+    assert.deepEqual(plan({ page_permissions: ['card_queue', 'giftbox'] }, { page_permissions: held }).updates.page_permissions, [
+      'card_queue', 'giftbox',
+    ]);
+  });
+
+  test('a super admin’s stored keys, including transfers, ride along with a phone title change', () => {
+    const held = ['dashboard', 'card_queue', 'withdrawals', 'admin_accounts', 'transfers', 'manual_wallet_credit'];
+    const result = plan(
+      { email: 'ada@cardelite.ng', role_title: 'Lead', page_permissions: [...held] },
+      { is_super_admin: true, page_permissions: held },
+    );
+    assert.deepEqual(result.changed, ['role_title']);
+    assert.deepEqual(result.updates, { role_title: 'Lead', token_version: 5 });
+  });
+
+  test('the saved row, not the plan, says whether sessions ended and what the grants became', () => {
+    const grantPlan = plan({ page_permissions: ['card_queue', 'users', 'coupons'] });
+    const bumped = rules.savedChange(grantPlan, state(), { page_permissions: ['card_queue', 'coupons', 'users'], token_version: 5 });
+    assert.equal(bumped.sessionsRevoked, true);
+    assert.deepEqual(bumped.after, {
+      page_permissions: ['card_queue', 'coupons', 'users'],
+      grant_changes: { added: ['coupons'], removed: [], actions_gained: ['coupons.read', 'coupons.write'], actions_lost: [] },
+      token_version_bumped: true,
+    });
+    const kept = rules.savedChange(grantPlan, state(), { page_permissions: ['card_queue', 'coupons', 'users'], token_version: 4 });
+    assert.equal(kept.sessionsRevoked, false);
+    assert.equal('token_version_bumped' in kept.after, false);
+    const composed = rules.savedChange(grantPlan, state(), { page_permissions: ['card_queue', 'coupons', 'users', 'withdrawals'], token_version: 5 });
+    assert.deepEqual((composed.after.grant_changes as { added: string[] }).added, ['withdrawals', 'coupons']);
+    const titlePlan = plan({ role_title: 'Lead' });
+    const titled = rules.savedChange(titlePlan, state(), { page_permissions: ['card_queue', 'users'], token_version: 5 });
+    assert.deepEqual(titled, { after: { role_title: 'Lead', token_version_bumped: true }, sessionsRevoked: true });
   });
 });
 
@@ -456,6 +581,15 @@ describe('page grant groups', () => {
     const navOrder = nav.NAV_GROUPS.map((group) => group.label);
     const groupOrder = model.PAGE_GRANT_GROUPS.map((group) => group.label);
     assert.deepEqual(groupOrder, navOrder.filter((label) => groupOrder.includes(label)));
+  });
+
+  test('a page is offered exactly when its bundle holds no super-administrator-only action', () => {
+    const offered = new Set(model.PAGE_GRANT_GROUPS.flatMap((group) => group.grants.map((grant) => grant.key)));
+    for (const key of Object.keys(LEGACY_PERMISSION_MAP)) {
+      const superOnly = LEGACY_PERMISSION_MAP[key].some((permission) => permissionStatus(permission) === 'super_only');
+      assert.equal(offered.has(key), !superOnly, key);
+    }
+    assert.ok(!offered.has('admin_accounts'));
   });
 
   test('freezing users sits right after Users in People, and Admins is not offered', () => {
@@ -521,18 +655,15 @@ describe('additional permissions', () => {
     assert.equal(grant?.risk, 'critical');
   });
 
-  test('the in-use list matches what the console actually checks', () => {
-    const skip = [join(APP_DIR, 'lib', 'permissions.ts'), join(APP_DIR, '(dashboard)', 'admin-accounts') + sep];
-    const sources = sourceFiles(APP_DIR)
-      .filter((file) => !skip.some((prefix) => file === prefix || file.startsWith(prefix)))
-      .map((file) => readFileSync(file, 'utf8'));
-    const referenced = rules.ADDITIONAL_PERMISSIONS.filter((key) =>
-      sources.some((source) => source.includes(`'${key}'`) || source.includes(`"${key}"`)));
+  test('the in-use list comes from the catalog statuses, so it cannot drift from what is checked', () => {
     assert.deepEqual(
-      new Set(model.ENFORCED_ADDITIONAL),
-      new Set(referenced),
-      'An additional permission started or stopped being checked; update ENFORCED_ADDITIONAL in admin-accounts/model.ts',
+      [...model.ENFORCED_ADDITIONAL],
+      rules.ADDITIONAL_PERMISSIONS.filter((key) => permissionStatus(key) === 'enforced'),
     );
+    assert.deepEqual(new Set(model.ENFORCED_ADDITIONAL), new Set([
+      'flags.read', 'flags.resolve', 'sensitive_data.download', 'sensitive_data.share', 'wallets.adjust',
+    ]));
+    for (const key of model.RESERVED_ADDITIONAL) assert.notEqual(permissionStatus(key), 'enforced', key);
   });
 });
 
@@ -556,6 +687,27 @@ describe('stored extras and summaries', () => {
       .filter((key: Permission) => PERMISSION_CATALOG[key].risk === 'critical').length;
     assert.equal(summary.critical, critical);
     assert.deepEqual(summary.labels, ['Withdrawals', 'Coupons', 'Share card submissions']);
+  });
+
+  test('catalog keys from a page bundle count as access under their catalog names, as roles now hold them', () => {
+    const summary = model.accessSummary(['withdrawals.read', 'withdrawals.approve']);
+    assert.equal(summary.pages, 0);
+    assert.equal(summary.additional, 2);
+    assert.equal(summary.other, 0);
+    assert.equal(summary.actions, 2);
+    assert.deepEqual(summary.labels, [
+      PERMISSION_CATALOG['withdrawals.read'].label, PERMISSION_CATALOG['withdrawals.approve'].label,
+    ]);
+    assert.equal(model.grantLabel('withdrawals.read'), PERMISSION_CATALOG['withdrawals.read'].label);
+    assert.equal(model.grantLabel('sensitive_data.share'), PERMISSION_CATALOG['sensitive_data.share'].label);
+    assert.equal(model.grantLabel('withdrawals'), 'Withdrawals');
+    assert.equal(model.grantLabel('mystery'), 'mystery');
+    assert.equal(model.holdsCritical(row({ page_permissions: ['withdrawals.approve'] })), true);
+    const cell = textOf(render(createElement(accessParts.AccessCell, {
+      admin: row({ page_permissions: ['withdrawals.read', 'withdrawals.approve'] }),
+    })));
+    assert.match(cell, /^0 pages · 2 additional Critical risk /);
+    assert.doesNotMatch(cell, /No access/);
   });
 
   test('counts statuses and critical holders without deleted or super admins', () => {
@@ -587,8 +739,41 @@ describe('list model', () => {
     assert.equal(list.admins[0].id, 'abc');
     assert.equal(list.admins[0].email, null);
     assert.deepEqual(list.admins[0].page_permissions, []);
+    assert.equal(list.admins[0].role_id, null);
+    assert.equal(list.admins[0].role, null);
+    assert.deepEqual(list.admins[0].direct_permissions, []);
     assert.equal(list.currentAdminId, 'abc');
     assert.equal(model.toAdminList({ admins: 'nope' }), null);
+  });
+
+  test('reads the role, its id and the direct grants, and names the role for the table', () => {
+    const list = model.toAdminList({
+      admins: [
+        {
+          id: ADMIN_ID,
+          username: 'ada',
+          page_permissions: ['users', 'withdrawals'],
+          role_id: ROLE_ID.toUpperCase(),
+          role: { id: ROLE_ID.toUpperCase(), name: 'Manager', archived: false },
+          direct_permissions: ['users', 'users'],
+        },
+        { id: SELF_ID, username: 'root', is_super_admin: true, role_id: null, role: null, direct_permissions: null },
+        { id: 'c', username: 'odd', role_id: 'not-a-uuid', role: { id: 'nope', name: 'X' } },
+      ],
+    });
+    assert.ok(list);
+    const [ada, root, odd] = list.admins;
+    assert.equal(ada.role_id, ROLE_ID);
+    assert.deepEqual(ada.role, { id: ROLE_ID, name: 'Manager', archived: false });
+    assert.deepEqual(ada.direct_permissions, ['users']);
+    assert.equal(model.roleLabel(ada), 'Manager');
+    assert.equal(model.roleLabel(root), 'Super administrator');
+    assert.deepEqual(root.direct_permissions, []);
+    assert.equal(odd.role_id, null);
+    assert.equal(odd.role, null);
+    assert.equal(model.roleLabel(odd), 'No role');
+    assert.equal(model.roleLabel(row({ role_id: ROLE_ID, role: null })), 'Unnamed role');
+    assert.equal(model.roleLabel(row({ role_id: ROLE_ID, role: { id: ROLE_ID, name: null, archived: false } })), 'Unnamed role');
   });
 
   test('filters by tab and search, and sorts with never-signed-in admins last', () => {
@@ -644,152 +829,310 @@ describe('list model', () => {
 describe('editor model', () => {
   const draft = (patch: Partial<ReturnType<ModelModule['draftFor']>> = {}) => ({ ...model.EMPTY_DRAFT, ...patch });
 
-  test('creating needs a username, email, role title, password and a real grant', () => {
+  test('creating needs a username, email, title and password, and no grant, since access is its own step', () => {
     const errors = model.validateDraft('create', draft());
-    assert.deepEqual(Object.keys(errors).sort(), ['email', 'grants', 'password', 'roleTitle', 'username']);
+    assert.deepEqual(Object.keys(errors).sort(), ['email', 'password', 'roleTitle', 'username']);
+    assert.equal(errors.roleTitle, 'Enter a title.');
     const ready = draft({
       username: 'tolu', email: 'tolu@cardelite.ng', roleTitle: 'Payout Officer',
-      password: 'Correct-Horse-9', confirmPassword: 'Correct-Horse-9', grants: ['withdrawals'],
+      password: 'Correct-Horse-9', confirmPassword: 'Correct-Horse-9',
     });
     assert.deepEqual(model.validateDraft('create', ready), {});
     assert.ok(model.validateDraft('create', { ...ready, confirmPassword: 'Other-Horse-9' }).confirmPassword);
-    assert.ok(model.validateDraft('create', { ...ready, grants: ['giftbox'] }).grants);
-    assert.match(model.validateDraft('create', { ...ready, grants: ['withdrawals', 'mystery'] }).grants ?? '', /unrecognised/);
+    assert.equal(model.validateDraft('create', { ...ready, roleTitle: 'x' }).roleTitle, 'Title must be 2–64 characters.');
+    assert.equal('grants' in model.EMPTY_DRAFT, false);
+    assert.deepEqual([...model.EDITOR_FIELD_ORDER], ['username', 'email', 'roleTitle', 'password', 'confirmPassword']);
   });
 
   test('editing keeps the password optional and the email required', () => {
     const base = model.draftFor(row());
     assert.deepEqual(model.validateDraft('edit', base), {});
     assert.ok(model.validateDraft('edit', { ...base, email: ' ' }).email);
-    assert.equal(model.firstError(model.validateDraft('edit', { ...base, email: '', grants: [] })), 'email');
+    assert.equal(model.firstError(model.validateDraft('edit', { ...base, email: '', roleTitle: '' })), 'email');
   });
 
-  test('dirty tracking ignores reordering and surrounding spaces', () => {
+  test('dirty tracking ignores surrounding spaces and leaves access to the Access section', () => {
     const admin = row();
     const base = model.valuesOf(admin);
+    assert.deepEqual(base, { email: 'ada@cardelite.ng', roleTitle: 'Card Reviewer' });
     const current = model.draftFor(admin);
-    assert.equal(model.isDraftDirty('edit', { ...current, grants: ['users', 'card_queue'], roleTitle: ' Card Reviewer ' }, base), false);
+    assert.equal(model.isDraftDirty('edit', { ...current, roleTitle: ' Card Reviewer ' }, base), false);
     assert.equal(model.isDraftDirty('edit', { ...current, password: 'x' }, base), true);
-    assert.equal(model.isDraftDirty('create', draft(), model.valuesOf(row({ email: null, role_title: '', page_permissions: [] }))), false);
+    assert.equal(model.isDraftDirty('create', draft(), model.valuesOf(row({ email: null, role_title: '' }))), false);
   });
 
-  test('rebasing keeps both admins’ grant changes and flags a clashing field', () => {
-    const base = { email: 'a@x.ng', roleTitle: 'Reviewer', grants: ['card_queue', 'users'] };
-    const local = { email: 'a@x.ng', roleTitle: 'Lead', grants: ['card_queue', 'users', 'coupons'] };
-    const server = { email: 'b@x.ng', roleTitle: 'Senior', grants: ['card_queue'] };
+  test('rebasing keeps the other admin’s values and flags a clashing field', () => {
+    const base = { email: 'a@x.ng', roleTitle: 'Reviewer' };
+    const local = { email: 'a@x.ng', roleTitle: 'Lead' };
+    const server = { email: 'b@x.ng', roleTitle: 'Senior' };
     const rebased = model.rebaseValues(base, local, server);
-    assert.deepEqual(rebased.values, { email: 'b@x.ng', roleTitle: 'Lead', grants: ['card_queue', 'coupons'] });
+    assert.deepEqual(rebased.values, { email: 'b@x.ng', roleTitle: 'Lead' });
     assert.deepEqual(rebased.conflicts, ['roleTitle']);
     assert.equal(rebased.changedElsewhere, true);
     assert.equal(model.rebaseValues(base, local, base).changedElsewhere, false);
   });
 
-  test('an edit proposal sends only what changed', () => {
+  test('an edit proposal sends only the changed account fields, and never any access field', () => {
     const live = row();
-    const values = { email: 'ada@cardelite.ng', roleTitle: 'Card Reviewer', grants: ['card_queue', 'users', 'users_freeze'] };
-    const proposal = model.proposeEdit(live, values, '');
-    assert.equal(proposal.email, null);
-    assert.equal(proposal.roleTitle, null);
-    assert.deepEqual(proposal.grants?.added, ['users_freeze']);
-    assert.equal(proposal.revokesSessions, true);
-    assert.deepEqual(model.editRequestBody(live.id, proposal, '', 'Needs freeze'), {
-      id: ADMIN_ID,
-      reason: 'Needs freeze',
-      page_permissions: ['card_queue', 'users', 'users_freeze'],
-      expected: { page_permissions: ['card_queue', 'users'] },
+    const title = model.proposeEdit(live, { email: 'ada@cardelite.ng', roleTitle: 'Lead' }, '');
+    assert.equal(title.email, null);
+    assert.deepEqual(title.roleTitle, { before: 'Card Reviewer', after: 'Lead' });
+    assert.equal(title.revokesSessions, true);
+    assert.deepEqual(model.editRequestBody(live.id, title, '', 'Promoted'), {
+      id: ADMIN_ID, reason: 'Promoted', role_title: 'Lead', expected: { role_title: 'Card Reviewer' },
     });
     const email = model.proposeEdit(live, { ...model.valuesOf(live), email: 'new@cardelite.ng' }, '');
     assert.deepEqual(email.email, { before: 'ada@cardelite.ng', after: 'new@cardelite.ng' });
     assert.equal(email.revokesSessions, false);
     assert.equal(model.isEmptyProposal(model.proposeEdit(live, model.valuesOf(live), '')), true);
-    assert.equal(model.isEmptyProposal(model.proposeEdit(live, model.valuesOf(live), 'Correct-Horse-9')), false);
+    const password = model.proposeEdit(live, model.valuesOf(live), 'Correct-Horse-9');
+    assert.equal(model.isEmptyProposal(password), false);
+    assert.equal(password.revokesSessions, true);
+    for (const body of [
+      model.editRequestBody(live.id, title, '', 'x'),
+      model.editRequestBody(live.id, email, '', 'x'),
+      model.editRequestBody(live.id, password, 'Correct-Horse-9', 'x'),
+    ]) {
+      for (const field of ['page_permissions', 'role_id', 'direct_permissions']) assert.equal(field in body, false, field);
+      const expected = (body.expected ?? {}) as Record<string, unknown>;
+      assert.equal('page_permissions' in expected, false);
+    }
   });
 
-  test('the create body trims names and never adds fields the route does not know', () => {
+  test('the create body trims names and carries no access, so the route creates the account without any', () => {
     const body = model.createRequestBody(draft({
       username: ' tolu ', email: ' tolu@cardelite.ng ', roleTitle: ' Payout ', password: 'Correct-Horse-9',
-      confirmPassword: 'Correct-Horse-9', grants: ['withdrawals', 'withdrawals'],
+      confirmPassword: 'Correct-Horse-9',
     }), 'New hire');
     assert.deepEqual(body, {
-      username: 'tolu', email: 'tolu@cardelite.ng', password: 'Correct-Horse-9', role_title: 'Payout',
-      page_permissions: ['withdrawals'], reason: 'New hire',
+      username: 'tolu', email: 'tolu@cardelite.ng', password: 'Correct-Horse-9', role_title: 'Payout', reason: 'New hire',
     });
   });
 });
 
-describe('mutation outcomes', () => {
-  const failure = (patch: Partial<ApiFailure>): ApiResult<MutationResult> => ({
-    ok: false,
-    error: {
-      kind: 'http', status: 400, code: 'VALIDATION_ERROR', message: 'Bad', requestId: null, details: null,
-      outcomeUnknown: false, ...patch,
-    },
+const MANAGER_KEYS = ['dashboard', 'users', 'withdrawals'];
+const OTHER_ROLE_ID = '5f4e3d2c-1b0a-4987-8654-3210fedcba98';
+const SYSTEM_ROLE_ID = '00000000-0000-4000-8000-000000000001';
+const ARCHIVED_ROLE_ID = '00000000-0000-4000-8000-000000000002';
+
+function roleRow(patch: Partial<RoleRow> = {}): RoleRow {
+  return {
+    id: ROLE_ID,
+    name: 'Manager',
+    description: '',
+    permissions: [...MANAGER_KEYS],
+    system_key: null,
+    is_protected: false,
+    version: 1,
+    archived_at: null,
+    archived_by: null,
+    created_at: null,
+    created_by: null,
+    updated_at: null,
+    updated_by: null,
+    ...patch,
+  };
+}
+
+const ROLE_LIST: RoleRow[] = [
+  roleRow({ id: SYSTEM_ROLE_ID, name: 'Super administrator', system_key: 'super_admin', is_protected: true, permissions: [] }),
+  roleRow({ id: OTHER_ROLE_ID, name: 'Reviewer', permissions: ['card_queue'] }),
+  roleRow(),
+  roleRow({ id: ARCHIVED_ROLE_ID, name: 'Old desk', archived_at: '2026-10-01T00:00:00.000Z' }),
+];
+
+function managerRow(patch: Partial<AdminRow> = {}): AdminRow {
+  return row({
+    username: 'manager',
+    role_title: 'Manager',
+    page_permissions: [...MANAGER_KEYS],
+    direct_permissions: [...MANAGER_KEYS],
+    ...patch,
+  });
+}
+
+describe('access model', () => {
+  test('the expected values are the role, the direct grants and the effective list the last read returned', () => {
+    const expected = model.accessOf(managerRow());
+    assert.deepEqual(expected, { role_id: null, direct_permissions: MANAGER_KEYS, page_permissions: MANAGER_KEYS });
+    assert.deepEqual(model.accessDraftFor(expected), { roleId: null, direct: MANAGER_KEYS, folded: [] });
+    assert.deepEqual(model.NO_ACCESS, { role_id: null, direct_permissions: [], page_permissions: [] });
+    assert.equal(model.isAccessDirty(expected, model.accessDraftFor(expected)), false);
+    assert.equal(model.isAccessDirty(expected, { roleId: null, direct: [...MANAGER_KEYS].reverse(), folded: [] }), false);
+    assert.equal(model.isAccessDirty(expected, { roleId: ROLE_ID, direct: MANAGER_KEYS, folded: [] }), true);
+    assert.equal(model.isAccessDirty(model.NO_ACCESS, { roleId: null, direct: ['coupons'], folded: [] }), true);
   });
 
-  test('maps failures onto retry, stale, refused, unknown and expired', () => {
-    assert.equal(model.classifyMutation(failure({})).kind, 'retry');
-    assert.equal(model.classifyMutation(failure({ status: 409 })).kind, 'stale');
-    assert.equal(model.classifyMutation(failure({ status: 404 })).kind, 'stale');
-    assert.equal(model.classifyMutation(failure({ status: 403 })).kind, 'refused');
-    assert.equal(model.classifyMutation(failure({ status: 401 })).kind, 'expired');
-    assert.equal(model.classifyMutation(failure({ status: 500, code: null, outcomeUnknown: true })).kind, 'unknown');
-    assert.equal(model.classifyMutation(failure({ kind: 'timeout', status: null, outcomeUnknown: true })).kind, 'unknown');
-  });
-
-  test('reads the additive response fields', () => {
-    const result = model.toMutationResult({
-      success: true, changed: true, sessions_revoked: true, admin: { id: ADMIN_ID, username: 'ada' }, warning: 'w',
+  test('picking the copied Manager role moves the covered direct grants into it, and No role puts them back', () => {
+    const start = model.accessDraftFor(model.accessOf(managerRow()));
+    const picked = model.pickRole(start, ROLE_ID, MANAGER_KEYS);
+    assert.deepEqual(picked, { roleId: ROLE_ID, direct: [], folded: MANAGER_KEYS });
+    const cleared = model.pickRole(picked, null, []);
+    assert.deepEqual(cleared, { roleId: null, direct: MANAGER_KEYS, folded: [] });
+    assert.equal(model.isAccessDirty(model.accessOf(managerRow()), cleared), false);
+    assert.deepEqual(model.pickRole(picked, OTHER_ROLE_ID, ['card_queue', 'users.read']), {
+      roleId: OTHER_ROLE_ID, direct: MANAGER_KEYS, folded: [],
     });
-    assert.equal(result.admin?.id, ADMIN_ID);
-    assert.equal(result.sessionsRevoked, true);
-    assert.equal(result.warning, 'w');
-    assert.equal(model.toMutationResult({ success: true }).changed, true);
-  });
-});
-
-describe('rendered grant editor', () => {
-  function editor(value: string[], baseline: string[] = value, mode: 'create' | 'edit' = 'edit', error?: string) {
-    return render(createElement(GrantEditor, { value, baseline, mode, error, onChange: () => {} }));
-  }
-
-  test('renders a real checkbox for every grantable page and in-use permission, with reserved ones hidden', () => {
-    const html = editor(['withdrawals']);
-    const boxes = tagsOf(html, 'input').filter((input) => input.type === 'checkbox');
-    const expected = rules.GRANTABLE_PAGE_KEYS.length + rules.ADDITIONAL_PERMISSIONS.length;
-    assert.equal(boxes.length, expected);
-    assert.equal(boxes.filter((input) => 'checked' in input).length, 1);
-    const reserved = tagsOf(html, 'div').find((div) => classesOf(div).includes('reservedBody'));
-    assert.ok(reserved && 'hidden' in reserved);
-    const text = textOf(html);
-    assert.match(text, /Freeze & unfreeze users/);
-    assert.match(text, /Approve withdrawals/);
-    assert.doesNotMatch(text, /Other stored keys/);
+    assert.deepEqual(model.pickRole({ roleId: null, direct: ['withdrawals.read', 'coupons'], folded: [] }, ROLE_ID, ['withdrawals']), {
+      roleId: ROLE_ID, direct: ['coupons'], folded: ['withdrawals.read'],
+    });
   });
 
-  test('opens the reserved list when the account holds a reserved permission', () => {
-    const html = editor(['withdrawals', 'reconciliation.read']);
-    const reserved = tagsOf(html, 'div').find((div) => classesOf(div).includes('reservedBody'));
-    assert.ok(reserved && !('hidden' in reserved));
+  test('every action the role holds is locked in the matrix as From role with its name', () => {
+    const locks = model.roleLocks(roleRow());
+    assert.equal(locks.get('withdrawals.approve'), 'From role Manager');
+    assert.equal(locks.get('users.read'), 'From role Manager');
+    assert.equal(locks.has('coupons.read'), false);
+    assert.equal(locks.size, resolvePermissions(MANAGER_KEYS, false).size);
+    assert.equal(model.roleLocks(null).size, 0);
   });
 
-  test('lists stored keys that cannot be granted, marking unknown ones invalid', () => {
-    const html = editor(['coupons', 'admin_accounts', 'mystery']);
-    const text = textOf(html);
-    assert.match(text, /Other stored keys/);
-    assert.match(text, /super administrators only/);
-    assert.ok(tagsOf(html, 'input').some((input) => input['aria-invalid'] === 'true'));
+  test('picking a role proposes its name as the title while the title is empty or still names the previous role', () => {
+    assert.equal(model.proposedTitle('', null, 'Manager'), 'Manager');
+    assert.equal(model.proposedTitle('  ', null, 'Manager'), 'Manager');
+    assert.equal(model.proposedTitle('Reviewer', 'Reviewer', 'Manager'), 'Manager');
+    assert.equal(model.proposedTitle('Operations lead', 'Reviewer', 'Manager'), null);
+    assert.equal(model.proposedTitle('Operations lead', null, 'Manager'), null);
+    assert.equal(model.proposedTitle('Manager', null, 'Manager'), null);
+    assert.equal(model.proposedTitle('Reviewer', 'Reviewer', null), null);
   });
 
-  test('marks pending additions and removals while editing, and shows the error', () => {
-    const html = editor(['coupons', 'users'], ['coupons', 'withdrawals'], 'edit', 'Give this admin at least one page or permission.');
-    assert.equal(withClass(html, 'span', 'grantMark').length, 2);
-    assert.match(textOf(html), /Give this admin at least one page or permission\./);
-    assert.equal(withClass(editor(['coupons'], [], 'create'), 'span', 'grantMark').length, 0);
+  test('the role picker offers active, non-system roles by name, and keeps the admin’s own role visible', () => {
+    const list = model.toRoleList({
+      roles: [...ROLE_LIST.map((role) => (role.id === OTHER_ROLE_ID ? { ...role, id: OTHER_ROLE_ID.toUpperCase() } : role)), {
+        id: 'nope', name: 'Broken', version: 1,
+      }],
+    });
+    assert.ok(list);
+    assert.equal(list.length, 4);
+    assert.equal(list[1].id, OTHER_ROLE_ID);
+    assert.deepEqual(model.roleChoices(list, null), [{ id: ROLE_ID, name: 'Manager' }, { id: OTHER_ROLE_ID, name: 'Reviewer' }]);
+    assert.deepEqual(model.roleChoices(list, ARCHIVED_ROLE_ID)[0], { id: ARCHIVED_ROLE_ID, name: 'Old desk (archived)' });
+    assert.deepEqual(model.roleChoices(list, ROLE_ID).map((choice) => choice.id), [ROLE_ID, OTHER_ROLE_ID]);
+    assert.equal(model.toRoleList({ roles: 'nope' }), null);
+  });
+
+  test('the dry run and the save send the same change against the values the last read returned', () => {
+    const expected = model.accessOf(managerRow());
+    const next = model.pickRole(model.accessDraftFor(expected), ROLE_ID, MANAGER_KEYS);
+    const preview = model.accessPreviewBody(expected, next);
+    assert.deepEqual(preview, {
+      role_id: ROLE_ID,
+      direct_permissions: [],
+      expected: { role_id: null, direct_permissions: MANAGER_KEYS, page_permissions: MANAGER_KEYS },
+      dry_run: true,
+    });
+    const { dry_run: dryRun, ...change } = preview;
+    assert.equal(dryRun, true);
+    const save = model.accessSaveBody(expected, next, 'Moving the Manager onto the role');
+    assert.deepEqual(save, { ...change, reason: 'Moving the Manager onto the role' });
+    const directOnly = model.accessPreviewBody(expected, { roleId: null, direct: [...MANAGER_KEYS, 'coupons'], folded: [] });
+    assert.equal('role_id' in directOnly, false);
+    assert.deepEqual(directOnly.direct_permissions, [...MANAGER_KEYS, 'coupons']);
+    const unrole = model.accessPreviewBody(
+      { role_id: ROLE_ID, direct_permissions: [], page_permissions: MANAGER_KEYS },
+      { roleId: null, direct: [], folded: [] },
+    );
+    assert.equal(unrole.role_id, null);
+    assert.equal('direct_permissions' in unrole, false);
+    assert.equal(model.accessPath(ADMIN_ID), `/api/admin-accounts/${ADMIN_ID}/access`);
+  });
+
+  test('a reason of at least 3 characters is needed before the save is sent', () => {
+    assert.equal(model.accessReasonProblem('ok'), 'Enter a reason of 3 to 500 characters.');
+    assert.equal(model.accessReasonProblem('  ab  '), 'Enter a reason of 3 to 500 characters.');
+    assert.equal(model.accessReasonProblem('New desk'), null);
+  });
+
+  test('reads the dry run and the save the access route answers, and updates the listed row', () => {
+    assert.deepEqual(model.toAccessPreview({
+      success: true,
+      impact: {
+        before: MANAGER_KEYS, after: MANAGER_KEYS, gained: [], lost: [], highest_risk: null, changed: false,
+        signs_out: false, folded: MANAGER_KEYS,
+      },
+    }), {
+      before: MANAGER_KEYS, after: MANAGER_KEYS, gained: [], lost: [], highestRisk: null, changed: false, signsOut: false,
+      folded: MANAGER_KEYS,
+    });
+    const loss = model.toAccessPreview({
+      impact: { before: ['withdrawals'], after: ['withdrawals.read'], gained: [], lost: ['withdrawals.approve', 'nope'], changed: true, signs_out: true },
+    });
+    assert.deepEqual(loss?.lost, ['withdrawals.approve']);
+    assert.equal(loss?.highestRisk, PERMISSION_CATALOG['withdrawals.approve'].risk);
+    assert.deepEqual(loss?.folded, []);
+    assert.equal(model.toAccessPreview({ impact: { before: [], after: [] } }), null);
+    assert.equal(model.toAccessPreview({}), null);
+    const saved = model.toAccessResult({
+      success: true,
+      admin: { id: ADMIN_ID, role_id: ROLE_ID.toUpperCase(), direct_permissions: [], page_permissions: MANAGER_KEYS },
+      changed: true,
+      signed_out: false,
+    });
+    assert.deepEqual(saved, {
+      access: { role_id: ROLE_ID, direct_permissions: [], page_permissions: MANAGER_KEYS }, changed: true, signedOut: false,
+    });
+    assert.equal(model.toAccessResult({ changed: true }), null);
+    const access = saved?.access;
+    assert.ok(access);
+    const updated = model.withAccess(managerRow(), access, { id: ROLE_ID, name: 'Manager', archived: false });
+    assert.equal(updated.role_id, ROLE_ID);
+    assert.deepEqual(updated.direct_permissions, []);
+    assert.equal(model.roleLabel(updated), 'Manager');
+    assert.equal(model.withAccess(updated, { role_id: null, direct_permissions: ['coupons'], page_permissions: ['coupons'] }, null).role, null);
+  });
+
+  test('a stale answer rebases the change onto the server’s values', () => {
+    const base = { role_id: null, direct_permissions: ['users', 'withdrawals'], page_permissions: ['users', 'withdrawals'] };
+    const local = { roleId: ROLE_ID, direct: ['users', 'coupons'], folded: ['withdrawals'] };
+    const server = {
+      role_id: null,
+      direct_permissions: ['users', 'withdrawals', 'rates_management'],
+      page_permissions: ['users', 'withdrawals', 'rates_management'],
+    };
+    const rebased = model.rebaseAccess(base, local, server);
+    assert.deepEqual(rebased.draft, { roleId: ROLE_ID, direct: ['users', 'rates_management', 'coupons'], folded: ['withdrawals'] });
+    assert.equal(rebased.changedElsewhere, true);
+    assert.equal(model.rebaseAccess(base, model.accessDraftFor(base), { ...base, role_id: OTHER_ROLE_ID }).draft.roleId, OTHER_ROLE_ID);
+    assert.equal(model.rebaseAccess(base, local, base).changedElsewhere, false);
+    assert.equal(model.rebaseAccess(base, local, { ...base, page_permissions: ['users'] }).changedElsewhere, true);
+  });
+
+  test('a stopped preview or save keeps its own outcome, and a create that stops leaves the notice the plan names', () => {
+    const failure = (patch: Partial<ApiFailure>): ApiFailure => ({
+      kind: 'http', status: 500, code: 'INTERNAL_ERROR', message: 'The access preview could not be loaded. Try again.',
+      requestId: null, details: null, outcomeUnknown: false, ...patch,
+    });
+    assert.deepEqual(model.previewStop(failure({ status: 401, code: 'AUTH_REQUIRED' })), { kind: 'expired' });
+    assert.deepEqual(model.previewStop(failure({ status: 409, code: 'STATE_CONFLICT', message: 'That record has changed. Reload and try again.' })), {
+      kind: 'stale', message: 'That record has changed. Reload and try again.',
+    });
+    assert.equal(model.previewStop(failure({ status: 404, code: 'RESOURCE_NOT_FOUND' })).kind, 'stale');
+    assert.equal(model.previewStop(failure({ status: 403, code: 'PERMISSION_DENIED' })).kind, 'refused');
+    assert.deepEqual(model.previewStop(failure({})), { kind: 'failed', message: 'The access preview could not be loaded. Try again.' });
+    assert.deepEqual(model.previewStop(failure({ kind: 'network', status: null, code: null, outcomeUnknown: true })), {
+      kind: 'failed', message: model.ACCESS_PREVIEW_UNREACHABLE,
+    });
+    assert.deepEqual(model.accessStepOf(null), { kind: 'cancelled' });
+    assert.deepEqual(model.accessStepOf({ kind: 'reauth', code: 'MFA_REQUIRED', message: model.STEP_UP_MESSAGE.MFA_REQUIRED }), {
+      kind: 'reauth', message: 'Set up two-step sign-in on your Profile first.',
+    });
+    const result = { access: null, changed: true, signedOut: false };
+    assert.deepEqual(model.accessStepOf({ kind: 'done', result }), { kind: 'saved', result });
+    assert.equal(model.createdNotice({ kind: 'failed', message: 'This role is archived.' }), 'The account was created without access. This role is archived.');
+    assert.equal(model.createdNotice({ kind: 'cancelled' }), 'The account was created without access. The access change was cancelled.');
+    assert.match(model.createdNotice({ kind: 'unknown', message: 'Could not reach the server.' }), /^The account was created\. Could not reach/);
   });
 });
 
 describe('confirmations', () => {
   const html = (...nodes: ReactNode[]) => render(createElement('div', null, ...nodes));
+  const detailRows = (options: { details?: Array<{ label: string; value: ReactNode }> }) =>
+    (options.details ?? []).map((detail) => createElement('p', { key: detail.label }, detail.label, ' ', detail.value));
+  const managerPreview = {
+    before: MANAGER_KEYS, after: MANAGER_KEYS, gained: [], lost: [], highestRisk: null, changed: false, signsOut: false,
+    folded: MANAGER_KEYS,
+  };
 
   test('the grant diff shows added and removed keys with risk and the actions that change', () => {
     const change = rules.diffGrants(['coupons'], ['withdrawals']);
@@ -821,44 +1164,244 @@ describe('confirmations', () => {
     assert.match(restoring, /Access restored · 2/);
     const revoking = confirmOptions.rowActionConfirm('revoke', row()).details ?? [];
     assert.deepEqual(revoking.find((detail) => detail.label === 'Access')?.value, 'Unchanged, 2 grants');
+    assert.deepEqual(revoking.find((detail) => detail.label === 'Title')?.value, 'Card Reviewer');
   });
 
-  test('the edit confirmation shows before and after values and never the password', () => {
+  test('the edit confirmation shows before and after values, never the password, and leaves access to its own step', () => {
     const live = row();
-    const proposal = model.proposeEdit(
-      live,
-      { email: 'new@cardelite.ng', roleTitle: 'Lead', grants: ['card_queue'] },
-      'Correct-Horse-9',
-    );
-    const options = confirmOptions.editConfirm(live, proposal, { values: model.valuesOf(live), conflicts: [], changedElsewhere: false });
+    const proposal = model.proposeEdit(live, { email: 'new@cardelite.ng', roleTitle: 'Lead' }, 'Correct-Horse-9');
+    const rebased = { values: model.valuesOf(live), conflicts: [], changedElsewhere: false };
+    const options = confirmOptions.editConfirm(live, proposal, rebased);
     assert.equal(options.reason?.required, true);
-    const text = textOf(html(
-      options.message,
-      ...(options.details ?? []).map((detail) => createElement('p', { key: detail.label }, detail.label, ' ', detail.value)),
-      ...(options.consequences ?? []),
-    ));
-    assert.match(text, /Card Reviewer → changes to Lead/);
+    const text = textOf(html(options.message, ...detailRows(options), ...(options.consequences ?? [])));
+    assert.match(text, /Title Card Reviewer → changes to Lead/);
     assert.match(text, /ada@cardelite\.ng → changes to new@cardelite\.ng/);
-    assert.match(text, /Removing · 1/);
+    assert.match(text, /Access does not change\./);
     assert.match(text, /signed out on every device/);
     assert.doesNotMatch(text, /Correct-Horse-9/);
+    const pending = textOf(html(confirmOptions.editConfirm(live, proposal, rebased, true).message));
+    assert.match(pending, /Your access changes are saved separately with Review access\./);
   });
 
-  test('the create confirmation lists every grant as added and keeps the password hidden', () => {
-    const options = confirmOptions.createConfirm({
+  test('the create confirmation keeps the password hidden and says access is a second, separate change', () => {
+    const snapshot = {
       ...model.EMPTY_DRAFT,
       username: 'tolu', email: 'tolu@cardelite.ng', roleTitle: 'Payout', password: 'Correct-Horse-9',
-      confirmPassword: 'Correct-Horse-9', grants: ['withdrawals', 'reconciliation.read'],
+      confirmPassword: 'Correct-Horse-9',
+    };
+    const bare = confirmOptions.createConfirm(snapshot, null);
+    const bareText = textOf(html(bare.message, ...detailRows(bare), ...(bare.consequences ?? [])));
+    assert.match(bareText, /The account is created without access\./);
+    assert.match(bareText, /Title Payout/);
+    assert.doesNotMatch(bareText, /Correct-Horse-9/);
+    assert.equal(bare.reason?.required, true);
+    assert.equal(bare.details?.some((detail) => detail.label === 'Role'), false);
+    const planned = confirmOptions.createConfirm(snapshot, { roleName: 'Manager', direct: ['coupons'] });
+    assert.deepEqual(planned.details?.slice(-2).map((detail) => [detail.label, detail.value]), [
+      ['Role', 'Manager'],
+      ['Additional access', '1 grant'],
+    ]);
+    assert.match(textOf(html(planned.message)), /saved as a second change/);
+    assert.equal(planned.credential, undefined);
+  });
+
+  test('moving the live Manager onto a role that matches reads as no change and lists the moved keys', () => {
+    const live = managerRow();
+    const options = confirmOptions.accessConfirm({
+      admin: live,
+      preview: managerPreview,
+      before: { roleName: null, direct: MANAGER_KEYS },
+      after: { roleName: 'Manager', direct: [] },
     });
-    const text = textOf(html(
-      options.message,
-      ...(options.details ?? []).map((detail) => createElement('p', { key: detail.label }, detail.value)),
-      ...(options.consequences ?? []),
-    ));
-    assert.match(text, /Access granted · 2/);
-    assert.match(text, /not checked anywhere yet/);
-    assert.doesNotMatch(text, /Correct-Horse-9/);
+    const text = textOf(html(options.message, ...detailRows(options), ...(options.consequences ?? [])));
+    assert.match(text, /Access unchanged\. @manager stays signed in\./);
+    assert.match(text, /Moved into the role: dashboard, users, withdrawals/);
+    assert.match(text, /Role No role → changes to Manager/);
+    assert.match(text, /Additional access 3 grants → changes to None/);
+    assert.deepEqual(options.consequences, []);
     assert.equal(options.reason?.required, true);
+    assert.equal(options.credential, undefined);
+    assert.equal(options.confirmLabel, 'Save access');
+    assert.equal(options.title, 'Change access for @manager?');
+  });
+
+  test('an access change that changes what the admin can do lists the actions and today’s sign-out line', () => {
+    const preview = {
+      before: ['withdrawals'], after: ['withdrawals.read'], gained: [], lost: ['withdrawals.approve' as Permission],
+      highestRisk: PERMISSION_CATALOG['withdrawals.approve'].risk, changed: true, signsOut: true, folded: [],
+    };
+    const sides = { before: { roleName: null, direct: ['withdrawals'] }, after: { roleName: null, direct: ['withdrawals.read'] } };
+    const options = confirmOptions.accessConfirm({ admin: row(), preview, ...sides });
+    const text = textOf(html(options.message, ...detailRows(options)));
+    assert.match(text, /What this admin can do/);
+    assert.match(text, /Gains no actions\./);
+    assert.match(text, /Loses 1 action:/);
+    assert.match(text, /Role No role/);
+    assert.doesNotMatch(text, /stays signed in/);
+    assert.doesNotMatch(text, /Moved into the role/);
+    assert.deepEqual(options.consequences, ['@ada is signed out on every device, web and mobile, and must sign in again.']);
+    const inactive = confirmOptions.accessConfirm({ admin: row({ is_active: false }), preview: { ...preview, signsOut: false }, ...sides });
+    assert.deepEqual(inactive.consequences, ['@ada is deactivated. These changes apply if the account is reactivated.']);
+  });
+
+  test('a pending title change is never covered by a stays-signed-in claim', () => {
+    const options = confirmOptions.accessConfirm({
+      admin: managerRow(),
+      preview: managerPreview,
+      before: { roleName: null, direct: MANAGER_KEYS },
+      after: { roleName: 'Manager', direct: [] },
+      titlePending: true,
+    });
+    const text = textOf(html(options.message));
+    assert.match(text, /Access unchanged\./);
+    assert.doesNotMatch(text, /stays signed in/);
+    assert.deepEqual(options.consequences, [
+      'The new title is saved separately with Review changes, and saving it signs @manager out on every device.',
+    ]);
+    const inactive = textOf(html(confirmOptions.accessConfirm({
+      admin: managerRow({ is_active: false }),
+      preview: managerPreview,
+      before: { roleName: null, direct: MANAGER_KEYS },
+      after: { roleName: 'Manager', direct: [] },
+    }).message));
+    assert.doesNotMatch(inactive, /stays signed in/);
+  });
+
+  test('the identity check is a follow-up that asks only for a code, and the toast follows the save', () => {
+    const options = confirmOptions.accessIdentityConfirm(row());
+    assert.deepEqual(options.credential, { kind: 'otp' });
+    assert.equal(options.reason, undefined);
+    assert.equal(options.title, 'Confirm it is you');
+    assert.match(String(options.message), /authenticator app/);
+    assert.equal(
+      confirmOptions.accessSavedText(row(), { access: null, changed: true, signedOut: true }),
+      'Saved access for @ada. They were signed out everywhere and must sign in again.',
+    );
+    assert.equal(confirmOptions.accessSavedText(row(), { access: null, changed: true, signedOut: false }), 'Saved access for @ada. They stay signed in.');
+    assert.equal(confirmOptions.accessSavedText(row({ is_active: false }), { access: null, changed: true, signedOut: false }), 'Saved access for @ada.');
+    assert.equal(confirmOptions.accessSavedText(row(), { access: null, changed: false, signedOut: false }), 'Nothing changed. This access was already live.');
+  });
+});
+
+describe('rendered access section', () => {
+  const noop = () => {};
+  const roleFailure: ApiFailure = {
+    kind: 'http', status: 500, code: 'INTERNAL_ERROR', message: 'Roles could not be loaded.', requestId: 'req_roles',
+    details: null, outcomeUnknown: false,
+  };
+  const section = (props: Record<string, unknown> = {}) => render(createElement(editorModule.AccessSection, {
+    mode: 'edit',
+    roles: ROLE_LIST,
+    rolesError: null,
+    rolesRetrying: false,
+    onRetryRoles: noop,
+    base: { role_id: null, direct_permissions: ['withdrawals'], page_permissions: ['withdrawals'] },
+    draft: { roleId: null, direct: ['withdrawals'], folded: [] },
+    onRole: noop,
+    onDirect: noop,
+    onReview: noop,
+    ...props,
+  }));
+  const optionsOf = (html: string) => [...html.matchAll(/<option\b([^>]*)>([^<]*)<\/option>/g)].map((match) => ({
+    value: tagsOf(`<option${match[1]}>`, 'option')[0].value,
+    label: match[2],
+    selected: 'selected' in tagsOf(`<option${match[1]}>`, 'option')[0],
+  }));
+  const boxFor = (html: string, key: string) => {
+    const found = tagsOf(html, 'input').filter((input) => input.value === key);
+    assert.equal(found.length, 1, key);
+    return found[0];
+  };
+
+  test('offers No role and the active roles, and Review access waits for a change', () => {
+    const html = section();
+    assert.deepEqual(optionsOf(html).map((option) => [option.value, option.label, option.selected]), [
+      ['', 'No role', true],
+      [ROLE_ID, 'Manager', false],
+      [OTHER_ROLE_ID, 'Reviewer', false],
+    ]);
+    const idle = buttonByText(html, 'Review access');
+    assert.ok(idle && 'disabled' in idle);
+    const changed = section({ draft: { roleId: ROLE_ID, direct: [], folded: ['withdrawals'] } });
+    assert.equal(optionsOf(changed).find((option) => option.selected)?.value, ROLE_ID);
+    const ready = buttonByText(changed, 'Review access');
+    assert.ok(ready && !('disabled' in ready));
+    assert.match(textOf(changed), /Actions on top of the role Manager\./);
+  });
+
+  test('the role’s actions are ticked and locked as From role, while direct grants stay editable', () => {
+    const html = section({ draft: { roleId: ROLE_ID, direct: ['coupons'], folded: [] } });
+    const approve = boxFor(html, 'withdrawals.approve');
+    assert.ok('checked' in approve && 'disabled' in approve);
+    assert.match(textOf(html), /From role Manager/);
+    const coupons = boxFor(html, 'coupons.write');
+    assert.ok('checked' in coupons && !('disabled' in coupons));
+    const rates = boxFor(html, 'rates.write');
+    assert.ok(!('checked' in rates) && !('disabled' in rates));
+  });
+
+  test('stored keys the matrix cannot show are listed for removal, and a notice is shown above them', () => {
+    const html = section({
+      base: { role_id: null, direct_permissions: ['coupons', 'giftbox'], page_permissions: ['coupons', 'giftbox'] },
+      draft: { roleId: null, direct: ['coupons', 'giftbox'], folded: [] },
+      notice: model.ACCESS_CHANGED_ELSEWHERE,
+    });
+    const text = textOf(html);
+    assert.match(text, /Other stored keys/);
+    assert.match(text, /Another admin changed this account’s access while you were editing/);
+    assert.ok('checked' in boxFor(html, 'giftbox'));
+  });
+
+  test('creating has no Review access button, and the roles list has its loading and error states', () => {
+    assert.equal(buttonByText(section({ mode: 'create', onReview: undefined }), 'Review access'), undefined);
+    assert.match(textOf(section({ mode: 'create', onReview: undefined })), /Saved right after the account is created/);
+    assert.match(textOf(section({ roles: undefined })), /Loading roles…/);
+    const failed = section({ roles: undefined, rolesError: roleFailure });
+    assert.match(textOf(failed), /Roles could not be loaded/);
+    assert.ok(buttonByText(failed, 'Try again'));
+    assert.equal(tagsOf(failed, 'select').length, 0);
+  });
+
+  test('while a save runs, the role picker and the matrix are frozen', () => {
+    const html = section({ disabled: true, draft: { roleId: ROLE_ID, direct: [], folded: [] } });
+    assert.ok('disabled' in tagsOf(html, 'select')[0]);
+    const boxes = tagsOf(html, 'input').filter((input) => input.type === 'checkbox');
+    assert.ok(boxes.length > 0);
+    assert.ok(boxes.every((input) => 'disabled' in input));
+  });
+});
+
+describe('rendered admin details', () => {
+  const noop = () => {};
+  const details = (admin: AdminRow) => textOf(render(createElement(detailsModule.AdminDetails, { admin, onClose: noop })));
+
+  test('shows the role, the title, the direct grants and the effective access summary', () => {
+    const text = details(row({
+      role_id: ROLE_ID,
+      role: { id: ROLE_ID, name: 'Manager', archived: false },
+      page_permissions: ['withdrawals', 'coupons'],
+      direct_permissions: ['coupons'],
+    }));
+    assert.match(text, /Role Manager/);
+    assert.match(text, /Title Card Reviewer/);
+    assert.match(text, /Direct grants Coupons coupons Medium risk/);
+    assert.match(text, /Effective access 8 actions in total, from the role and direct grants\./);
+    assert.match(text, /Critical risk/);
+  });
+
+  test('an admin without a role or grants says so, and a super admin shows only the account', () => {
+    const none = details(row({ page_permissions: [], direct_permissions: [] }));
+    assert.match(none, /Role No role/);
+    assert.match(none, /No direct grants\./);
+    assert.match(none, /No actions\./);
+    const direct = details(row());
+    assert.match(direct, /10 actions in total, from direct grants\./);
+    const root = details(row({ is_super_admin: true }));
+    assert.match(root, /Role Super administrator/);
+    assert.match(root, /roles and direct grants do not apply/);
+    assert.doesNotMatch(root, /Effective access/);
+    const gone = details(row({ is_active: false, deleted_at: '2026-09-01T00:00:00.000Z' }));
+    assert.match(gone, /Access it held/);
   });
 });
 
@@ -1294,7 +1837,8 @@ describe('drawer Security tab', () => {
 
   test('the page wires the column, the menu item, the stat, the identity check and the drawer tab', () => {
     const source = readFileSync(new URL('../app/(dashboard)/admin-accounts/page.tsx', import.meta.url), 'utf8');
-    assert.match(source, /const COLUMN_COUNT = 7;/);
+    assert.match(source, /const COLUMN_COUNT = 8;/);
+    assert.match(source, /<Th>Email<\/Th>\s*<Th>Role<\/Th>\s*<Th>Access<\/Th>/);
     assert.match(source, /<Th>Status<\/Th>\s*<Th>Two-step<\/Th>/);
     assert.match(source, /label: 'Reset two-step sign-in',\s*icon: <KeyRound/);
     const everywhere = source.indexOf("label: 'Sign out everywhere'");
@@ -1305,6 +1849,80 @@ describe('drawer Security tab', () => {
     const reasonCheck = source.indexOf('checkStepUpReason(reason);');
     assert.ok(reasonCheck > 0 && reasonCheck < identity, 'a short reason is refused before the code is spent');
     assert.equal((source.match(/security=\{securityTab\}/g) ?? []).length, 2);
+  });
+});
+
+describe('the Access step wiring', () => {
+  const ACCOUNTS_DIR = join(APP_DIR, '(dashboard)', 'admin-accounts');
+  const source = (name: string) => readFileSync(join(ACCOUNTS_DIR, name), 'utf8');
+
+  test('the old grant editor and grant parts are gone, and the shared parts come from _access', () => {
+    assert.equal(existsSync(join(ACCOUNTS_DIR, 'GrantEditor.tsx')), false);
+    assert.equal(existsSync(join(ACCOUNTS_DIR, 'GrantParts.tsx')), false);
+    for (const name of readdirSync(ACCOUNTS_DIR).filter((file) => /\.(ts|tsx)$/.test(file))) {
+      assert.doesNotMatch(source(name), /\.\/Grant(?:Editor|Parts)['"]/, name);
+    }
+    assert.match(source('page.tsx'), /import \{ AccessCell \} from '\.\.\/_access';/);
+    assert.match(source('AdminDetails.tsx'), /import \{ ActionBreakdown, GrantList \} from '\.\.\/_access';/);
+    assert.match(source('confirmOptions.tsx'), /import \{ Change, GrantDiff \} from '\.\.\/_access';/);
+    assert.match(source('AdminEditor.tsx'), /import \{ PermissionMatrix \} from '\.\.\/_access';/);
+  });
+
+  test('account saves go to /api/admin-accounts with no access fields, and access goes to its own route', () => {
+    const editor = source('AdminEditor.tsx');
+    assert.match(editor, /body: createRequestBody\(snapshot, reason\)/);
+    assert.match(editor, /body: editRequestBody\(live\.id, proposal, password, reason\)/);
+    assert.match(editor, /body: accessPreviewBody\(expected, next\)/);
+    assert.match(editor, /body: accessSaveBody\(expected, next, reason\)/);
+    assert.equal((editor.match(/apiRequest\(accessPath\(target\.id\)/g) ?? []).length, 2);
+    assert.doesNotMatch(editor, /page_permissions|direct_permissions:/);
+  });
+
+  test('the dry run comes before the confirm, and the identity check is asked only after REAUTH_REQUIRED', () => {
+    const editor = source('AdminEditor.tsx');
+    const order = [
+      'body: accessPreviewBody(expected, next)',
+      '...accessConfirm({',
+      'accessReasonProblem(result.reason)',
+      'const attempt = await save();',
+      "outcome.code !== 'REAUTH_REQUIRED'",
+      '...accessIdentityConfirm(target)',
+      "await confirmIdentity(credential ?? '')",
+    ].map((needle) => editor.indexOf(needle));
+    assert.ok(order.every((at) => at > 0), JSON.stringify(order));
+    assert.deepEqual(order, [...order].sort((a, b) => a - b));
+    assert.equal((editor.match(/credential: \{ kind: 'otp' \}/g) ?? []).length, 0);
+    assert.match(source('confirmOptions.tsx'), /export function accessIdentityConfirm[\s\S]*?credential: \{ kind: 'otp' \}/);
+  });
+
+  test('the Access section is a role picker and the shared matrix of direct grants, with the role locked', () => {
+    const editor = source('AdminEditor.tsx');
+    assert.match(editor, /<option value="">No role<\/option>/);
+    assert.match(editor, /roleChoices\(roles, base\.role_id, currentRoleName\)/);
+    assert.match(editor, /locked=\{locked\}/);
+    assert.match(editor, /onDirect\(keysFromMatrix\(draft\.direct, next, true\)\)/);
+    assert.match(editor, /storedKeys=\{\{ value: draft\.direct, baseline: base\.direct_permissions, onChange: onDirect \}\}/);
+    assert.match(editor, /pickRole\(current, roleId, role \? role\.permissions : \[\]\)/);
+    assert.match(editor, /proposedTitle\(draft\.roleTitle, previous, role \? role\.name : null\)/);
+    assert.match(editor, /<FieldShell label="Title"/);
+    assert.doesNotMatch(editor, /label="Role title"/);
+  });
+
+  test('a web create that cannot save its access hands the editor to the new account with the notice', () => {
+    const editor = source('AdminEditor.tsx');
+    assert.match(editor, /onHandoff\(created, \{ adminId: created\.id, access: planned, notice: createdNotice\(step\) \}\)/);
+    assert.match(editor, /runAccessStep\(created, accessOf\(created\), planned, false/);
+    const page = source('page.tsx');
+    assert.match(page, /onHandoff=\{handOff\}/);
+    assert.match(page, /handoff=\{handoff\?\.adminId === openAdmin\.id \? handoff : undefined\}/);
+  });
+
+  test('the table shows each admin’s role, and the page shares the identity check with the editor', () => {
+    const page = source('page.tsx');
+    assert.match(page, /<Td><RoleCell admin=\{admin\} \/><\/Td>\s*<Td><AccessCell admin=\{admin\} \/><\/Td>/);
+    assert.match(page, /secondary: `\$\{admin\.role_title \|\| 'No title'\} · \$\{roleLabel\(admin\)\}`/);
+    assert.doesNotMatch(page, /reauthenticate|async function confirmIdentity/);
+    assert.match(source('model.ts'), /export async function confirmIdentity\(code: string\)/);
   });
 });
 
@@ -1330,6 +1948,18 @@ describe('owned sources', () => {
     }
     assert.doesNotMatch(css, /\/\*/);
   });
+
+  test('every class the components use is in the stylesheet, and the moved grant styles are gone from it', () => {
+    const used = new Set<string>();
+    for (const file of owned()) {
+      for (const [, name] of readFileSync(file, 'utf8').matchAll(/(?<![\w.])s\.([A-Za-z]\w*)/g)) used.add(name);
+    }
+    const css = readFileSync(join(ownedDir, 'page.module.css'), 'utf8');
+    const defined = new Set([...css.matchAll(/\.([A-Za-z]\w*)/g)].map((match) => match[1]));
+    assert.deepEqual([...used].filter((name) => !defined.has(name)).sort(), []);
+    assert.deepEqual([...defined].filter((name) => !used.has(name)).sort(), []);
+    assert.doesNotMatch(css, /\.(?:grant|breakdown|reserved|diff\b|note\b)/);
+  });
 });
 
 const ROUTE_KEY = '__adminAccountsRouteTest';
@@ -1344,6 +1974,18 @@ const CANNOT_DEACTIVATE = 'Cannot deactivate the last active super admin.';
 const CANNOT_DELETE = 'Cannot delete the last active super admin.';
 const UPDATE_FAILED = 'The admin account could not be updated.';
 const DELETE_FAILED = 'The admin account could not be deleted.';
+const CREATED_ID = '33333333-4444-4555-8666-777777777777';
+const CREATED_AT = '2026-10-16T09:00:00.000Z';
+
+interface RouteSession {
+  id: string;
+  client: 'web' | 'mobile';
+  amr: string[];
+  createdAt: string;
+  expiresAt: string;
+  reauthAt: string | null;
+  transport: 'cookie' | 'bearer';
+}
 
 interface RouteClaims {
   admin_id: string;
@@ -1352,6 +1994,7 @@ interface RouteClaims {
   is_super_admin: boolean;
   page_permissions: string[];
   token_version: number;
+  session: RouteSession;
 }
 
 interface RouteDbError {
@@ -1370,13 +2013,16 @@ interface RouteQuery {
   options: unknown;
   payload: unknown;
   filters: RouteFilter[];
-  terminal: 'maybeSingle' | null;
+  terminal: 'maybeSingle' | 'single' | null;
 }
 
 interface RouteScenario {
   target: StoredAdmin | null;
   superAdmins: number;
   updateError: RouteDbError | null;
+  saved: Partial<StoredAdmin> | null;
+  list: Array<Record<string, unknown>>;
+  insertError: RouteDbError | null;
 }
 
 interface RouteHarness {
@@ -1386,11 +2032,13 @@ interface RouteHarness {
   logs: string[];
   db: {
     from(table: string): object;
-    rpc(name: string, args: unknown): Promise<never>;
+    rpc(name: string, args: unknown): Promise<unknown>;
   };
 }
 
 interface AccountsRoute {
+  GET: () => Promise<Response>;
+  POST: (req: Request) => Promise<Response>;
   PATCH: (req: Request) => Promise<Response>;
   DELETE: (req: Request) => Promise<Response>;
 }
@@ -1400,6 +2048,18 @@ interface Reply {
   body: Record<string, unknown>;
 }
 
+function routeSession(client: RouteSession['client']): RouteSession {
+  return {
+    id: '0f1e2d3c-4b5a-4968-8776-655443322110',
+    client,
+    amr: ['otp', 'pwd'],
+    createdAt: '2026-10-16T08:00:00.000Z',
+    expiresAt: '2026-10-16T16:00:00.000Z',
+    reauthAt: null,
+    transport: client === 'web' ? 'cookie' : 'bearer',
+  };
+}
+
 const OWNER: RouteClaims = {
   admin_id: SELF_ID,
   username: 'owner',
@@ -1407,7 +2067,10 @@ const OWNER: RouteClaims = {
   is_super_admin: true,
   page_permissions: [],
   token_version: 0,
+  session: routeSession('mobile'),
 };
+
+const WEB_OWNER: RouteClaims = { ...OWNER, session: routeSession('web') };
 
 function stored(patch: Partial<StoredAdmin> = {}): StoredAdmin {
   return {
@@ -1416,6 +2079,9 @@ function stored(patch: Partial<StoredAdmin> = {}): StoredAdmin {
     email: 'ada@cardelite.ng',
     role_title: 'Card Reviewer',
     page_permissions: ['card_queue', 'users'],
+    role_id: null,
+    direct_permissions: ['card_queue', 'users'],
+    role: null,
     last_login_at: '2026-09-30T10:00:00.000Z',
     is_active: true,
     is_super_admin: true,
@@ -1427,7 +2093,7 @@ function stored(patch: Partial<StoredAdmin> = {}): StoredAdmin {
 }
 
 function routeScenario(patch: Partial<RouteScenario> = {}): RouteScenario {
-  return { target: stored(), superAdmins: 2, updateError: null, ...patch };
+  return { target: stored(), superAdmins: 2, updateError: null, saved: null, list: [], insertError: null, ...patch };
 }
 
 const routeHarness: RouteHarness = {
@@ -1437,20 +2103,46 @@ const routeHarness: RouteHarness = {
   logs: [],
   db: {
     from: (table) => routeChain(table),
-    rpc: (name) => Promise.reject(new Error(`unexpected rpc ${name}`)),
+    rpc: (name) => (name === 'admin_security_overview'
+      ? Promise.resolve({ data: [], error: null })
+      : Promise.reject(new Error(`unexpected rpc ${name}`))),
   },
 };
 
 Reflect.set(globalThis, ROUTE_KEY, routeHarness);
+
+function createdRow(payload: Record<string, unknown>): Record<string, unknown> {
+  const grants = Array.isArray(payload.page_permissions) ? [...(payload.page_permissions as string[])].sort() : [];
+  return {
+    id: CREATED_ID,
+    username: payload.username,
+    email: payload.email,
+    role_title: payload.role_title,
+    page_permissions: grants,
+    role_id: null,
+    direct_permissions: grants,
+    role: null,
+    last_login_at: null,
+    is_active: payload.is_active,
+    is_super_admin: payload.is_super_admin,
+    deleted_at: null,
+    created_at: CREATED_AT,
+  };
+}
 
 function routeAnswer(query: RouteQuery): Record<string, unknown> {
   const s = routeHarness.scenario;
   if (query.table === 'audit_log' && query.op === 'insert') return { error: null };
   if (query.table === 'admin_users' && query.op === 'select' && query.terminal === 'maybeSingle') return { data: s.target };
   if (query.table === 'admin_users' && query.op === 'select' && query.columns === 'id') return { count: s.superAdmins };
+  if (query.table === 'admin_users' && query.op === 'select' && query.terminal === null) return { data: s.list };
+  if (query.table === 'admin_users' && query.op === 'insert') {
+    if (s.insertError) return { error: s.insertError };
+    return { data: createdRow(query.payload as Record<string, unknown>) };
+  }
   if (query.table === 'admin_users' && query.op === 'update') {
     if (s.updateError) return { error: s.updateError };
-    return { data: s.target ? [{ ...s.target, ...(query.payload as Record<string, unknown>) }] : [] };
+    return { data: s.target ? [{ ...s.target, ...(query.payload as Record<string, unknown>), ...(s.saved ?? {}) }] : [] };
   }
   throw new Error(`unexpected query ${JSON.stringify(query)}`);
 }
@@ -1483,8 +2175,13 @@ function routeChain(table: string): object {
     eq: filter('eq'),
     is: filter('is'),
     not: filter('not'),
+    order: filter('order'),
     maybeSingle: () => {
       query.terminal = 'maybeSingle';
+      return builder;
+    },
+    single: () => {
+      query.terminal = 'single';
       return builder;
     },
     then: (onFulfilled: (value: unknown) => unknown, onRejected: (reason: unknown) => unknown) =>
@@ -1568,19 +2265,26 @@ before(async () => {
   accountsRoute = (await import(await routeBundle(ROUTE_FILE))) as AccountsRoute;
 });
 
-function routeReset(patch: Partial<RouteScenario> = {}): void {
+function routeReset(patch: Partial<RouteScenario> = {}, claims: RouteClaims = OWNER): void {
   routeHarness.scenario = routeScenario(patch);
+  routeHarness.claims = claims;
   routeHarness.queries = [];
   routeHarness.logs.length = 0;
 }
 
-async function send(method: 'PATCH' | 'DELETE', body: unknown): Promise<Reply> {
+async function send(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: unknown): Promise<Reply> {
   const req = new Request('http://localhost/api/admin-accounts', {
     method,
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const res = method === 'PATCH' ? await accountsRoute.PATCH(req) : await accountsRoute.DELETE(req);
+  const res = method === 'GET'
+    ? await accountsRoute.GET()
+    : method === 'POST'
+      ? await accountsRoute.POST(req)
+      : method === 'PATCH'
+        ? await accountsRoute.PATCH(req)
+        : await accountsRoute.DELETE(req);
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
@@ -1709,6 +2413,9 @@ describe('PATCH /api/admin-accounts: the last active super admin', () => {
         email: 'ada@cardelite.ng',
         role_title: 'Card Reviewer',
         page_permissions: ['card_queue', 'users'],
+        role_id: null,
+        role: null,
+        direct_permissions: ['card_queue', 'users'],
         last_login_at: '2026-09-30T10:00:00.000Z',
         is_active: false,
         is_super_admin: true,
@@ -1775,5 +2482,309 @@ describe('DELETE /api/admin-accounts: the database super admin guard', () => {
     assert.equal(typeof admin.deleted_at, 'string');
     assert.equal(reply.body.audit_recorded, true);
     assert.deepEqual(routeAudits().map((row) => [row.action, row.result]), [['DELETE_ADMIN', 'success']]);
+  });
+});
+
+const ACCESS_ELSEWHERE = 'Change access in the web console’s Access section.';
+const STALE_ACCESS = 'This admin’s access changed since you opened it. Reload and try again.';
+const LIST_ROLE_EMBED = 'role:admin_roles!admin_users_role_id_fkey(id, name, archived_at)';
+const STATE_ROLE_EMBED = 'role:admin_roles!admin_users_role_id_fkey(id, name, archived_at, permissions)';
+const PHONE_FIELDS = ['id', 'username', 'email', 'role_title', 'page_permissions', 'last_login_at', 'is_active', 'is_super_admin', 'deleted_at'];
+const PHONE_CREATE = {
+  username: 'tolu',
+  email: 'tolu@cardelite.ng',
+  password: 'Correct-Horse-9',
+  role_title: 'Payout Officer',
+  page_permissions: ['withdrawals', 'card_queue'],
+};
+
+const member = (patch: Partial<StoredAdmin> = {}) => stored({ is_super_admin: false, ...patch });
+
+function phoneEdit(pages: string[], patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: ADMIN_ID, email: 'ada@cardelite.ng', role_title: 'Card Reviewer', page_permissions: pages, ...patch };
+}
+
+function listedRow(patch: Partial<StoredAdmin>, role: Record<string, unknown> | null): Record<string, unknown> {
+  const { token_version: _version, role: _state, ...row } = stored(patch);
+  return { ...row, role };
+}
+
+function columnsOf(query: RouteQuery | undefined): string[] {
+  return (query?.columns ?? '').split(/,\s*/);
+}
+
+describe('GET /api/admin-accounts: roles beside the fields the phone reads', () => {
+  captureRouteLogs();
+
+  test('keeps every field the phone reads and adds the role, its id and the direct grants through the hinted embed', async () => {
+    const listed = [
+      listedRow(
+        { is_super_admin: false, page_permissions: ['dashboard', 'users', 'withdrawals'], role_id: ROLE_ID, direct_permissions: [] },
+        { id: ROLE_ID, name: 'Manager', archived_at: null },
+      ),
+      listedRow({ id: SELF_ID, username: 'owner' }, null),
+      listedRow({ id: CREATED_ID, username: 'old', is_super_admin: false, role_id: ROLE_ID }, {
+        id: ROLE_ID, name: 'Night shift', archived_at: '2026-10-01T09:00:00.000Z',
+      }),
+    ];
+    routeReset({ list: listed });
+    const reply = await send('GET');
+    assert.equal(reply.status, 200);
+    const admins = reply.body.admins as Array<Record<string, unknown>>;
+    assert.equal(admins.length, 3);
+    for (const [index, admin] of admins.entries()) {
+      for (const field of PHONE_FIELDS) assert.deepEqual(admin[field], listed[index][field], `${index} ${field}`);
+    }
+    assert.deepEqual([admins[0].role_id, admins[0].role, admins[0].direct_permissions], [
+      ROLE_ID, { id: ROLE_ID, name: 'Manager', archived: false }, [],
+    ]);
+    assert.deepEqual([admins[1].role_id, admins[1].role, admins[1].direct_permissions], [null, null, ['card_queue', 'users']]);
+    assert.deepEqual(admins[2].role, { id: ROLE_ID, name: 'Night shift', archived: true });
+    const [list] = routeQueries('admin_users', 'select');
+    assert.ok(list?.columns?.includes(LIST_ROLE_EMBED));
+    assert.ok(columnsOf(list).includes('role_id') && columnsOf(list).includes('direct_permissions'));
+    assert.equal(columnsOf(list).includes('token_version'), false);
+  });
+});
+
+describe('PATCH /api/admin-accounts: the phone’s edits once roles exist', () => {
+  captureRouteLogs();
+
+  test('the phone’s edit from a mobile session, with no reason or expected values, writes only page_permissions', async () => {
+    routeReset({
+      target: member(),
+      saved: { page_permissions: ['card_queue', 'coupons', 'users'], direct_permissions: ['card_queue', 'coupons', 'users'], token_version: 5 },
+    });
+    const reply = await send('PATCH', phoneEdit(['card_queue', 'users', 'coupons']));
+    assert.equal(reply.status, 200);
+    const [update] = routeQueries('admin_users', 'update');
+    assert.deepEqual(update?.payload, { page_permissions: ['card_queue', 'users', 'coupons'] });
+    assert.deepEqual(update?.filters, [['eq', 'id', ADMIN_ID], ['is', 'deleted_at', null], ['eq', 'token_version', 4]]);
+    for (const column of ['page_permissions', 'direct_permissions', 'role_id', 'token_version']) {
+      assert.ok(columnsOf(update).includes(column), column);
+    }
+    assert.equal(reply.body.changed, true);
+    assert.equal(reply.body.sessions_revoked, true);
+    const admin = reply.body.admin as Record<string, unknown>;
+    assert.deepEqual([admin.page_permissions, admin.direct_permissions, admin.role_id, admin.role], [
+      ['card_queue', 'coupons', 'users'], ['card_queue', 'coupons', 'users'], null, null,
+    ]);
+    assert.equal('token_version' in admin, false);
+    const [audit] = routeAudits();
+    assert.deepEqual(auditSummary(audit), {
+      admin_id: SELF_ID,
+      action: 'EDIT_ADMIN',
+      entity: 'admin_users',
+      entity_id: ADMIN_ID,
+      reason: null,
+      result: 'success',
+      error: null,
+      sensitivity: 'security',
+    });
+    assert.deepEqual(audit?.after_value, {
+      page_permissions: ['card_queue', 'coupons', 'users'],
+      grant_changes: { added: ['coupons'], removed: [], actions_gained: ['coupons.read', 'coupons.write'], actions_lost: [] },
+      token_version_bumped: true,
+    });
+  });
+
+  test('a page change the database stores without a sign-out answers that no session ended', async () => {
+    routeReset({
+      target: member(),
+      saved: { page_permissions: ['card_queue', 'dashboard', 'users'], direct_permissions: ['card_queue', 'dashboard', 'users'] },
+    });
+    const reply = await send('PATCH', phoneEdit(['card_queue', 'users', 'dashboard']));
+    assert.equal(reply.status, 200);
+    assert.equal(reply.body.sessions_revoked, false);
+    const after = routeAudits()[0]?.after_value as Record<string, unknown>;
+    assert.equal('token_version_bumped' in after, false);
+    assert.deepEqual((after.grant_changes as Record<string, unknown>).added, ['dashboard']);
+  });
+
+  test('a title change in the same phone save still signs the admin out from the route, once', async () => {
+    routeReset({ target: member(), saved: { page_permissions: ['card_queue', 'coupons', 'users'] } });
+    const reply = await send('PATCH', phoneEdit(['card_queue', 'users', 'coupons'], { role_title: 'Senior Reviewer' }));
+    assert.equal(reply.status, 200);
+    assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, {
+      role_title: 'Senior Reviewer',
+      page_permissions: ['card_queue', 'users', 'coupons'],
+      token_version: 5,
+    });
+    assert.equal(reply.body.sessions_revoked, true);
+  });
+
+  test('unticking a page that comes from the role answers 409 naming the role, and nothing is written', async () => {
+    routeReset({
+      target: member({
+        page_permissions: ['users', 'withdrawals'],
+        role_id: ROLE_ID,
+        direct_permissions: ['users'],
+        role: { id: ROLE_ID, name: 'Manager', archived_at: null, permissions: ['withdrawals'] },
+      }),
+    });
+    const reply = await send('PATCH', phoneEdit(['users']));
+    assert.equal(reply.status, 409);
+    assert.deepEqual(reply.body, failureBody('withdrawals comes from the role Manager. Change it in the web console.'));
+    assert.deepEqual(routeQueries('admin_users', 'update'), []);
+    assert.deepEqual(routeAudits(), []);
+    const [read] = routeQueries('admin_users', 'select');
+    assert.ok(read?.columns?.includes(STATE_ROLE_EMBED));
+    assert.ok(columnsOf(read).includes('token_version'));
+  });
+
+  test('dotted keys that differ from the stored ones answer 409, and an echo of them saves', async () => {
+    for (const pages of [['users'], ['users', 'withdrawals.read', 'withdrawals.approve']]) {
+      routeReset({ target: member({ page_permissions: ['users', 'withdrawals.read'] }) });
+      const reply = await send('PATCH', phoneEdit(pages));
+      assert.equal(reply.status, 409, JSON.stringify(pages));
+      assert.deepEqual(reply.body, failureBody(STALE_ACCESS));
+      assert.deepEqual(routeQueries('admin_users', 'update'), []);
+    }
+    routeReset({ target: member({ page_permissions: ['users', 'withdrawals.read'] }) });
+    const echo = await send('PATCH', phoneEdit(['withdrawals.read', 'users', 'coupons']));
+    assert.equal(echo.status, 200);
+    assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, { page_permissions: ['withdrawals.read', 'users', 'coupons'] });
+  });
+
+  test('an echo containing transfers for a super-admin target is accepted', async () => {
+    const held = ['dashboard', 'card_queue', 'withdrawals', 'admin_accounts', 'transfers', 'manual_wallet_credit'];
+    routeReset({ target: stored({ page_permissions: held, direct_permissions: held }) });
+    const reply = await send('PATCH', phoneEdit([...held], { role_title: 'Lead' }));
+    assert.equal(reply.status, 200);
+    assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, { role_title: 'Lead', token_version: 5 });
+  });
+
+  test('newly added restricted or retired pages answer 400 with the keys, before anything is written', async () => {
+    routeReset({ target: member() });
+    const reply = await send('PATCH', phoneEdit(['card_queue', 'users', 'admin_accounts', 'giftbox']));
+    assert.equal(reply.status, 400);
+    assert.deepEqual(reply.body, {
+      ...failureBody('These permissions cannot be granted: admin_accounts, giftbox.', 'VALIDATION_ERROR'),
+      details: { reason: 'not_grantable', keys: ['admin_accounts', 'giftbox'] },
+    });
+    assert.deepEqual(routeQueries('admin_users', 'update'), []);
+  });
+
+  test('database trigger refusals answer 400 or 409 with a failure audit, while other errors stay 500', async () => {
+    const cases: Array<[RouteDbError, number, string, string, Record<string, unknown>]> = [
+      [
+        { message: 'This permission cannot be granted', code: 'P0001' },
+        400, 'VALIDATION_ERROR', 'This permission cannot be granted.', { reason: 'not_grantable' },
+      ],
+      [{ message: 'This role is archived', code: 'P0001' }, 409, 'STATE_CONFLICT', 'This role is archived.', { reason: 'role_archived' }],
+    ];
+    for (const [error, status, code, message, details] of cases) {
+      routeReset({ target: member(), updateError: error });
+      const reply = await send('PATCH', phoneEdit(['card_queue', 'users', 'coupons']));
+      assert.equal(reply.status, status, error.message);
+      assert.deepEqual(reply.body, { ...failureBody(message, code), details });
+      assert.deepEqual(routeAudits().map((row) => [row.action, row.result, row.error]), [['EDIT_ADMIN', 'failure', error.message]]);
+      assert.deepEqual(routeHarness.logs, []);
+    }
+  });
+});
+
+describe('POST /api/admin-accounts: creating from the phone and from the web', () => {
+  captureRouteLogs();
+
+  test('the phone’s create from a mobile session creates the account with its pages, read back from the row', async () => {
+    routeReset({ target: null });
+    const reply = await send('POST', PHONE_CREATE);
+    assert.equal(reply.status, 200);
+    const [insert] = routeQueries('admin_users', 'insert');
+    assert.deepEqual(insert?.payload, {
+      username: 'tolu',
+      email: 'tolu@cardelite.ng',
+      password_hash: 'bcrypt-hash:12',
+      role_title: 'Payout Officer',
+      page_permissions: ['withdrawals', 'card_queue'],
+      is_super_admin: false,
+      is_active: true,
+    });
+    assert.equal(insert?.terminal, 'single');
+    assert.ok(insert?.columns?.includes(LIST_ROLE_EMBED));
+    assert.equal(reply.body.id, CREATED_ID);
+    assert.deepEqual(reply.body.admin, {
+      id: CREATED_ID,
+      username: 'tolu',
+      email: 'tolu@cardelite.ng',
+      role_title: 'Payout Officer',
+      page_permissions: ['card_queue', 'withdrawals'],
+      role_id: null,
+      role: null,
+      direct_permissions: ['card_queue', 'withdrawals'],
+      last_login_at: null,
+      is_active: true,
+      is_super_admin: false,
+      deleted_at: null,
+      created_at: CREATED_AT,
+    });
+    const [audit] = routeAudits();
+    assert.deepEqual([audit?.action, audit?.result, audit?.entity_id], ['CREATE_ADMIN', 'success', CREATED_ID]);
+    assert.deepEqual((audit?.after_value as Record<string, unknown>).page_permissions, ['card_queue', 'withdrawals']);
+  });
+
+  test('a web create carries no pages and makes an account with no access, and pages from the web answer 400', async () => {
+    routeReset({ target: null }, WEB_OWNER);
+    const { page_permissions: _pages, ...account } = PHONE_CREATE;
+    const created = await send('POST', { ...account, reason: 'New payout officer' });
+    assert.equal(created.status, 200);
+    assert.deepEqual((routeQueries('admin_users', 'insert')[0]?.payload as Record<string, unknown>).page_permissions, []);
+    routeReset({ target: null }, WEB_OWNER);
+    const refused = await send('POST', { ...PHONE_CREATE, reason: 'New payout officer' });
+    assert.equal(refused.status, 400);
+    assert.deepEqual(refused.body, failureBody(ACCESS_ELSEWHERE, 'VALIDATION_ERROR'));
+    assert.deepEqual(routeHarness.queries, []);
+  });
+
+  test('a database refusal on create is a 400 with a failure audit', async () => {
+    routeReset({ target: null, insertError: { message: 'This permission cannot be granted', code: 'P0001' } });
+    const reply = await send('POST', PHONE_CREATE);
+    assert.equal(reply.status, 400);
+    assert.equal(reply.body.code, 'VALIDATION_ERROR');
+    assert.deepEqual(routeAudits().map((row) => [row.action, row.result]), [['CREATE_ADMIN', 'failure']]);
+    assert.deepEqual(routeHarness.logs, []);
+  });
+});
+
+describe('/api/admin-accounts: access fields belong to the Access step', () => {
+  captureRouteLogs();
+
+  test('role_id or direct_permissions answer 400 from any session before anything is read, also beside page_permissions', async () => {
+    const requests: Array<['POST' | 'PATCH', Record<string, unknown>]> = [
+      ['PATCH', { id: ADMIN_ID, role_id: ROLE_ID }],
+      ['PATCH', { id: ADMIN_ID, role_id: null }],
+      ['PATCH', { id: ADMIN_ID, direct_permissions: [] }],
+      ['PATCH', { ...phoneEdit(['card_queue', 'users']), role_id: ROLE_ID }],
+      ['POST', { ...PHONE_CREATE, role_id: ROLE_ID }],
+      ['POST', { ...PHONE_CREATE, direct_permissions: ['coupons'] }],
+    ];
+    for (const claims of [OWNER, WEB_OWNER]) {
+      for (const [method, body] of requests) {
+        routeReset({}, claims);
+        const reply = await send(method, body);
+        assert.equal(reply.status, 400, `${claims.session.client} ${method} ${JSON.stringify(body)}`);
+        assert.deepEqual(reply.body, failureBody(ACCESS_ELSEWHERE, 'VALIDATION_ERROR'));
+        assert.deepEqual(routeHarness.queries, []);
+      }
+    }
+  });
+
+  test('page_permissions from a web session answer 400, while the web console’s account edits still save', async () => {
+    routeReset({ target: member() }, WEB_OWNER);
+    const refused = await send('PATCH', { ...phoneEdit(['card_queue', 'users']), reason: 'Tidy up' });
+    assert.equal(refused.status, 400);
+    assert.deepEqual(refused.body, failureBody(ACCESS_ELSEWHERE, 'VALIDATION_ERROR'));
+    assert.deepEqual(routeHarness.queries, []);
+    routeReset({ target: member() }, WEB_OWNER);
+    const titled = await send('PATCH', { id: ADMIN_ID, role_title: 'Lead', reason: 'Promotion', expected: { role_title: 'Card Reviewer' } });
+    assert.equal(titled.status, 200);
+    assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, { role_title: 'Lead', token_version: 5 });
+  });
+
+  test('the route takes pages from phone sessions only and still asks for no fresh identity check', () => {
+    const source = readFileSync(ROUTE_FILE, 'utf8');
+    assert.match(source, /admin\.session\.client !== 'mobile'/);
+    assert.doesNotMatch(source, /requireRecentAuth|requireTwoStep|REAUTH_REQUIRED|MFA_REQUIRED/);
   });
 });

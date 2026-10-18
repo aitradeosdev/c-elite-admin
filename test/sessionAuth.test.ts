@@ -24,6 +24,8 @@ const KEY = new TextEncoder().encode(SECRET);
 const ADMIN_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
 const SID = 'c4e2a9d1-3b5f-4e7a-8c6d-2f1e0a9b8c7d';
 const OTHER_SID = '0f1e2d3c-4b5a-4968-8776-655443322110';
+const ROLE_ID = '5f0c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f';
+const ACCESS_ROUTE = '/api/admin-accounts/[id]/access';
 const REQUEST_ID = 'req_sessionauth1';
 const USER_AGENT = 'Mozilla/5.0 (CardElite session test)';
 const CLIENT_IP = '198.51.100.7';
@@ -451,6 +453,7 @@ describe('verifyAdminSession', () => {
       token_version: 4,
       sid: SID,
       amr: ['otp', 'pwd'],
+      role: null,
     });
     const raw = state0.session as Record<string, string>;
     assert.deepEqual(check.session, {
@@ -480,6 +483,28 @@ describe('verifyAdminSession', () => {
       assert.deepEqual(check.claims.amr, ['pwd']);
     }
     assert.deepEqual(state.rpcs, [{ name: 'admin_auth_state', args: { p_admin_id: ADMIN_ID, p_sid: SID } }]);
+  });
+
+  test('the role is read from the database when it is well formed, and anything else is no role, never an error', async () => {
+    const cases: Array<[unknown, unknown]> = [
+      [{ id: ROLE_ID, name: 'Manager' }, { id: ROLE_ID, name: 'Manager' }],
+      [{ id: ROLE_ID, name: null }, { id: ROLE_ID, name: null }],
+      [{ id: ROLE_ID }, { id: ROLE_ID, name: null }],
+      [{ id: ROLE_ID, name: 7 }, { id: ROLE_ID, name: null }],
+      [null, null],
+      ['Manager', null],
+      [[ROLE_ID], null],
+      [{ id: 'not-a-role', name: 'Manager' }, null],
+      [{ id: 42, name: 'Manager' }, null],
+      [{ name: 'Manager' }, null],
+    ];
+    for (const [role, expected] of cases) {
+      reset();
+      answer(stateFor({ admin: { ...(stateFor().admin as object), role } }));
+      const check = await jwt.verifyAdminSession(await token(), 'cookie');
+      assert.equal(check.status, 'ok', JSON.stringify(role));
+      if (check.status === 'ok') assert.deepEqual(check.claims.role, expected, JSON.stringify(role));
+    }
   });
 
   test('a session that is revoked, expired, superseded by a version bump or unknown is invalid', async () => {
@@ -781,6 +806,7 @@ describe('the guard', () => {
     assert.equal(admin.ip, CLIENT_IP);
     assert.equal(admin.user_agent, USER_AGENT);
     assert.equal(admin.request_id, REQUEST_ID);
+    assert.equal(admin.role, null);
     assert.ok(admin.can('withdrawals.read'));
 
     reset();
@@ -788,6 +814,16 @@ describe('the guard', () => {
     answer(stateFor());
     const denied = await guard.requireSuperAdmin();
     assert.equal(denied.ok ? 200 : denied.response.status, 403);
+  });
+
+  test('the context carries the role the database reports', async () => {
+    prepare({}, { admin_token: await token() });
+    answer(stateFor({ admin: { ...(stateFor().admin as object), role: { id: ROLE_ID, name: 'Manager' } } }));
+    const result = await guard.requireAdmin('withdrawals.read');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.admin.role, { id: ROLE_ID, name: 'Manager' });
+    assert.deepEqual(result.admin.page_permissions, ['withdrawals', 'card_queue']);
   });
 
   test('bare claims from the suites that stub jwt.ts still build a working context with safe defaults', async () => {
@@ -805,6 +841,7 @@ describe('the guard', () => {
     assert.deepEqual(result.admin.mfa, { status: 'none', lockedUntil: null });
     assert.deepEqual(result.admin.policy, { mode: 'off', graceEndsAt: null, requiredNow: false });
     assert.deepEqual(result.admin.page_permissions, ['withdrawals']);
+    assert.equal(result.admin.role, null);
     assert.equal(result.admin.request_id, REQUEST_ID);
     state.stubClaims = null;
     const refused = await stubbedGuard.requireAdmin();
@@ -1080,6 +1117,11 @@ describe('routes the mobile app calls', () => {
       const source = readFileSync(file, 'utf8');
       assert.doesNotMatch(source, /requireRecentAuth|requireTwoStep|REAUTH_REQUIRED|MFA_REQUIRED/, path);
     }
+  });
+
+  test('the web-only access route is not a route the mobile app calls, while the phone keeps /api/admin-accounts', () => {
+    assert.ok(!(MOBILE_WEB_PATHS as readonly string[]).includes(ACCESS_ROUTE));
+    assert.ok((MOBILE_WEB_PATHS as readonly string[]).includes('/api/admin-accounts'));
   });
 
   test('the list holds every web path the mobile app calls', { skip: !existsSync(join(MOBILE_DIR, 'lib', 'api.ts')) }, () => {

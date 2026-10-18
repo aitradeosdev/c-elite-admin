@@ -1,12 +1,19 @@
 import {
   ALL_PERMISSIONS,
   LEGACY_PERMISSION_MAP,
-  PERMISSION_CATALOG,
   isPermission,
-  resolvePermissions,
   type Permission,
-  type PermissionRisk,
 } from '../../lib/permissions';
+import {
+  RETIRED_PAGE_KEYS,
+  checkNewKeys,
+  diffGrants,
+  grantChangeRecord,
+  normalizeGrants,
+  phoneEditProblem,
+  sameGrants,
+  type GrantChange,
+} from '../../lib/grants';
 import { checkPassword } from '../../lib/passwordPolicy';
 
 export {
@@ -18,6 +25,21 @@ export {
 } from '../../lib/passwordPolicy';
 export type { PasswordRule } from '../../lib/passwordPolicy';
 
+export {
+  RETIRED_PAGE_KEYS,
+  RISK_ORDER,
+  diffGrants,
+  effectiveActions,
+  grantChangeRecord,
+  grantRisk,
+  grantedActions,
+  highestRisk,
+  normalizeGrants,
+  sameGrants,
+  sortGrants,
+} from '../../lib/grants';
+export type { GrantChange } from '../../lib/grants';
+
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 32;
 export const ROLE_TITLE_MIN = 2;
@@ -27,14 +49,6 @@ export const REASON_MAX = 500;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const RESTRICTED_PAGE_KEYS: readonly string[] = ['admin_accounts'];
-
-export const RETIRED_PAGE_KEYS: readonly string[] = [
-  'manual_wallet_credit',
-  'field_builder',
-  'feature_overrides',
-  'flagged_transactions',
-  'giftbox',
-];
 
 export const PAGE_KEYS: readonly string[] = Object.keys(LEGACY_PERMISSION_MAP);
 
@@ -50,7 +64,7 @@ export const ADDITIONAL_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.fil
 
 const ACCEPTED: ReadonlySet<string> = new Set<string>([...PAGE_KEYS, ...RETIRED_PAGE_KEYS, ...ADDITIONAL_PERMISSIONS]);
 
-export const MAX_GRANT_KEYS = ACCEPTED.size;
+export const MAX_GRANT_KEYS = 256;
 
 export type GrantKind = 'page' | 'restricted' | 'retired' | 'additional' | 'unknown';
 
@@ -66,106 +80,36 @@ export function isAcceptedGrant(value: unknown): value is string {
   return typeof value === 'string' && ACCEPTED.has(value);
 }
 
-export const RISK_ORDER: readonly PermissionRisk[] = ['critical', 'high', 'medium', 'low'];
+export type RuleFailure = {
+  ok: false;
+  code: 'VALIDATION_ERROR' | 'STATE_CONFLICT';
+  message: string;
+  details?: Record<string, unknown>;
+};
 
-const RISK_RANK: Readonly<Record<PermissionRisk, number>> = { low: 0, medium: 1, high: 2, critical: 3 };
+const invalid = (message: string, details?: Record<string, unknown>): RuleFailure =>
+  details ? { ok: false, code: 'VALIDATION_ERROR', message, details } : { ok: false, code: 'VALIDATION_ERROR', message };
+const conflict = (message: string): RuleFailure => ({ ok: false, code: 'STATE_CONFLICT', message });
 
-export function highestRisk(permissions: Iterable<Permission>): PermissionRisk | null {
-  let best: PermissionRisk | null = null;
-  for (const permission of permissions) {
-    const risk = PERMISSION_CATALOG[permission].risk;
-    if (best === null || RISK_RANK[risk] > RISK_RANK[best]) best = risk;
-  }
-  return best;
+export interface HeldGrants {
+  stored?: readonly string[] | null;
+  roleKeys?: readonly string[] | null;
+  roleName?: string | null;
 }
 
-export function grantedActions(key: string): readonly Permission[] {
-  if (PAGES.has(key)) return LEGACY_PERMISSION_MAP[key];
-  if (isPermission(key)) return [key];
-  return [];
-}
+export type GrantCheck = { ok: true; keys: string[] } | RuleFailure;
 
-export function grantRisk(key: string): PermissionRisk | null {
-  return highestRisk(grantedActions(key));
-}
-
-export function normalizeGrants(keys: readonly unknown[] | null | undefined): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const key of keys ?? []) {
-    if (typeof key !== 'string' || key === '' || seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-  }
-  return out;
-}
-
-export function sameGrants(a: readonly string[], b: readonly string[]): boolean {
-  const left = new Set(a);
-  const right = new Set(b);
-  if (left.size !== right.size) return false;
-  for (const key of left) if (!right.has(key)) return false;
-  return true;
-}
-
-export function effectiveActions(keys: readonly string[]): Set<Permission> {
-  return resolvePermissions(keys.filter((key) => PAGES.has(key) || isPermission(key)), false);
-}
-
-const ORDER: ReadonlyMap<string, number> = new Map<string, number>([
-  ...PAGE_KEYS.map((key, index) => [key, index] as const),
-  ...ALL_PERMISSIONS.map((key, index) => [key, PAGE_KEYS.length + index] as const),
-  ...RETIRED_PAGE_KEYS.map((key, index) => [key, PAGE_KEYS.length + ALL_PERMISSIONS.length + index] as const),
-]);
-
-export function sortGrants(keys: Iterable<string>): string[] {
-  const unplaced = Number.MAX_SAFE_INTEGER;
-  return Array.from(keys).sort((a, b) => {
-    const delta = (ORDER.get(a) ?? unplaced) - (ORDER.get(b) ?? unplaced);
-    return delta !== 0 ? delta : a < b ? -1 : a > b ? 1 : 0;
-  });
-}
-
-export interface GrantChange {
-  added: string[];
-  removed: string[];
-  gained: Permission[];
-  lost: Permission[];
-}
-
-export function diffGrants(before: readonly string[], after: readonly string[]): GrantChange {
-  const was = new Set(before);
-  const now = new Set(after);
-  const beforeActions = effectiveActions(before);
-  const afterActions = effectiveActions(after);
-  return {
-    added: sortGrants([...now].filter((key) => !was.has(key))),
-    removed: sortGrants([...was].filter((key) => !now.has(key))),
-    gained: ALL_PERMISSIONS.filter((key) => afterActions.has(key) && !beforeActions.has(key)),
-    lost: ALL_PERMISSIONS.filter((key) => beforeActions.has(key) && !afterActions.has(key)),
-  };
-}
-
-export function grantChangeRecord(change: GrantChange) {
-  return {
-    added: change.added,
-    removed: change.removed,
-    actions_gained: change.gained,
-    actions_lost: change.lost,
-  };
-}
-
-export type GrantCheck = { ok: true; keys: string[] } | { ok: false; message: string };
-
-export function checkGrants(input: unknown): GrantCheck {
-  if (!Array.isArray(input)) return { ok: false, message: 'page_permissions must be an array of permission keys.' };
-  if (input.length > MAX_GRANT_KEYS) return { ok: false, message: 'Too many permission keys.' };
-  for (const key of input) {
-    if (!isAcceptedGrant(key)) {
-      return { ok: false, message: `Unknown permission key: ${String(key).slice(0, 32)}` };
-    }
-  }
-  return { ok: true, keys: normalizeGrants(input) };
+export function checkGrants(input: unknown, held: HeldGrants = {}): GrantCheck {
+  if (!Array.isArray(input)) return invalid('page_permissions must be an array of permission keys.');
+  if (input.length > MAX_GRANT_KEYS) return invalid('Too many permission keys.');
+  if (input.some((key) => typeof key !== 'string')) return invalid('page_permissions must be an array of permission keys.');
+  const keys = normalizeGrants(input);
+  const stored = normalizeGrants(held.stored);
+  const refused = checkNewKeys(keys.filter((key) => !key.includes('.')), stored, 'direct');
+  if (refused) return invalid(refused.message, { reason: 'not_grantable', keys: refused.keys });
+  const problem = phoneEditProblem(keys, stored, held.roleKeys, held.roleName);
+  if (problem) return conflict(problem.message);
+  return { ok: true, keys };
 }
 
 export function checkUsername(value: unknown): string | null {
@@ -214,20 +158,20 @@ export interface NewAdmin {
   page_permissions: string[];
 }
 
-export type CreateCheck = { ok: true; value: NewAdmin } | { ok: false; message: string };
+export type CreateCheck = { ok: true; value: NewAdmin } | RuleFailure;
 
 export function checkCreate(input: CreateInput): CreateCheck {
   const { username, email, password, role_title: roleTitle, page_permissions: grants } = input;
   if (!username || !password || !roleTitle || !email) {
-    return { ok: false, message: 'Username, email, password and role title are required.' };
+    return invalid('Username, email, password and role title are required.');
   }
-  if (!isEmail(email)) return { ok: false, message: 'Enter a valid email address.' };
+  if (!isEmail(email)) return invalid('Enter a valid email address.');
   const passwordProblem = checkPassword(password);
-  if (passwordProblem) return { ok: false, message: passwordProblem };
+  if (passwordProblem) return invalid(passwordProblem);
   const usernameProblem = checkUsername(username);
-  if (usernameProblem) return { ok: false, message: usernameProblem };
+  if (usernameProblem) return invalid(usernameProblem);
   const roleProblem = checkRoleTitle(roleTitle);
-  if (roleProblem) return { ok: false, message: roleProblem };
+  if (roleProblem) return invalid(roleProblem);
   let keys: string[] = [];
   if (grants !== undefined && grants !== null) {
     const checked = checkGrants(grants);
@@ -246,6 +190,13 @@ export function checkCreate(input: CreateInput): CreateCheck {
   };
 }
 
+export interface AdminRoleState {
+  id: string;
+  name: string | null;
+  archived_at?: string | null;
+  permissions?: readonly string[] | null;
+}
+
 export interface AdminState {
   id: string;
   username: string | null;
@@ -256,6 +207,9 @@ export interface AdminState {
   is_super_admin: boolean | null;
   deleted_at: string | null;
   token_version: number | null;
+  role_id?: string | null;
+  direct_permissions?: readonly string[] | null;
+  role?: AdminRoleState | null;
 }
 
 export interface EditInput {
@@ -323,12 +277,7 @@ export interface EditPlan {
   after: Record<string, unknown>;
 }
 
-export type RuleFailure = { ok: false; code: 'VALIDATION_ERROR' | 'STATE_CONFLICT'; message: string };
-
 export type EditPlanResult = { ok: true; plan: EditPlan } | RuleFailure;
-
-const invalid = (message: string): RuleFailure => ({ ok: false, code: 'VALIDATION_ERROR', message });
-const conflict = (message: string): RuleFailure => ({ ok: false, code: 'STATE_CONFLICT', message });
 
 export const SELF_REVOKE_MESSAGE =
   'You cannot deactivate or revoke your own session here. Sign out from your account instead.';
@@ -376,8 +325,12 @@ export function planEdit(state: AdminState, input: EditInput, actorId: string): 
 
   let grants: GrantChange | null = null;
   if (input.page_permissions !== undefined) {
-    const checked = checkGrants(input.page_permissions === null ? [] : input.page_permissions);
-    if (!checked.ok) return invalid(checked.message);
+    const checked = checkGrants(input.page_permissions === null ? [] : input.page_permissions, {
+      stored: current,
+      roleKeys: state.role?.permissions,
+      roleName: state.role?.name,
+    });
+    if (!checked.ok) return checked;
     if (!sameGrants(current, checked.keys)) {
       updates.page_permissions = checked.keys;
       changed.push('page_permissions');
@@ -415,7 +368,6 @@ export function planEdit(state: AdminState, input: EditInput, actorId: string): 
   const deactivating = updates.is_active === false;
   const revokesSessions = revoke
     || password !== null
-    || changed.includes('page_permissions')
     || changed.includes('role_title')
     || changed.includes('is_active');
   if (revokesSessions) updates.token_version = (state.token_version ?? 0) + 1;
@@ -449,6 +401,29 @@ export function planEdit(state: AdminState, input: EditInput, actorId: string): 
       after,
     },
   };
+}
+
+export interface SavedGrants {
+  page_permissions: readonly string[] | null;
+  token_version: number | null;
+}
+
+export interface SavedChange {
+  after: Record<string, unknown>;
+  sessionsRevoked: boolean;
+}
+
+export function savedChange(plan: EditPlan, state: AdminState, saved: SavedGrants): SavedChange {
+  const sessionsRevoked = saved.token_version !== state.token_version;
+  const after: Record<string, unknown> = { ...plan.after };
+  delete after.token_version_bumped;
+  if (plan.updates.page_permissions !== undefined) {
+    const effective = normalizeGrants(saved.page_permissions);
+    after.page_permissions = effective;
+    after.grant_changes = grantChangeRecord(diffGrants(normalizeGrants(state.page_permissions), effective));
+  }
+  if (sessionsRevoked) after.token_version_bumped = true;
+  return { after, sessionsRevoked };
 }
 
 export type DeletePlanResult = { ok: true; before: Record<string, unknown> } | RuleFailure;

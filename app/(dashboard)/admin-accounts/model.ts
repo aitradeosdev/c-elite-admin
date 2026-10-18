@@ -1,25 +1,33 @@
 import { NAV_GROUPS } from '../_shell/nav';
 import {
+  ALL_PERMISSIONS,
+  LEGACY_PERMISSION_MAP,
   PERMISSION_CATALOG,
   PERMISSION_CATEGORIES,
   isPermission,
+  permissionStatus,
+  resolvePermissions,
   type Permission,
   type PermissionCategory,
   type PermissionRisk,
 } from '../../lib/permissions';
 import type { ApiBody, ApiFailure, ApiResult } from '../../lib/apiClient';
-import { twoStepUnlockText } from '../../lib/http';
+import { isUuid, twoStepUnlockText } from '../../lib/http';
 import { graceText, isLockActive, toTwoStepStatus, type TwoStepStatus } from '../../lib/adminSecurity';
+import { foldIntoRole } from '../../lib/grants';
+import { REASON_MESSAGE, REASON_MIN, assignableRole, parseRoleRow, type RoleRow } from '../../lib/roles';
+import { SecurityRequestError, reauthenticate } from '../../_security/reauth';
 import { combineCodecs, enumParam, uuidParam } from '../../_ui/useUrlState';
 import type { SortState } from '../../_ui/useTableSort';
 import type { StatTone, Tone } from '../../_ui/Status';
 import {
   ADDITIONAL_PERMISSIONS,
-  GRANTABLE_PAGE_KEYS,
+  PAGE_KEYS,
+  ROLE_TITLE_MAX,
+  ROLE_TITLE_MIN,
   checkPassword,
   checkRoleTitle,
   checkUsername,
-  diffGrants,
   effectiveActions,
   grantKind,
   grantRisk,
@@ -30,7 +38,6 @@ import {
   sameGrants,
   sortGrants,
   type EditExpectation,
-  type GrantChange,
 } from './rules';
 
 export interface AdminSecurity {
@@ -43,12 +50,21 @@ export interface AdminSecurity {
   lastSeenAt: string | null;
 }
 
+export interface AdminRoleRef {
+  id: string;
+  name: string | null;
+  archived: boolean;
+}
+
 export interface AdminRow {
   id: string;
   username: string;
   email: string | null;
   role_title: string;
   page_permissions: string[];
+  role_id: string | null;
+  role: AdminRoleRef | null;
+  direct_permissions: string[];
   last_login_at: string | null;
   is_active: boolean;
   is_super_admin: boolean;
@@ -87,6 +103,10 @@ function countOf(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
+function idOf(value: unknown): string | null {
+  return isUuid(value) ? value.toLowerCase() : null;
+}
+
 function isTwoStepStatus(value: unknown): value is TwoStepStatus {
   return value === 'none' || value === 'pending' || value === 'active';
 }
@@ -102,6 +122,13 @@ function toAdminSecurity(row: Record<string, unknown>): AdminSecurity | null {
     liveSessions: countOf(row.live_sessions),
     lastSeenAt: text(row.last_seen_at),
   };
+}
+
+function toRoleRef(value: unknown): AdminRoleRef | null {
+  if (!isRecord(value)) return null;
+  const id = idOf(value.id);
+  if (!id) return null;
+  return { id, name: text(value.name), archived: value.archived === true };
 }
 
 export function toSecurityPolicy(raw: unknown): SecurityPolicy {
@@ -124,6 +151,9 @@ export function toAdminRow(row: unknown): AdminRow | null {
     email: text(row.email),
     role_title: typeof row.role_title === 'string' ? row.role_title : '',
     page_permissions: Array.isArray(row.page_permissions) ? normalizeGrants(row.page_permissions) : [],
+    role_id: idOf(row.role_id),
+    role: toRoleRef(row.role),
+    direct_permissions: Array.isArray(row.direct_permissions) ? normalizeGrants(row.direct_permissions) : [],
     last_login_at: text(row.last_login_at),
     is_active: row.is_active === true,
     is_super_admin: row.is_super_admin === true,
@@ -159,6 +189,16 @@ export function withAdmin(list: AdminList | undefined, admin: AdminRow): AdminLi
 export function adminHandle(admin: { username: string } | null | undefined): string {
   const name = admin?.username?.trim();
   return name ? `@${name}` : 'this admin';
+}
+
+export const SUPER_ADMIN_ROLE_LABEL = 'Super administrator';
+export const NO_ROLE_LABEL = 'No role';
+export const UNNAMED_ROLE_LABEL = 'Unnamed role';
+
+export function roleLabel(admin: Pick<AdminRow, 'is_super_admin' | 'role_id' | 'role'>): string {
+  if (admin.is_super_admin) return SUPER_ADMIN_ROLE_LABEL;
+  if (admin.role) return admin.role.name ?? UNNAMED_ROLE_LABEL;
+  return admin.role_id ? UNNAMED_ROLE_LABEL : NO_ROLE_LABEL;
 }
 
 export type AdminStatus = 'active' | 'inactive' | 'deleted';
@@ -410,6 +450,10 @@ export function adminSessionPath(id: string, sessionId: string): string {
   return `${adminSessionsPath(id)}/${encodeURIComponent(sessionId)}`;
 }
 
+export function accessPath(id: string): string {
+  return `/api/admin-accounts/${encodeURIComponent(id)}/access`;
+}
+
 export type RowActionKind = 'revoke' | 'deactivate' | 'reactivate' | 'remove';
 
 export function allowsAction(capabilities: AdminCapabilities, kind: RowActionKind): boolean {
@@ -500,9 +544,9 @@ export function pageLabel(key: string): string {
 }
 
 export function grantLabel(key: string): string {
+  if (isPermission(key)) return PERMISSION_CATALOG[key].label;
   const kind = grantKind(key);
   if (kind === 'page' || kind === 'restricted' || kind === 'retired') return pageLabel(key);
-  if (kind === 'additional' && isPermission(key)) return PERMISSION_CATALOG[key].label;
   return key;
 }
 
@@ -523,8 +567,11 @@ function pageSpec(key: string): PageGrantSpec {
   };
 }
 
+const GRANTABLE_PAGES: readonly string[] = PAGE_KEYS.filter((key) =>
+  LEGACY_PERMISSION_MAP[key].every((permission) => permissionStatus(permission) !== 'super_only'));
+
 export const PAGE_GRANT_GROUPS: readonly PageGrantGroup[] = (() => {
-  const grantable = new Set(GRANTABLE_PAGE_KEYS);
+  const grantable = new Set(GRANTABLE_PAGES);
   const placed = new Set<string>();
   const groups: PageGrantGroup[] = [];
   for (const group of NAV_GROUPS) {
@@ -541,18 +588,14 @@ export const PAGE_GRANT_GROUPS: readonly PageGrantGroup[] = (() => {
     }
     if (keys.length) groups.push({ label: group.label, grants: keys.map(pageSpec) });
   }
-  const rest = GRANTABLE_PAGE_KEYS.filter((key) => !placed.has(key));
+  const rest = GRANTABLE_PAGES.filter((key) => !placed.has(key));
   if (rest.length) groups.push({ label: 'Other pages', grants: rest.map(pageSpec) });
   return groups;
 })();
 
-export const ENFORCED_ADDITIONAL: readonly Permission[] = [
-  'flags.read',
-  'flags.resolve',
-  'sensitive_data.download',
-  'sensitive_data.share',
-  'wallets.adjust',
-];
+export const ENFORCED_ADDITIONAL: readonly Permission[] = ADDITIONAL_PERMISSIONS.filter(
+  (key) => permissionStatus(key) === 'enforced',
+);
 
 export interface AdditionalGrantSpec {
   key: Permission;
@@ -650,7 +693,7 @@ export function accessSummary(keys: readonly string[]): AccessSummary {
     if (kind === 'page' || kind === 'restricted') {
       pages += 1;
       labels.push(grantLabel(key));
-    } else if (kind === 'additional') {
+    } else if (kind === 'additional' || isPermission(key)) {
       additional += 1;
       labels.push(grantLabel(key));
     } else {
@@ -704,13 +747,11 @@ export interface EditorDraft {
   roleTitle: string;
   password: string;
   confirmPassword: string;
-  grants: readonly string[];
 }
 
 export interface EditableValues {
   email: string;
   roleTitle: string;
-  grants: readonly string[];
 }
 
 export const EMPTY_DRAFT: EditorDraft = {
@@ -719,11 +760,10 @@ export const EMPTY_DRAFT: EditorDraft = {
   roleTitle: '',
   password: '',
   confirmPassword: '',
-  grants: [],
 };
 
 export function valuesOf(admin: AdminRow): EditableValues {
-  return { email: admin.email ?? '', roleTitle: admin.role_title, grants: admin.page_permissions };
+  return { email: admin.email ?? '', roleTitle: admin.role_title };
 }
 
 export function draftFor(admin: AdminRow | null): EditorDraft {
@@ -731,7 +771,7 @@ export function draftFor(admin: AdminRow | null): EditorDraft {
   return { ...EMPTY_DRAFT, username: admin.username, ...valuesOf(admin) };
 }
 
-export type EditorField = 'username' | 'email' | 'roleTitle' | 'password' | 'confirmPassword' | 'grants';
+export type EditorField = 'username' | 'email' | 'roleTitle' | 'password' | 'confirmPassword';
 
 export const EDITOR_FIELD_ORDER: readonly EditorField[] = [
   'username',
@@ -739,10 +779,11 @@ export const EDITOR_FIELD_ORDER: readonly EditorField[] = [
   'roleTitle',
   'password',
   'confirmPassword',
-  'grants',
 ];
 
 export type EditorErrors = Partial<Record<EditorField, string>>;
+
+export const TITLE_LENGTH_MESSAGE = `Title must be ${ROLE_TITLE_MIN}–${ROLE_TITLE_MAX} characters.`;
 
 export function validateDraft(mode: EditorMode, draft: EditorDraft): EditorErrors {
   const errors: EditorErrors = {};
@@ -754,20 +795,15 @@ export function validateDraft(mode: EditorMode, draft: EditorDraft): EditorError
   const email = draft.email.trim();
   if (!email) errors.email = 'Enter an email address. Admins sign in with it and receive security alerts there.';
   else if (!isEmail(email)) errors.email = 'Enter a valid email address.';
-  const role = draft.roleTitle.trim();
-  const roleProblem = role ? checkRoleTitle(role) : 'Enter a role title.';
-  if (roleProblem) errors.roleTitle = roleProblem;
+  const title = draft.roleTitle.trim();
+  if (!title) errors.roleTitle = 'Enter a title.';
+  else if (checkRoleTitle(title)) errors.roleTitle = TITLE_LENGTH_MESSAGE;
   if (mode === 'create' || draft.password !== '') {
     const passwordProblem = checkPassword(draft.password);
     if (passwordProblem) errors.password = passwordProblem;
   }
   if (draft.password !== '' && draft.confirmPassword !== draft.password) {
     errors.confirmPassword = 'The passwords do not match.';
-  }
-  const kinds = draft.grants.map(grantKind);
-  if (kinds.includes('unknown')) errors.grants = 'Untick the unrecognised keys before saving.';
-  else if (!kinds.some((kind) => kind === 'page' || kind === 'additional')) {
-    errors.grants = 'Give this admin at least one page or permission.';
   }
   return errors;
 }
@@ -779,9 +815,7 @@ export function firstError(errors: EditorErrors): EditorField | null {
 export function isDraftDirty(mode: EditorMode, draft: EditorDraft, base: EditableValues): boolean {
   if (draft.password !== '' || draft.confirmPassword !== '') return true;
   if (mode === 'create' && draft.username.trim() !== '') return true;
-  return draft.email.trim() !== base.email.trim()
-    || draft.roleTitle.trim() !== base.roleTitle.trim()
-    || !sameGrants(draft.grants, base.grants);
+  return draft.email.trim() !== base.email.trim() || draft.roleTitle.trim() !== base.roleTitle.trim();
 }
 
 export type ConflictField = 'email' | 'roleTitle';
@@ -803,17 +837,10 @@ export function rebaseValues(base: EditableValues, local: EditableValues, server
   };
   const email = pick('email');
   const roleTitle = pick('roleTitle');
-  const was = new Set(base.grants);
-  const wanted = new Set(local.grants);
-  const live = new Set(server.grants);
-  const grants = sortGrants(new Set([...base.grants, ...local.grants, ...server.grants]))
-    .filter((key) => (wanted.has(key) !== was.has(key) ? wanted.has(key) : live.has(key)));
   return {
-    values: { email, roleTitle, grants },
+    values: { email, roleTitle },
     conflicts,
-    changedElsewhere: server.email.trim() !== base.email.trim()
-      || server.roleTitle.trim() !== base.roleTitle.trim()
-      || !sameGrants(server.grants, base.grants),
+    changedElsewhere: server.email.trim() !== base.email.trim() || server.roleTitle.trim() !== base.roleTitle.trim(),
   };
 }
 
@@ -825,8 +852,6 @@ export interface FieldChange {
 export interface EditProposal {
   email: FieldChange | null;
   roleTitle: FieldChange | null;
-  grants: GrantChange | null;
-  nextGrants: string[];
   password: boolean;
   revokesSessions: boolean;
   expected: EditExpectation;
@@ -835,28 +860,23 @@ export interface EditProposal {
 export function proposeEdit(live: AdminRow, values: EditableValues, password: string): EditProposal {
   const email = values.email.trim();
   const roleTitle = values.roleTitle.trim();
-  const nextGrants = normalizeGrants(values.grants);
   const emailChange = email !== (live.email ?? '').trim() ? { before: live.email, after: email } : null;
   const roleChange = roleTitle !== live.role_title.trim() ? { before: live.role_title || null, after: roleTitle } : null;
-  const grants = sameGrants(live.page_permissions, nextGrants) ? null : diffGrants(live.page_permissions, nextGrants);
   const passwordChange = password !== '';
   const expected: EditExpectation = {};
   if (emailChange) expected.email = live.email;
   if (roleChange) expected.role_title = live.role_title;
-  if (grants) expected.page_permissions = live.page_permissions;
   return {
     email: emailChange,
     roleTitle: roleChange,
-    grants,
-    nextGrants,
     password: passwordChange,
-    revokesSessions: passwordChange || roleChange !== null || grants !== null,
+    revokesSessions: passwordChange || roleChange !== null,
     expected,
   };
 }
 
 export function isEmptyProposal(proposal: EditProposal): boolean {
-  return !proposal.email && !proposal.roleTitle && !proposal.grants && !proposal.password;
+  return !proposal.email && !proposal.roleTitle && !proposal.password;
 }
 
 export function editRequestBody(
@@ -868,7 +888,6 @@ export function editRequestBody(
   const body: Record<string, unknown> = { id, reason };
   if (proposal.email) body.email = proposal.email.after;
   if (proposal.roleTitle) body.role_title = proposal.roleTitle.after;
-  if (proposal.grants) body.page_permissions = proposal.nextGrants;
   if (proposal.password) body.password = password;
   if (Object.keys(proposal.expected).length) body.expected = proposal.expected;
   return body;
@@ -880,10 +899,220 @@ export function createRequestBody(draft: EditorDraft, reason: string): Record<st
     email: draft.email.trim(),
     password: draft.password,
     role_title: draft.roleTitle.trim(),
-    page_permissions: normalizeGrants(draft.grants),
     reason,
   };
 }
+
+export interface AccessExpected {
+  role_id: string | null;
+  direct_permissions: readonly string[];
+  page_permissions: readonly string[];
+}
+
+export const NO_ACCESS: AccessExpected = Object.freeze({ role_id: null, direct_permissions: [], page_permissions: [] });
+
+export interface AccessDraft {
+  roleId: string | null;
+  direct: readonly string[];
+  folded: readonly string[];
+}
+
+export function accessOf(admin: Pick<AdminRow, 'role_id' | 'direct_permissions' | 'page_permissions'>): AccessExpected {
+  return {
+    role_id: admin.role_id,
+    direct_permissions: [...admin.direct_permissions],
+    page_permissions: [...admin.page_permissions],
+  };
+}
+
+export function accessDraftFor(expected: AccessExpected): AccessDraft {
+  return { roleId: expected.role_id, direct: [...expected.direct_permissions], folded: [] };
+}
+
+export function isAccessDirty(base: AccessExpected, draft: AccessDraft): boolean {
+  return draft.roleId !== base.role_id || !sameGrants(draft.direct, base.direct_permissions);
+}
+
+export function pickRole(draft: AccessDraft, roleId: string | null, roleKeys: readonly string[]): AccessDraft {
+  const candidates = normalizeGrants([...draft.direct, ...draft.folded]);
+  if (roleId === null) return { roleId: null, direct: candidates, folded: [] };
+  const direct = foldIntoRole(candidates, roleKeys);
+  const kept = new Set(direct);
+  return { roleId, direct, folded: candidates.filter((key) => !kept.has(key)) };
+}
+
+export function roleLocks(role: Pick<RoleRow, 'name' | 'permissions'> | null): Map<Permission, string> {
+  const locks = new Map<Permission, string>();
+  if (!role) return locks;
+  const held = resolvePermissions(role.permissions, false);
+  const note = `From role ${role.name}`;
+  for (const permission of ALL_PERMISSIONS) if (held.has(permission)) locks.set(permission, note);
+  return locks;
+}
+
+export function proposedTitle(title: string, previousRole: string | null, nextRole: string | null): string | null {
+  if (nextRole === null) return null;
+  const current = title.trim();
+  const follows = current === '' || (previousRole !== null && current === previousRole.trim());
+  return follows && current !== nextRole.trim() ? nextRole : null;
+}
+
+export function toRoleList(body: ApiBody): RoleRow[] | null {
+  if (!Array.isArray(body.roles)) return null;
+  const roles: RoleRow[] = [];
+  for (const raw of body.roles) {
+    const role = parseRoleRow(raw);
+    if (role) roles.push({ ...role, id: role.id.toLowerCase() });
+  }
+  return roles;
+}
+
+export interface RoleChoice {
+  id: string;
+  name: string;
+}
+
+export function roleChoices(roles: readonly RoleRow[], keepId: string | null, keepName: string | null = null): RoleChoice[] {
+  const choices = roles
+    .filter(assignableRole)
+    .map((role) => ({ id: role.id, name: role.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  if (keepId && !choices.some((choice) => choice.id === keepId)) {
+    const kept = roles.find((role) => role.id === keepId);
+    const name = kept?.name ?? keepName ?? UNNAMED_ROLE_LABEL;
+    choices.unshift({ id: keepId, name: kept?.archived_at ? `${name} (archived)` : name });
+  }
+  return choices;
+}
+
+function accessChangeBody(base: AccessExpected, draft: AccessDraft): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (draft.roleId !== base.role_id) body.role_id = draft.roleId;
+  if (!sameGrants(draft.direct, base.direct_permissions)) body.direct_permissions = normalizeGrants(draft.direct);
+  body.expected = {
+    role_id: base.role_id,
+    direct_permissions: [...base.direct_permissions],
+    page_permissions: [...base.page_permissions],
+  };
+  return body;
+}
+
+export function accessPreviewBody(base: AccessExpected, draft: AccessDraft): Record<string, unknown> {
+  return { ...accessChangeBody(base, draft), dry_run: true };
+}
+
+export function accessSaveBody(base: AccessExpected, draft: AccessDraft, reason: string): Record<string, unknown> {
+  return { ...accessChangeBody(base, draft), reason };
+}
+
+export function accessReasonProblem(reason: string): string | null {
+  return Array.from(reason.trim()).length < REASON_MIN ? REASON_MESSAGE : null;
+}
+
+export interface AccessPreview {
+  before: string[];
+  after: string[];
+  gained: Permission[];
+  lost: Permission[];
+  highestRisk: PermissionRisk | null;
+  changed: boolean;
+  signsOut: boolean;
+  folded: string[];
+}
+
+function keyList(value: unknown): string[] | null {
+  return Array.isArray(value) ? normalizeGrants(value) : null;
+}
+
+function actionList(value: unknown): Permission[] {
+  return Array.isArray(value)
+    ? value.filter((key): key is Permission => typeof key === 'string' && isPermission(key))
+    : [];
+}
+
+export function toAccessPreview(body: ApiBody): AccessPreview | null {
+  const impact = isRecord(body.impact) ? body.impact : null;
+  if (!impact) return null;
+  const before = keyList(impact.before);
+  const after = keyList(impact.after);
+  if (!before || !after || typeof impact.changed !== 'boolean' || typeof impact.signs_out !== 'boolean') return null;
+  const gained = actionList(impact.gained);
+  const lost = actionList(impact.lost);
+  return {
+    before,
+    after,
+    gained,
+    lost,
+    highestRisk: highestRisk([...gained, ...lost]),
+    changed: impact.changed,
+    signsOut: impact.signs_out,
+    folded: keyList(impact.folded) ?? [],
+  };
+}
+
+export interface AccessResult {
+  access: AccessExpected | null;
+  changed: boolean;
+  signedOut: boolean;
+}
+
+export function toAccessResult(body: ApiBody): AccessResult | null {
+  if (typeof body.changed !== 'boolean' || typeof body.signed_out !== 'boolean') return null;
+  const admin = isRecord(body.admin) ? body.admin : null;
+  const direct = admin ? keyList(admin.direct_permissions) : null;
+  const effective = admin ? keyList(admin.page_permissions) : null;
+  return {
+    access: admin && direct && effective
+      ? { role_id: idOf(admin.role_id), direct_permissions: direct, page_permissions: effective }
+      : null,
+    changed: body.changed,
+    signedOut: body.signed_out,
+  };
+}
+
+export function withAccess(admin: AdminRow, access: AccessExpected, role: AdminRoleRef | null): AdminRow {
+  return {
+    ...admin,
+    role_id: access.role_id,
+    role: access.role_id ? role : null,
+    direct_permissions: [...access.direct_permissions],
+    page_permissions: [...access.page_permissions],
+  };
+}
+
+export interface AccessRebase {
+  draft: AccessDraft;
+  changedElsewhere: boolean;
+}
+
+export function rebaseAccess(base: AccessExpected, local: AccessDraft, server: AccessExpected): AccessRebase {
+  const roleId = local.roleId !== base.role_id ? local.roleId : server.role_id;
+  const was = new Set(base.direct_permissions);
+  const wanted = new Set(local.direct);
+  const live = new Set(server.direct_permissions);
+  const direct = sortGrants(new Set([...base.direct_permissions, ...local.direct, ...server.direct_permissions]))
+    .filter((key) => (wanted.has(key) !== was.has(key) ? wanted.has(key) : live.has(key)));
+  const kept = new Set(direct);
+  return {
+    draft: { roleId, direct, folded: local.folded.filter((key) => !kept.has(key)) },
+    changedElsewhere: server.role_id !== base.role_id
+      || !sameGrants(server.direct_permissions, base.direct_permissions)
+      || !sameGrants(server.page_permissions, base.page_permissions),
+  };
+}
+
+export interface AccessHandoff {
+  adminId: string;
+  access: AccessDraft;
+  notice: string;
+}
+
+export const CREATED_WITHOUT_ACCESS = 'The account was created without access.';
+
+export const ACCESS_CHANGED_ELSEWHERE =
+  'Another admin changed this account’s access while you were editing. It now shows their change with yours on top, so review it again.';
+
+export const ACCESS_PREVIEW_UNREACHABLE = 'The access preview could not be loaded. Check your connection and try again.';
 
 export interface MutationResult {
   admin: AdminRow | null;
@@ -913,6 +1142,18 @@ export function stepUpCode(failure: ApiFailure): StepUpCode | null {
   return failure.code === 'REAUTH_REQUIRED' || failure.code === 'MFA_REQUIRED' ? failure.code : null;
 }
 
+export async function confirmIdentity(code: string): Promise<'ok' | 'expired'> {
+  try {
+    await reauthenticate('otp', code);
+    return 'ok';
+  } catch (error) {
+    if (error instanceof SecurityRequestError && error.failure.kind === 'http' && error.failure.status === 401) {
+      return 'expired';
+    }
+    throw error;
+  }
+}
+
 export type MutationOutcome<T = MutationResult> =
   | { kind: 'done'; result: T }
   | { kind: 'unknown'; message: string }
@@ -933,6 +1174,58 @@ export function classifyMutation<T = MutationResult>(result: ApiResult<T>): Muta
   if (failure.status === 403) return { kind: 'refused', message: failure.message };
   if (failure.status === 404 || failure.status === 409) return { kind: 'stale', message: failure.message };
   return { kind: 'retry', message: failure.message };
+}
+
+export type AccessStop =
+  | { kind: 'cancelled' }
+  | { kind: 'expired' }
+  | { kind: 'stale'; message: string }
+  | { kind: 'refused'; message: string }
+  | { kind: 'reauth'; message: string }
+  | { kind: 'failed'; message: string }
+  | { kind: 'unknown'; message: string };
+
+export type AccessStep = { kind: 'saved'; result: AccessResult } | AccessStop;
+
+export function previewStop(failure: ApiFailure): AccessStop {
+  if (failure.status === 401) return { kind: 'expired' };
+  if (failure.kind !== 'http') return { kind: 'failed', message: ACCESS_PREVIEW_UNREACHABLE };
+  const stepUp = stepUpCode(failure);
+  if (stepUp) return { kind: 'reauth', message: STEP_UP_MESSAGE[stepUp] };
+  if (failure.status === 403) return { kind: 'refused', message: failure.message };
+  if (failure.status === 404 || failure.status === 409) return { kind: 'stale', message: failure.message };
+  return { kind: 'failed', message: failure.message };
+}
+
+export function accessStepOf(outcome: MutationOutcome<AccessResult> | null | undefined): AccessStep {
+  if (!outcome) return { kind: 'cancelled' };
+  switch (outcome.kind) {
+    case 'done':
+      return { kind: 'saved', result: outcome.result };
+    case 'expired':
+      return { kind: 'expired' };
+    case 'reauth':
+      return { kind: 'reauth', message: outcome.message };
+    case 'unknown':
+      return { kind: 'unknown', message: outcome.message };
+    case 'stale':
+      return { kind: 'stale', message: outcome.message };
+    case 'refused':
+      return { kind: 'refused', message: outcome.message };
+  }
+}
+
+export function createdNotice(stop: AccessStop): string {
+  switch (stop.kind) {
+    case 'cancelled':
+      return `${CREATED_WITHOUT_ACCESS} The access change was cancelled.`;
+    case 'expired':
+      return `${CREATED_WITHOUT_ACCESS} Your session ended before it was saved.`;
+    case 'unknown':
+      return `The account was created. ${stop.message}`;
+    default:
+      return `${CREATED_WITHOUT_ACCESS} ${stop.message}`;
+  }
 }
 
 export interface ResetResult {

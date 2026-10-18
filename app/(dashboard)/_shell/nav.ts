@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, ClipboardList, ArrowDownToLine,
-  Users, Activity, ShieldCheck,
+  Users, Activity, ShieldCheck, UserCog, KeyRound,
   CreditCard, Wrench, BadgePercent,
   Gift, Trophy, TicketPercent, Share2,
   Megaphone, Bell, Mail,
@@ -8,11 +8,15 @@ import {
   Receipt, ShieldAlert, Shield,
   type LucideIcon,
 } from 'lucide-react';
+import type { Permission } from '../../lib/permissions';
 
 export type NavCountKey = 'withdrawals' | 'cards';
 
+export type PageReadPermissions = Readonly<Record<string, Permission>>;
+
 export interface NavLeaf {
   key: string;
+  permission?: Permission;
   label: string;
   href: string;
   icon: LucideIcon;
@@ -42,6 +46,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { key: 'user_activity_monitor',  label: 'Activity Log',   href: '/user-activity-monitor',  icon: Activity },
       { key: 'activity',               label: 'Admin Activity', href: '/activity',               icon: Activity },
       { key: 'admin_accounts',         label: 'Admins',         href: '/admin-accounts',         icon: ShieldCheck },
+      { key: 'admin_accounts',         label: 'Roles',          href: '/admin-roles',            icon: UserCog, permission: 'roles.read' },
+      { key: 'admin_accounts',         label: 'Permissions',    href: '/admin-permissions',      icon: KeyRound, permission: 'roles.read' },
     ],
   },
   {
@@ -151,18 +157,49 @@ export function findNavKey(pathname: string): string | null {
   return findNavMatch(pathname)?.leaf.key ?? null;
 }
 
-export function filterNavByPermissions(allowedKeys: readonly string[], isSuperAdmin: boolean): NavGroup[] {
+const DASHBOARD_HREF = '/dashboard';
+const NO_PERMISSIONS: ReadonlySet<string> = new Set();
+const NO_PAGE_READS: PageReadPermissions = {};
+
+export function navLeafPermission(leaf: NavLeaf, pageRead: PageReadPermissions = NO_PAGE_READS): Permission | null {
+  if (leaf.permission) return leaf.permission;
+  return Object.prototype.hasOwnProperty.call(pageRead, leaf.key) ? pageRead[leaf.key] : null;
+}
+
+function leafAllowed(
+  leaf: NavLeaf,
+  allowed: ReadonlySet<string>,
+  permissions: ReadonlySet<string>,
+  pageRead: PageReadPermissions,
+): boolean {
+  if (leaf.href === DASHBOARD_HREF || allowed.has(leaf.key)) return true;
+  const permission = navLeafPermission(leaf, pageRead);
+  return permission !== null && permissions.has(permission);
+}
+
+export function filterNavByPermissions(
+  allowedKeys: readonly string[],
+  isSuperAdmin: boolean,
+  permissions: ReadonlySet<string> = NO_PERMISSIONS,
+  pageRead: PageReadPermissions = NO_PAGE_READS,
+): NavGroup[] {
   if (isSuperAdmin) return NAV_GROUPS;
   const allowed = new Set(allowedKeys);
   return NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.key)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => leafAllowed(i, allowed, permissions, pageRead)) }))
     .filter((g) => g.items.length > 0);
 }
 
-export function isNavPathDenied(pathname: string, allowedKeys: readonly string[], isSuperAdmin: boolean): boolean {
-  if (isSuperAdmin || pathname === '/dashboard') return false;
-  const key = findNavKey(pathname);
-  return key !== null && !allowedKeys.includes(key);
+export function isNavPathDenied(
+  pathname: string,
+  allowedKeys: readonly string[],
+  isSuperAdmin: boolean,
+  permissions: ReadonlySet<string> = NO_PERMISSIONS,
+  pageRead: PageReadPermissions = NO_PAGE_READS,
+): boolean {
+  if (isSuperAdmin) return false;
+  const match = findNavMatch(pathname);
+  return match !== null && !leafAllowed(match.leaf, new Set(allowedKeys), permissions, pageRead);
 }
 
 export const NAV_COUNT_CAP = 99;

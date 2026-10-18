@@ -1,24 +1,32 @@
-import type { NextRequest } from 'next/server';
+import type { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '../../lib/supabase';
-import { requireSuperAdmin } from '../../lib/guard';
+import { requireSuperAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, isUuid, ok } from '../../lib/api';
+import { rpcFailure, type RpcFailure } from '../../lib/roles';
 import {
   checkCreate,
   checkReason,
   diffGrants,
   grantChangeRecord,
+  normalizeGrants,
   planDelete,
   planEdit,
+  savedChange,
   type AdminState,
   type CreateInput,
   type EditInput,
+  type NewAdmin,
+  type RuleFailure,
 } from '../../(dashboard)/admin-accounts/rules';
 
-const ADMIN_COLUMNS =
-  'id, username, email, role_title, page_permissions, last_login_at, is_active, is_super_admin, deleted_at, created_at';
-const STATE_COLUMNS = `${ADMIN_COLUMNS}, token_version`;
+const ADMIN_FIELDS =
+  'id, username, email, role_title, page_permissions, role_id, direct_permissions, last_login_at, is_active, is_super_admin, deleted_at, created_at';
+const ROLE_EMBED = 'role:admin_roles!admin_users_role_id_fkey(id, name, archived_at)';
+const STATE_ROLE_EMBED = 'role:admin_roles!admin_users_role_id_fkey(id, name, archived_at, permissions)';
+const ADMIN_COLUMNS = `${ADMIN_FIELDS}, ${ROLE_EMBED}`;
+const STATE_COLUMNS = `${ADMIN_FIELDS}, token_version, ${STATE_ROLE_EMBED}`;
 const ENTITY = 'admin_users';
 const BCRYPT_ROUNDS = 12;
 const EDIT_ATTEMPTS = 3;
@@ -27,6 +35,7 @@ const LAST_SUPER_ADMIN = 'At least one active super admin is required';
 const LAST_SUPER_ADMIN_DEACTIVATE = 'Cannot deactivate the last active super admin.';
 const LAST_SUPER_ADMIN_DELETE = 'Cannot delete the last active super admin.';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const ACCESS_ELSEWHERE = 'Change access in the web console’s Access section.';
 
 type Body = Record<string, unknown>;
 
@@ -107,6 +116,17 @@ function withSecurityStatus(row: Record<string, unknown>, overview: Map<string, 
   return { ...row, ...(overview?.get(id) ?? NO_SECURITY_STATUS) };
 }
 
+function publicRole(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const role = value as Record<string, unknown>;
+  if (!isUuid(role.id)) return null;
+  return {
+    id: role.id,
+    name: typeof role.name === 'string' ? role.name : null,
+    archived: typeof role.archived_at === 'string' && role.archived_at !== '',
+  };
+}
+
 function publicAdmin(row: AdminRecord) {
   return {
     id: row.id,
@@ -114,11 +134,24 @@ function publicAdmin(row: AdminRecord) {
     email: row.email,
     role_title: row.role_title,
     page_permissions: row.page_permissions,
+    role_id: row.role_id ?? null,
+    role: publicRole(row.role),
+    direct_permissions: row.direct_permissions ?? [],
     last_login_at: row.last_login_at,
     is_active: row.is_active,
     is_super_admin: row.is_super_admin,
     deleted_at: row.deleted_at,
     created_at: row.created_at,
+  };
+}
+
+function createRecord(account: NewAdmin, grants: readonly string[]) {
+  return {
+    username: account.username,
+    email: account.email,
+    role_title: account.role_title,
+    page_permissions: [...grants],
+    grant_changes: grantChangeRecord(diffGrants([], grants)),
   };
 }
 
@@ -145,6 +178,21 @@ async function readState(id: string): Promise<StateRead> {
   return { ok: true, state: data ?? null };
 }
 
+function accessRefusal(body: Body, admin: AdminContext): Promise<NextResponse> | null {
+  if (body.role_id !== undefined || body.direct_permissions !== undefined) return fail('VALIDATION_ERROR', ACCESS_ELSEWHERE);
+  if (body.page_permissions !== undefined && admin.session.client !== 'mobile') return fail('VALIDATION_ERROR', ACCESS_ELSEWHERE);
+  return null;
+}
+
+function ruleRefusal(failure: RuleFailure | RpcFailure): Promise<NextResponse> {
+  return fail(failure.code, failure.message, failure.details ? { details: failure.details } : undefined);
+}
+
+function storedRefusal(error: unknown): RpcFailure | null {
+  const failure = rpcFailure(error);
+  return failure.status === 400 || failure.status === 409 ? failure : null;
+}
+
 function auditFields(recorded: boolean) {
   return recorded ? { audit_recorded: true } : { audit_recorded: false, warning: AUDIT_WARNING };
 }
@@ -166,7 +214,7 @@ export async function GET() {
   }
   const rows = (data ?? []) as Record<string, unknown>[];
   return ok({
-    admins: rows.map((row) => withSecurityStatus(row, overview)),
+    admins: rows.map((row) => withSecurityStatus({ ...row, role: publicRole(row.role) }, overview)),
     current_admin_id: admin.admin_id,
     security: {
       mfa_mode: admin.policy.mode,
@@ -185,10 +233,12 @@ export async function POST(req: NextRequest) {
 
   const body = await readBody(req);
   if (!body) return fail('VALIDATION_ERROR', 'Send the new admin account as a JSON object.');
+  const refused = accessRefusal(body, admin);
+  if (refused) return refused;
   const reason = checkReason(body.reason);
   if (!reason.ok) return fail('VALIDATION_ERROR', reason.message);
   const checked = checkCreate(body as CreateInput);
-  if (!checked.ok) return fail('VALIDATION_ERROR', checked.message);
+  if (!checked.ok) return ruleRefusal(checked);
   const account = checked.value;
 
   const audit: AuditInput = {
@@ -197,13 +247,7 @@ export async function POST(req: NextRequest) {
     entity: ENTITY,
     reason: reason.reason,
     sensitivity: 'security',
-    after: {
-      username: account.username,
-      email: account.email,
-      role_title: account.role_title,
-      page_permissions: account.page_permissions,
-      grant_changes: grantChangeRecord(diffGrants([], account.page_permissions)),
-    },
+    after: createRecord(account, account.page_permissions),
   };
 
   const passwordHash = await bcrypt.hash(account.password, BCRYPT_ROUNDS);
@@ -226,12 +270,18 @@ export async function POST(req: NextRequest) {
     if (error?.code === UNIQUE_VIOLATION || /unique|duplicate/i.test(message)) {
       return fail('VALIDATION_ERROR', 'That username is already taken.');
     }
-    console.error('admin account create:', message);
+    const refusal = error ? storedRefusal(error) : null;
+    if (!refusal) console.error('admin account create:', message);
     await writeAudit({ ...audit, result: 'failure', error: message });
-    return fail('INTERNAL_ERROR', 'The admin account could not be created.');
+    return refusal ? ruleRefusal(refusal) : fail('INTERNAL_ERROR', 'The admin account could not be created.');
   }
 
-  const recorded = await writeAudit({ ...audit, entity_id: data.id, result: 'success' });
+  const recorded = await writeAudit({
+    ...audit,
+    entity_id: data.id,
+    after: createRecord(account, normalizeGrants(data.page_permissions)),
+    result: 'success',
+  });
   return ok({ id: data.id, admin: publicAdmin(data), ...auditFields(recorded.ok) });
 }
 
@@ -244,6 +294,8 @@ export async function PATCH(req: NextRequest) {
   if (!body) return fail('VALIDATION_ERROR', 'Send the changes as a JSON object.');
   const id = readId(body.id);
   if (!id) return fail('VALIDATION_ERROR', 'A valid admin account id is required.');
+  const refused = accessRefusal(body, admin);
+  if (refused) return refused;
   const reason = checkReason(body.reason);
   if (!reason.ok) return fail('VALIDATION_ERROR', reason.message);
 
@@ -256,7 +308,7 @@ export async function PATCH(req: NextRequest) {
     if (!state) return fail('RESOURCE_NOT_FOUND', 'Admin account not found.');
 
     const planned = planEdit(state, body as EditInput, admin.admin_id);
-    if (!planned.ok) return fail(planned.code, planned.message);
+    if (!planned.ok) return ruleRefusal(planned);
     const plan = planned.plan;
 
     if (plan.changed.length === 0 && !plan.revokesSessions) {
@@ -289,7 +341,7 @@ export async function PATCH(req: NextRequest) {
     const { data, error } = await (state.token_version === null
       ? guarded.is('token_version', null)
       : guarded.eq('token_version', state.token_version)
-    ).select(ADMIN_COLUMNS);
+    ).select(STATE_COLUMNS);
 
     const audit: AuditInput = {
       admin,
@@ -304,20 +356,21 @@ export async function PATCH(req: NextRequest) {
 
     if (error) {
       const lastSuperAdmin = error.message === LAST_SUPER_ADMIN;
-      if (!lastSuperAdmin) console.error('admin account update:', error.message);
+      const refusal = lastSuperAdmin ? null : storedRefusal(error);
+      if (!lastSuperAdmin && !refusal) console.error('admin account update:', error.message);
       await writeAudit({ ...audit, result: 'failure', error: error.message });
-      return lastSuperAdmin
-        ? fail('STATE_CONFLICT', LAST_SUPER_ADMIN_DEACTIVATE)
-        : fail('INTERNAL_ERROR', 'The admin account could not be updated.');
+      if (lastSuperAdmin) return fail('STATE_CONFLICT', LAST_SUPER_ADMIN_DEACTIVATE);
+      return refusal ? ruleRefusal(refusal) : fail('INTERNAL_ERROR', 'The admin account could not be updated.');
     }
 
     const rows = (data ?? []) as unknown as AdminRecord[];
     if (rows.length === 0) continue;
 
-    const recorded = await writeAudit({ ...audit, result: 'success' });
+    const saved = savedChange(plan, state, rows[0]);
+    const recorded = await writeAudit({ ...audit, after: saved.after, result: 'success' });
     return ok({
       changed: true,
-      sessions_revoked: plan.revokesSessions,
+      sessions_revoked: saved.sessionsRevoked,
       admin: publicAdmin(rows[0]),
       ...auditFields(recorded.ok),
     });

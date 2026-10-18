@@ -2,15 +2,27 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ALL_PERMISSIONS,
+  ENFORCED_PERMISSIONS,
   LEGACY_PERMISSION_MAP,
+  PAGE_READ_PERMISSION,
   PERMISSION_CATALOG,
   PERMISSION_CATEGORIES,
+  RESOURCE_LABELS,
+  RESTRICTED_PERMISSIONS,
+  actionLabel,
+  actionOf,
   holdsAny,
   isPermission,
+  permissionStatus,
   permissionsByCategory,
   resolvePermissions,
+  resourceOf,
   type Permission,
+  type PermissionStatus,
 } from '../app/lib/permissions.ts';
+import { loadAppModule } from './support/uiHarness.ts';
+
+type NavModule = typeof import('../app/(dashboard)/_shell/nav.ts');
 
 describe('catalog integrity', () => {
   test('every permission is resource.action', () => {
@@ -202,6 +214,77 @@ describe('legacy page keys stay separate', () => {
   test('the template keys map to their own permissions, not the broadcast ones', () => {
     assert.deepEqual([...LEGACY_PERMISSION_MAP.notification_templates].sort(), ['notification_templates.read', 'notification_templates.write']);
     assert.deepEqual([...LEGACY_PERMISSION_MAP.email_templates].sort(), ['email_templates.read', 'email_templates.write']);
+  });
+});
+
+describe('page read permissions', () => {
+  test('every nav key except dashboard maps to a read action from its own bundle, and dashboard maps to none', async () => {
+    const nav = await loadAppModule<NavModule>('(dashboard)/_shell/nav.ts');
+    const keys = [...new Set(nav.NAV_GROUPS.flatMap((group) => group.items.map((leaf) => leaf.key)))]
+      .filter((key) => key !== 'dashboard');
+    assert.equal(keys.length, 22);
+    for (const key of keys) {
+      const read = PAGE_READ_PERMISSION[key];
+      assert.ok(read, `no read permission for ${key}`);
+      assert.ok(LEGACY_PERMISSION_MAP[key].includes(read), `${key} does not grant ${read}`);
+      assert.equal(actionOf(read), 'read', key);
+    }
+    assert.deepEqual(Object.keys(PAGE_READ_PERMISSION).sort(), [...keys].sort());
+    assert.equal(Object.hasOwn(PAGE_READ_PERMISSION, 'dashboard'), false);
+  });
+});
+
+describe('permission statuses', () => {
+  test('the statuses partition the catalog into in use, super administrators only and not in use yet', () => {
+    const byStatus: Record<PermissionStatus, Permission[]> = { enforced: [], super_only: [], reserved: [] };
+    for (const key of ALL_PERMISSIONS) byStatus[permissionStatus(key)].push(key);
+    const all = [...byStatus.enforced, ...byStatus.super_only, ...byStatus.reserved];
+    assert.equal(all.length, ALL_PERMISSIONS.length);
+    assert.equal(new Set(all).size, ALL_PERMISSIONS.length);
+    assert.deepEqual([...byStatus.super_only].sort(), [...RESTRICTED_PERMISSIONS].sort());
+    assert.deepEqual(
+      [...byStatus.enforced].sort(),
+      ENFORCED_PERMISSIONS.filter((key) => !RESTRICTED_PERMISSIONS.includes(key)).sort(),
+    );
+  });
+
+  test('only the admin and role permissions are restricted', () => {
+    assert.deepEqual([...RESTRICTED_PERMISSIONS].sort(), [
+      'admin_users.manage', 'admin_users.read', 'admin_users.sessions', 'roles.read', 'roles.write',
+    ]);
+  });
+
+  test('the enforced list holds unique catalog keys, including the role and audit keys this work checks', () => {
+    for (const key of ENFORCED_PERMISSIONS) assert.ok(isPermission(key), key);
+    assert.equal(new Set(ENFORCED_PERMISSIONS).size, ENFORCED_PERMISSIONS.length);
+    for (const key of ['roles.read', 'audit.read', 'audit.export', 'withdrawals.approve'] as const) {
+      assert.ok(ENFORCED_PERMISSIONS.includes(key), key);
+    }
+    assert.equal(permissionStatus('roles.read'), 'super_only');
+    assert.equal(permissionStatus('audit.read'), 'enforced');
+    assert.equal(permissionStatus('withdrawals.retry'), 'reserved');
+  });
+});
+
+describe('matrix labels', () => {
+  test('every catalog key splits into a labelled resource and a labelled action', () => {
+    const resources = new Set<string>();
+    for (const key of ALL_PERMISSIONS) {
+      assert.equal(`${resourceOf(key)}.${actionOf(key)}`, key);
+      resources.add(resourceOf(key));
+      assert.ok(RESOURCE_LABELS[resourceOf(key)], `no resource label for ${key}`);
+      assert.notEqual(actionLabel(key), actionOf(key), `no action label for ${key}`);
+    }
+    assert.deepEqual(Object.keys(RESOURCE_LABELS).sort(), [...resources].sort());
+  });
+
+  test('actions read as plain words', () => {
+    assert.equal(actionLabel('communications.send_all'), 'Send to all');
+    assert.equal(actionLabel('withdrawals.read'), 'View');
+    assert.equal(actionLabel('withdrawals.approve'), 'Approve');
+    assert.equal(resourceOf('sensitive_data.share'), 'sensitive_data');
+    assert.equal(actionOf('risk.case_write'), 'case_write');
+    assert.equal(RESOURCE_LABELS.withdrawals, 'Withdrawals');
   });
 });
 

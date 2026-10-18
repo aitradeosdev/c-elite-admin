@@ -2,17 +2,27 @@
 
 import { useId, type ReactNode } from 'react';
 import { DetailRow, Notice, SectionLabel, SidePanel, StatusDot } from '../../_ui';
-import { ALL_PERMISSIONS } from '../../lib/permissions';
+import { ALL_PERMISSIONS, type Permission } from '../../lib/permissions';
 import { formatAge, formatBusinessDateTime } from '../../lib/time';
 import { effectiveActions, sortGrants } from './rules';
-import { STATUS_LABEL, STATUS_TONE, adminHandle, statusOf, type AdminPanel, type AdminRow } from './model';
-import { ActionBreakdown, GrantList } from './GrantParts';
+import {
+  STATUS_LABEL, STATUS_TONE, adminHandle, plural, roleLabel, statusOf, type AdminPanel, type AdminRow,
+} from './model';
+import { ActionBreakdown, GrantList } from '../_access';
 import { DrawerPanels, drawerPanel } from './SecurityParts';
 import s from './page.module.css';
 
 function when(value: string | null): string {
   if (!value) return 'Never';
   return `${formatBusinessDateTime(value)} WAT · ${formatAge(value)} ago`;
+}
+
+function effectiveText(admin: AdminRow, actions: readonly Permission[]): string {
+  if (actions.length === 0) return 'No actions.';
+  const fromRole = admin.role_id !== null;
+  const fromDirect = admin.direct_permissions.length > 0;
+  const source = fromRole && fromDirect ? 'the role and direct grants' : fromRole ? 'the role' : 'direct grants';
+  return `${plural(actions.length, 'action')} in total, from ${source}.`;
 }
 
 export interface AdminDetailsProps {
@@ -34,6 +44,7 @@ export function AdminDetails({
     const held = effectiveActions(admin.page_permissions);
     return ALL_PERMISSIONS.filter((permission) => held.has(permission));
   })();
+  const direct = sortGrants(admin.direct_permissions);
   const tabs = status === 'deleted' ? undefined : security;
 
   return (
@@ -55,8 +66,8 @@ export function AdminDetails({
         <div className={s.details}>
           {admin.is_super_admin ? (
             <Notice tone="info" flush title="Super administrator">
-              Super administrators hold every permission, so page grants do not apply and the account cannot be edited
-              here.
+              Super administrators hold every permission, so roles and direct grants do not apply and the account
+              cannot be edited here.
             </Notice>
           ) : null}
           {status === 'deleted' ? (
@@ -70,7 +81,8 @@ export function AdminDetails({
             <div className={s.detailRows}>
               <DetailRow label="Username" value={adminHandle(admin)} />
               <DetailRow label="Email" value={admin.email ?? 'None'} wrap />
-              <DetailRow label="Role title" value={admin.role_title || '—'} wrap />
+              <DetailRow label="Role" value={roleLabel(admin)} wrap />
+              <DetailRow label="Title" value={admin.role_title || '—'} wrap />
               <DetailRow
                 label="Status"
                 value={<StatusDot status={status} tone={STATUS_TONE[status]} label={STATUS_LABEL[status]} />}
@@ -83,17 +95,15 @@ export function AdminDetails({
           {admin.is_super_admin ? null : (
             <section className={s.formSection}>
               <h3 className={s.formHeading}>{status === 'deleted' ? 'Access it held' : 'Access'}</h3>
-              {admin.page_permissions.length ? (
-                <GrantList keys={sortGrants(admin.page_permissions)} label="Stored grants" />
+              <SectionLabel as="h4" flush>Direct grants</SectionLabel>
+              {direct.length ? (
+                <GrantList keys={direct} label="Direct grants" />
               ) : (
-                <p className={s.formHint}>No grants are stored on this account.</p>
+                <p className={s.formHint}>No direct grants.</p>
               )}
-              {actions.length ? (
-                <>
-                  <SectionLabel as="h4" flush>Actions those grants allow</SectionLabel>
-                  <ActionBreakdown actions={actions} />
-                </>
-              ) : null}
+              <SectionLabel as="h4" flush>Effective access</SectionLabel>
+              <p className={s.formHint}>{effectiveText(admin, actions)}</p>
+              {actions.length ? <ActionBreakdown actions={actions} /> : null}
             </section>
           )}
         </div>

@@ -29,10 +29,19 @@ export interface AdminJWTPayload {
   amr: AuthMethod[];
 }
 
-export interface VerifiedAdmin extends AdminJWTPayload, SecurityState {}
+export interface AdminRole {
+  id: string;
+  name: string | null;
+}
+
+export interface VerifiedClaims extends AdminJWTPayload {
+  role: AdminRole | null;
+}
+
+export interface VerifiedAdmin extends VerifiedClaims, SecurityState {}
 
 export type SessionCheck =
-  | ({ status: 'ok'; claims: AdminJWTPayload } & SecurityState)
+  | ({ status: 'ok'; claims: VerifiedClaims } & SecurityState)
   | { status: 'invalid' }
   | { status: 'unavailable' };
 
@@ -124,6 +133,13 @@ function readMfa(value: unknown): MfaState {
   return { status, lockedUntil: typeof raw.locked_until === 'string' ? raw.locked_until : null };
 }
 
+function readRole(value: unknown): AdminRole | null {
+  if (!isRecord(value)) return null;
+  const id = value.id;
+  if (!isUuid(id)) return null;
+  return { id, name: typeof value.name === 'string' ? value.name : null };
+}
+
 function readPolicy(value: unknown): PolicyState {
   const raw = isRecord(value) ? value : {};
   return {
@@ -181,7 +197,7 @@ export async function verifyAdminSession(token: string, transport: SessionTransp
     transport,
   };
 
-  const verified: AdminJWTPayload = {
+  const verified: VerifiedClaims = {
     admin_id: admin.id,
     role_title: typeof admin.role_title === 'string' ? admin.role_title : '',
     is_super_admin: admin.is_super_admin === true,
@@ -192,6 +208,7 @@ export async function verifyAdminSession(token: string, transport: SessionTransp
     token_version: currentVersion,
     sid: claims.sid,
     amr: session.amr,
+    role: readRole(admin.role),
   };
 
   return { status: 'ok', claims: verified, session, mfa: readMfa(state.mfa), policy: readPolicy(state.policy) };

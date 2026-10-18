@@ -614,6 +614,180 @@ export const LEGACY_PERMISSION_MAP: Readonly<Record<string, readonly Permission[
   security_limits: ['security.read', 'security.write'],
 };
 
+export const PAGE_READ_PERMISSION: Readonly<Record<string, Permission>> = {
+  card_queue: 'cards.read',
+  withdrawals: 'withdrawals.read',
+  transactions_overview: 'transactions.read',
+  users: 'users.read',
+  user_activity_monitor: 'user_activity.read',
+  activity: 'audit.read',
+  admin_accounts: 'admin_users.read',
+  card_management: 'catalog.read',
+  card_type_builder: 'card_types.read',
+  rates_management: 'rates.read',
+  bonuses_rewards: 'rewards.read',
+  coupons: 'coupons.read',
+  referral_management: 'referrals.read',
+  notifications_broadcast: 'communications.read',
+  notification_templates: 'notification_templates.read',
+  email_templates: 'email_templates.read',
+  platform_balance: 'platform_balance.read',
+  limits_fees: 'limits.read',
+  bill_settings: 'providers.read',
+  admin_settings: 'configuration.read',
+  anomaly_alerts: 'anomaly.read',
+  security_limits: 'security.read',
+};
+
+export const RESTRICTED_PERMISSIONS: readonly Permission[] = [
+  'admin_users.read',
+  'admin_users.manage',
+  'admin_users.sessions',
+  'roles.read',
+  'roles.write',
+];
+
+export const ENFORCED_PERMISSIONS: readonly Permission[] = [
+  'cards.read',
+  'cards.review',
+  'withdrawals.read',
+  'withdrawals.approve',
+  'withdrawals.reject',
+  'withdrawals.export',
+  'transactions.read',
+  'transactions.export',
+  'flags.read',
+  'flags.resolve',
+  'users.read',
+  'users.freeze',
+  'users.export',
+  'user_activity.read',
+  'wallets.read',
+  'wallets.adjust',
+  'rates.read',
+  'rates.write',
+  'platform_balance.read',
+  'platform_balance.write',
+  'catalog.read',
+  'catalog.write',
+  'card_types.read',
+  'card_types.write',
+  'rewards.read',
+  'rewards.write',
+  'coupons.read',
+  'coupons.write',
+  'referrals.read',
+  'communications.read',
+  'notification_templates.read',
+  'notification_templates.write',
+  'email_templates.read',
+  'email_templates.write',
+  'communications.send',
+  'communications.send_all',
+  'anomaly.read',
+  'anomaly.write',
+  'security.read',
+  'security.write',
+  'providers.read',
+  'providers.write',
+  'admin_users.read',
+  'roles.read',
+  'audit.read',
+  'audit.export',
+  'sensitive_data.download',
+  'sensitive_data.share',
+];
+
+export type PermissionStatus = 'enforced' | 'super_only' | 'reserved';
+
+const RESTRICTED_SET: ReadonlySet<Permission> = new Set(RESTRICTED_PERMISSIONS);
+const ENFORCED_SET: ReadonlySet<Permission> = new Set(ENFORCED_PERMISSIONS);
+
+export function permissionStatus(key: Permission): PermissionStatus {
+  if (RESTRICTED_SET.has(key)) return 'super_only';
+  return ENFORCED_SET.has(key) ? 'enforced' : 'reserved';
+}
+
+export const RESOURCE_LABELS: Readonly<Record<string, string>> = {
+  cards: 'Card submissions',
+  withdrawals: 'Withdrawals',
+  transactions: 'Transactions',
+  flags: 'Flagged transactions',
+  reconciliation: 'Reconciliation',
+  users: 'Users',
+  user_activity: 'User activity',
+  wallets: 'Wallets',
+  rates: 'Rates',
+  limits: 'Limits and fees',
+  platform_balance: 'Platform balance',
+  catalog: 'Gift card catalog',
+  card_types: 'Card types and fields',
+  rewards: 'Rewards',
+  coupons: 'Coupons',
+  referrals: 'Referrals',
+  communications: 'Broadcasts',
+  notification_templates: 'Notification templates',
+  email_templates: 'Email templates',
+  risk: 'Risk',
+  anomaly: 'Anomaly alerts',
+  security: 'Security controls',
+  providers: 'Providers',
+  webhooks: 'Webhooks',
+  analytics: 'Analytics',
+  reports: 'Reports',
+  system: 'System',
+  configuration: 'Configuration',
+  emergency: 'Emergency controls',
+  admin_users: 'Admins',
+  roles: 'Roles',
+  audit: 'Audit log',
+  sensitive_data: 'Sensitive data',
+};
+
+const ACTION_LABELS: Readonly<Record<string, string>> = {
+  read: 'View',
+  review: 'Decide',
+  assign: 'Assign',
+  note: 'Annotate',
+  export: 'Export',
+  approve: 'Approve',
+  reject: 'Reject',
+  retry: 'Retry',
+  resolve: 'Resolve',
+  edit: 'Edit',
+  freeze: 'Freeze',
+  sessions: 'Manage sessions',
+  delete: 'Delete',
+  adjust: 'Adjust',
+  approve_adjustment: 'Approve adjustments',
+  write: 'Edit',
+  publish: 'Publish',
+  payout: 'Manage payouts',
+  send: 'Send to a segment',
+  send_all: 'Send to all',
+  case_write: 'Manage cases',
+  switch: 'Switch primary',
+  run: 'Run',
+  jobs: 'Control jobs',
+  manage: 'Manage',
+  reveal: 'Reveal',
+  download: 'Download',
+  share: 'Share',
+};
+
+export function resourceOf(key: Permission): string {
+  return key.slice(0, key.indexOf('.'));
+}
+
+export function actionOf(key: Permission): string {
+  return key.slice(key.indexOf('.') + 1);
+}
+
+export function actionLabel(key: Permission): string {
+  const action = actionOf(key);
+  return ACTION_LABELS[action] ?? action;
+}
+
 export function holdsAny(permissions: ReadonlySet<Permission>, needed: Permission | readonly Permission[]): boolean {
   return typeof needed === 'string' ? permissions.has(needed) : needed.some((permission) => permissions.has(permission));
 }

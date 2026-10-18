@@ -3,7 +3,6 @@ import { MASK, METADATA_MASK_KEYS, isMaskable, maskMetadata } from '../../lib/ma
 import { BUSINESS_TZ } from '../../lib/time';
 import { formatNaira } from '../../_ui/money';
 
-export const ACTIVITY_GRANT = 'activity';
 export const PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 100;
 export const LEGACY_DEFAULT_LIMIT = 100;
@@ -138,10 +137,15 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
   ['Admins and sign-in', [
     ['CREATE_ADMIN', 'Created admin'],
     ['EDIT_ADMIN', 'Edited admin'],
+    ['EDIT_ADMIN_ACCESS', 'Changed admin access'],
     ['REVOKE_ADMIN_SESSIONS', 'Signed admin out everywhere'],
     ['DEACTIVATE_ADMIN', 'Deactivated admin'],
     ['REACTIVATE_ADMIN', 'Reactivated admin'],
     ['DELETE_ADMIN', 'Deleted admin'],
+    ['CREATE_ADMIN_ROLE', 'Created role'],
+    ['EDIT_ADMIN_ROLE', 'Edited role'],
+    ['ARCHIVE_ADMIN_ROLE', 'Archived role'],
+    ['RESTORE_ADMIN_ROLE', 'Restored role'],
     ['ADMIN_AUTO_DEACTIVATED', 'Admin locked after failed sign-ins'],
     ['ADMIN_AUTO_DEACTIVATION_SKIPPED', 'Admin lock skipped for last super admin'],
     ['LOGIN', 'Signed in'],
@@ -315,6 +319,7 @@ export function actionsMatching(query: string): string[] {
 }
 
 const ENTITY_TEXT: Readonly<Record<string, string>> = {
+  admin_roles: 'Role',
   admin_users: 'Admin account',
   app_config: 'Configuration',
   audit_log: 'Audit log',
@@ -698,6 +703,11 @@ export const TARGET_SPECS: Readonly<Record<string, TargetSpec>> = {
   },
   level_tiers: {
     table: 'level_tiers',
+    columns: 'id, name',
+    label: (row) => text(row.name),
+  },
+  admin_roles: {
+    table: 'admin_roles',
     columns: 'id, name',
     label: (row) => text(row.name),
   },

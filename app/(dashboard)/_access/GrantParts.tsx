@@ -1,8 +1,8 @@
 import { Badge, type BadgeTone } from '../../_ui';
 import { PERMISSION_CATALOG, type Permission, type PermissionRisk } from '../../lib/permissions';
-import { RISK_ORDER, grantRisk, type GrantChange } from './rules';
-import { accessSummary, grantLabel, plural, type AccessSummary, type AdminRow } from './model';
-import s from './page.module.css';
+import { RISK_ORDER, grantRisk, type GrantChange } from '../../lib/grants';
+import { accessSummary, grantLabel, plural, type AccessSummary, type AdminRow } from '../admin-accounts/model';
+import s from './access.module.css';
 
 const RISK_TONE: Readonly<Record<PermissionRisk, BadgeTone>> = {
   critical: 'danger',

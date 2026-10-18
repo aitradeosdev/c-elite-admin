@@ -20,14 +20,29 @@ import {
   findNavMatch,
   hrefMatches,
   isNavPathDenied,
+  navLeafPermission,
   parseSidebarCollapsed,
   serializeSidebarCollapsed,
   type NavGroup,
 } from '../app/(dashboard)/_shell/nav.ts';
-import { ALL_PERMISSIONS, LEGACY_PERMISSION_MAP, isPermission } from '../app/lib/permissions.ts';
+import {
+  ALL_PERMISSIONS, LEGACY_PERMISSION_MAP, PAGE_READ_PERMISSION, isPermission, permissionStatus, resolvePermissions,
+} from '../app/lib/permissions.ts';
 
 const leaves = NAV_GROUPS.flatMap((g) => g.items);
 const RETIRED_FLAGGED = '/flagged-transactions';
+const DASHBOARD = '/dashboard';
+const ROLES = '/admin-roles';
+const PERMISSIONS = '/admin-permissions';
+
+const LIVE_SUPER_ADMIN_KEYS: readonly string[] = [
+  'activity', 'admin_accounts', 'admin_settings', 'bonuses_rewards', 'card_management', 'card_queue',
+  'card_type_builder', 'coupons', 'dashboard', 'email_templates', 'limits_fees', 'manual_wallet_credit',
+  'notification_templates', 'notifications_broadcast', 'platform_balance', 'rates_management', 'referral_management',
+  'transactions_overview', 'transfers', 'user_activity_monitor', 'users', 'withdrawals',
+];
+const LIVE_MANAGER_KEYS: readonly string[] = ['dashboard', 'users', 'withdrawals'];
+const LIVE_DELETED_MANAGER_KEYS: readonly string[] = ['coupons', 'dashboard', 'withdrawals'];
 
 const VISIBLE_BY_KEY: Readonly<Record<string, readonly string[]>> = {
   dashboard: ['/dashboard'],
@@ -37,7 +52,7 @@ const VISIBLE_BY_KEY: Readonly<Record<string, readonly string[]>> = {
   users: ['/users'],
   user_activity_monitor: ['/user-activity-monitor'],
   activity: ['/activity'],
-  admin_accounts: ['/admin-accounts'],
+  admin_accounts: ['/admin-accounts', '/admin-roles', '/admin-permissions'],
   card_management: ['/cards'],
   card_type_builder: ['/field-builder'],
   rates_management: ['/rates'],
@@ -55,8 +70,24 @@ const VISIBLE_BY_KEY: Readonly<Record<string, readonly string[]>> = {
   security_limits: ['/security-limits'],
 };
 
+function hrefsOf(groups: readonly NavGroup[]): string[] {
+  return groups.flatMap((group) => group.items.map((item) => item.href));
+}
+
+function visibleGroups(keys: readonly string[]): NavGroup[] {
+  return filterNavByPermissions(keys, false, resolvePermissions(keys, false), PAGE_READ_PERMISSION);
+}
+
 function visibleHrefs(keys: readonly string[]): string[] {
-  return filterNavByPermissions(keys, false).flatMap((group) => group.items.map((item) => item.href));
+  return hrefsOf(visibleGroups(keys));
+}
+
+function legacyHrefs(keys: readonly string[]): string[] {
+  return leaves.filter((leaf) => leaf.href === DASHBOARD || keys.includes(leaf.key)).map((leaf) => leaf.href);
+}
+
+function deniedFor(pathname: string, keys: readonly string[]): boolean {
+  return isNavPathDenied(pathname, keys, false, resolvePermissions(keys, false), PAGE_READ_PERMISSION);
 }
 
 describe('nav table integrity', () => {
@@ -72,18 +103,62 @@ describe('nav table integrity', () => {
     for (const leaf of leaves) {
       assert.ok(leaf.label.trim().length > 0, `empty label on ${leaf.href}`);
       assert.ok(leaf.key in LEGACY_PERMISSION_MAP || isPermission(leaf.key), `unknown key ${leaf.key} on ${leaf.href}`);
+      if (leaf.permission !== undefined) assert.ok(isPermission(leaf.permission), `unknown permission on ${leaf.href}`);
       assert.ok(leaf.icon, `missing icon on ${leaf.href}`);
     }
   });
 
-  test('legacy page keys stay unique to their pages, so grant labels do not merge', () => {
+  test('page keys stay unique to their pages, apart from Bonuses and Levels and the three admin pages', () => {
+    const shared: Readonly<Record<string, readonly string[]>> = {
+      bonuses_rewards: ['Bonuses', 'Levels'],
+      admin_accounts: ['Admins', 'Roles', 'Permissions'],
+    };
     const owners = new Map<string, string[]>();
     for (const leaf of leaves) owners.set(leaf.key, [...(owners.get(leaf.key) ?? []), leaf.label]);
     for (const [key, labels] of owners) {
-      if (key === 'bonuses_rewards') assert.deepEqual(labels, ['Bonuses', 'Levels']);
+      if (Object.prototype.hasOwnProperty.call(shared, key)) assert.deepEqual(labels, shared[key]);
       else assert.equal(labels.length, 1, `${key} is the primary key of ${labels.join(', ')}`);
     }
     assert.deepEqual(owners.get('withdrawals'), ['Withdrawals']);
+  });
+
+  test('Roles and Permissions follow Admins in People, on the admin_accounts key with a roles.read override', () => {
+    const people = NAV_GROUPS.find((g) => g.label === 'People');
+    assert.deepEqual(people?.items.map((i) => [i.label, i.href]), [
+      ['Users', '/users'],
+      ['Activity Log', '/user-activity-monitor'],
+      ['Admin Activity', '/activity'],
+      ['Admins', '/admin-accounts'],
+      ['Roles', ROLES],
+      ['Permissions', PERMISSIONS],
+    ]);
+    const overridden = leaves.filter((leaf) => leaf.permission !== undefined);
+    assert.deepEqual(overridden.map((leaf) => [leaf.href, leaf.key, leaf.permission]), [
+      [ROLES, 'admin_accounts', 'roles.read'],
+      [PERMISSIONS, 'admin_accounts', 'roles.read'],
+    ]);
+    assert.deepEqual(overridden.map((leaf) => (leaf.icon as unknown as { displayName?: string }).displayName), [
+      'UserCog', 'KeyRound',
+    ]);
+  });
+
+  test('every page but Dashboard reads one permission from its own bundle: its override or the shared page map', () => {
+    for (const leaf of leaves) {
+      const permission = navLeafPermission(leaf, PAGE_READ_PERMISSION);
+      if (leaf.href === DASHBOARD) {
+        assert.equal(permission, null);
+        continue;
+      }
+      assert.ok(permission, `no read permission for ${leaf.href}`);
+      assert.equal(permission, leaf.permission ?? PAGE_READ_PERMISSION[leaf.key], leaf.href);
+      assert.ok(LEGACY_PERMISSION_MAP[leaf.key].includes(permission), `${leaf.key} does not grant ${permission}`);
+    }
+    const withdrawals = leaves.find((leaf) => leaf.href === '/withdrawals');
+    const roles = leaves.find((leaf) => leaf.href === ROLES);
+    assert.ok(withdrawals && roles);
+    assert.equal(navLeafPermission(withdrawals), null);
+    assert.equal(navLeafPermission(roles), 'roles.read');
+    assert.equal(navLeafPermission({ ...withdrawals, key: 'constructor' }, PAGE_READ_PERMISSION), null);
   });
 
   test('Levels keeps the shared bonuses_rewards permission key', () => {
@@ -254,51 +329,97 @@ describe('filterNavByPermissions', () => {
   });
 
   test('the shared key grants both Bonuses and Levels', () => {
-    const groups = filterNavByPermissions(['bonuses_rewards'], false);
-    assert.deepEqual(groups.map((g) => g.label), ['Rewards']);
-    assert.deepEqual(groups[0].items.map((i) => i.label), ['Bonuses', 'Levels']);
+    const groups = visibleGroups(['bonuses_rewards']);
+    assert.deepEqual(groups.map((g) => g.label), ['Operations', 'Rewards']);
+    assert.deepEqual(groups[1].items.map((i) => i.label), ['Bonuses', 'Levels']);
   });
 
   test('groups with no permitted items are dropped', () => {
-    const groups = filterNavByPermissions(['users', 'withdrawals'], false);
+    const groups = visibleGroups(['users', 'withdrawals']);
     assert.deepEqual(groups.map((g) => g.label), ['Operations', 'People']);
     for (const group of groups) assert.ok(group.items.length > 0);
   });
 
-  test('no keys means no groups', () => {
-    assert.deepEqual(filterNavByPermissions([], false), []);
+  test('an admin with no keys still sees Dashboard, and nothing else', () => {
+    const dashboard = leaves.find((leaf) => leaf.href === DASHBOARD);
+    assert.deepEqual(filterNavByPermissions([], false, new Set(), PAGE_READ_PERMISSION), [{ label: 'Operations', items: [dashboard] }]);
+    assert.deepEqual(filterNavByPermissions([], false), [{ label: 'Operations', items: [dashboard] }]);
   });
 
-  test('each single key shows exactly the pages it showed before', () => {
+  test('each single key shows Dashboard and exactly the pages it showed before', () => {
     for (const [key, hrefs] of Object.entries(VISIBLE_BY_KEY)) {
-      assert.deepEqual(visibleHrefs([key]), hrefs, key);
+      assert.deepEqual(visibleHrefs([key]), [...new Set([DASHBOARD, ...hrefs])], key);
+      assert.deepEqual(visibleHrefs([key]), legacyHrefs([key]), key);
     }
   });
 
   test('every legacy page key is covered by the visibility table', () => {
     for (const key of Object.keys(LEGACY_PERMISSION_MAP)) {
       if (key === 'users_freeze') {
-        assert.deepEqual(visibleHrefs([key]), [], key);
+        assert.deepEqual(visibleHrefs([key]), [DASHBOARD], key);
         continue;
       }
       assert.ok(key in VISIBLE_BY_KEY, `${key} has no expected visibility`);
     }
   });
 
-  test('raw catalog grants show no nav items, flags.read included', () => {
+  test('the live key sets show exactly the pages they showed before', () => {
+    assert.equal(filterNavByPermissions(LIVE_SUPER_ADMIN_KEYS, true), NAV_GROUPS);
+    for (const keys of [LIVE_SUPER_ADMIN_KEYS, LIVE_MANAGER_KEYS, LIVE_DELETED_MANAGER_KEYS]) {
+      assert.deepEqual(visibleHrefs(keys), legacyHrefs(keys), keys.join(','));
+    }
+    assert.deepEqual(visibleHrefs(LIVE_MANAGER_KEYS), [DASHBOARD, '/withdrawals', '/users']);
+    assert.deepEqual(visibleHrefs(LIVE_DELETED_MANAGER_KEYS), [DASHBOARD, '/withdrawals', '/coupons']);
+  });
+
+  test('a catalog grant shows Dashboard and the pages it reads, so flags.read opens none', () => {
     for (const permission of ALL_PERMISSIONS) {
-      assert.deepEqual(visibleHrefs([permission]), [], permission);
+      const reads = leaves.filter((leaf) => navLeafPermission(leaf, PAGE_READ_PERMISSION) === permission).map((leaf) => leaf.href);
+      assert.deepEqual(visibleHrefs([permission]), [DASHBOARD, ...reads], permission);
+    }
+    assert.deepEqual(visibleHrefs(['withdrawals.read']), [DASHBOARD, '/withdrawals']);
+    assert.deepEqual(visibleHrefs(['withdrawals.approve']), [DASHBOARD]);
+    assert.deepEqual(visibleHrefs(['flags.read']), [DASHBOARD]);
+    assert.deepEqual(visibleHrefs(['audit.read']), [DASHBOARD, '/activity']);
+    assert.deepEqual(visibleHrefs(['admin_users.read']), [DASHBOARD, '/admin-accounts']);
+    assert.deepEqual(visibleHrefs(['roles.read']), [DASHBOARD, ROLES, PERMISSIONS]);
+  });
+
+  test('Roles and Permissions show only for super admins and the two super-only keys that open them', () => {
+    const everything = hrefsOf(filterNavByPermissions([], true));
+    assert.ok(everything.includes(ROLES) && everything.includes(PERMISSIONS));
+    const opening: string[] = [];
+    for (const key of [...Object.keys(LEGACY_PERMISSION_MAP), ...ALL_PERMISSIONS]) {
+      const shown = visibleHrefs([key]);
+      assert.equal(shown.includes(ROLES), shown.includes(PERMISSIONS), key);
+      if (shown.includes(ROLES)) opening.push(key);
+    }
+    assert.deepEqual(opening, ['admin_accounts', 'roles.read']);
+    assert.equal(permissionStatus('roles.read'), 'super_only');
+    assert.ok(LEGACY_PERMISSION_MAP.admin_accounts.every((permission) => permissionStatus(permission) === 'super_only'));
+    for (const keys of [LIVE_MANAGER_KEYS, LIVE_DELETED_MANAGER_KEYS]) {
+      assert.ok(!visibleHrefs(keys).includes(ROLES), keys.join(','));
+      assert.ok(!visibleHrefs(keys).includes(PERMISSIONS), keys.join(','));
     }
   });
 
   test('combining keys shows the union in table order, with no duplicates', () => {
-    assert.deepEqual(visibleHrefs(['users', 'withdrawals', 'users']), ['/withdrawals', '/users']);
+    assert.deepEqual(visibleHrefs(['users', 'withdrawals', 'users']), [DASHBOARD, '/withdrawals', '/users']);
+    assert.deepEqual(visibleHrefs(['withdrawals', 'withdrawals.read']), [DASHBOARD, '/withdrawals']);
   });
 
-  test('unknown and retired keys show nothing', () => {
-    for (const key of ['flagged_transactions', 'giftbox', 'nope', '', 'Withdrawals']) {
-      assert.deepEqual(visibleHrefs([key]), [], key);
+  test('unknown and retired keys show only Dashboard', () => {
+    for (const key of ['flagged_transactions', 'giftbox', 'nope', '', 'Withdrawals', 'transfers', 'manual_wallet_credit']) {
+      assert.deepEqual(visibleHrefs([key]), [DASHBOARD], key);
     }
+    assert.deepEqual(hrefsOf(filterNavByPermissions(['constructor'], false, new Set(), PAGE_READ_PERMISSION)), [DASHBOARD]);
+  });
+
+  test('callers that pass no resolved permissions keep the stored-key rule, plus Dashboard', () => {
+    assert.deepEqual(hrefsOf(filterNavByPermissions(['withdrawals.read'], false)), [DASHBOARD]);
+    assert.deepEqual(hrefsOf(filterNavByPermissions(['withdrawals'], false)), [DASHBOARD, '/withdrawals']);
+    assert.equal(isNavPathDenied('/withdrawals', ['withdrawals.read'], false), true);
+    assert.equal(isNavPathDenied('/withdrawals', ['withdrawals'], false), false);
   });
 });
 
@@ -321,11 +442,6 @@ describe('retired Flagged page', () => {
 });
 
 describe('isNavPathDenied', () => {
-  const singleKeyRule = (pathname: string, keys: readonly string[]) => {
-    const key = findNavKey(pathname);
-    return pathname !== '/dashboard' && key !== null && !keys.includes(key);
-  };
-
   test('never denies a super admin, the dashboard or an unknown path', () => {
     for (const path of [...leaves.map((l) => l.href), '/users/1']) {
       assert.equal(isNavPathDenied(path, [], true), false, path);
@@ -333,22 +449,48 @@ describe('isNavPathDenied', () => {
     assert.equal(isNavPathDenied('/dashboard', [], false), false);
     for (const path of ['/', '/nope', '/login', RETIRED_FLAGGED]) {
       assert.equal(isNavPathDenied(path, [], false), false, path);
+      assert.equal(deniedFor(path, []), false, path);
     }
   });
 
-  test('follows the single-key rule for every page', () => {
-    const keySets = [[], ['users'], ['withdrawals'], ['bonuses_rewards', 'coupons'], ['dashboard'], ['flags.read']];
-    const paths = [...leaves.map((l) => l.href), '/users/9', '/dashboard/x'];
+  test('agrees with the sidebar on every page: a path opens exactly when its page is listed', () => {
+    const keySets = [
+      [], ['users'], ['withdrawals'], ['bonuses_rewards', 'coupons'], ['dashboard'], ['flags.read'], ['withdrawals.read'],
+      ['users.read', 'coupons.read'], ['admin_accounts'], ['admin_users.read'], ['roles.read'], LIVE_MANAGER_KEYS,
+    ];
+    const paths = [...leaves.map((l) => l.href), '/users/9', '/dashboard/x', '/admin-roles/x'];
     for (const keys of keySets) {
+      const listed = visibleHrefs(keys);
       for (const path of paths) {
-        assert.equal(isNavPathDenied(path, keys, false), singleKeyRule(path, keys), `${path} with ${keys.join(',')}`);
+        const leaf = findNavMatch(path)?.leaf;
+        assert.ok(leaf, path);
+        assert.equal(deniedFor(path, keys), !listed.includes(leaf.href), `${path} with ${keys.join(',')}`);
       }
     }
   });
 
-  test('Withdrawals opens for its own page key, never for flags.read', () => {
-    assert.equal(isNavPathDenied('/withdrawals', ['withdrawals'], false), false);
-    assert.equal(isNavPathDenied('/withdrawals', ['flags.read'], false), true);
+  test('Withdrawals opens for its own page key or withdrawals.read, never for flags.read or approve alone', () => {
+    assert.equal(deniedFor('/withdrawals', ['withdrawals']), false);
+    assert.equal(deniedFor('/withdrawals', ['withdrawals.read']), false);
+    assert.equal(deniedFor('/withdrawals', ['flags.read']), true);
+    assert.equal(deniedFor('/withdrawals', ['withdrawals.approve']), true);
+  });
+
+  test('Dashboard opens for every admin, with or without keys', () => {
+    for (const keys of [[], ['flags.read'], ['coupons'], ['dashboard']]) {
+      assert.equal(deniedFor(DASHBOARD, keys), false, keys.join(','));
+      assert.equal(isNavPathDenied(DASHBOARD, keys, false), false, keys.join(','));
+      assert.ok(visibleHrefs(keys).includes(DASHBOARD), keys.join(','));
+    }
+  });
+
+  test('Roles and Permissions are refused to every admin who is not a super admin', () => {
+    for (const keys of [[], LIVE_MANAGER_KEYS, LIVE_DELETED_MANAGER_KEYS, ['users', 'withdrawals', 'activity', 'coupons']]) {
+      assert.equal(deniedFor(ROLES, keys), true, keys.join(','));
+      assert.equal(deniedFor(PERMISSIONS, keys), true, keys.join(','));
+    }
+    assert.equal(isNavPathDenied(ROLES, [], true), false);
+    assert.equal(isNavPathDenied(PERMISSIONS, [], true), false);
   });
 });
 
@@ -747,6 +889,74 @@ describe('two-step sign-in banner', () => {
   });
 });
 
+describe('the shell lists and opens pages by their read permission', () => {
+  let shell: ShellModule;
+  let theme: ThemeModule;
+
+  before(async () => {
+    shell = await loadAppModule<ShellModule>('(dashboard)/_shell/Shell.tsx');
+    theme = await loadUi<ThemeModule>('theme.tsx');
+  });
+
+  const navHrefs = (html: string) => tagsOf(html, 'a')
+    .filter((anchor) => (anchor.class ?? '').split(/\s+/).includes('navItem'))
+    .map((anchor) => anchor.href);
+
+  const stored = (keys: readonly string[]) => ({
+    isSuperAdmin: false,
+    allowedKeys: [...keys],
+    permissions: Array.from(resolvePermissions(keys, false)).sort(),
+  });
+
+  const page = (pathname: string, overrides: Partial<Omit<ShellProps, 'children' | 'security'>>) =>
+    inShellWith(shell, theme, pathname, undefined, overrides);
+
+  test('an admin who holds only withdrawals.read gets Dashboard and Withdrawals, and the page opens', () => {
+    const html = page('/withdrawals', stored(['withdrawals.read']));
+    assert.deepEqual(navHrefs(html), [DASHBOARD, '/withdrawals']);
+    assert.match(mainOf(html), /^<h1>Page title<\/h1>$/);
+  });
+
+  test('an admin with no keys still gets the Dashboard link and page, and nothing else opens', () => {
+    const home = page(DASHBOARD, stored([]));
+    assert.deepEqual(navHrefs(home), [DASHBOARD]);
+    assert.match(mainOf(home), /^<h1>Page title<\/h1>$/);
+    const users = mainOf(page('/users', stored([])));
+    assert.match(textOf(users), /You do not have access to this page/);
+    assert.doesNotMatch(users, /Page title/);
+  });
+
+  test('the live Manager keeps the same sidebar and is refused Roles and Permissions', () => {
+    for (const path of [ROLES, PERMISSIONS]) {
+      const html = page(path, stored(LIVE_MANAGER_KEYS));
+      assert.deepEqual(navHrefs(html), [DASHBOARD, '/withdrawals', '/users'], path);
+      assert.match(textOf(mainOf(html)), /You do not have access to this page/, path);
+      assert.doesNotMatch(mainOf(html), /Page title/, path);
+    }
+  });
+
+  test('super admins get Roles and Permissions right after Admins, and both pages open', () => {
+    for (const path of [ROLES, PERMISSIONS]) {
+      const html = page(path, { isSuperAdmin: true, permissions: [...ALL_PERMISSIONS].sort() });
+      const hrefs = navHrefs(html);
+      const admins = hrefs.indexOf('/admin-accounts');
+      assert.deepEqual(hrefs.slice(admins, admins + 3), ['/admin-accounts', ROLES, PERMISSIONS], path);
+      assert.match(mainOf(html), /^<h1>Page title<\/h1>$/, path);
+    }
+  });
+
+  test('the frame gates with the resolved permissions from PermissionsProvider and the shared page map', () => {
+    const source = appSource('(dashboard)/_shell/Shell.tsx');
+    assert.match(source, /^import \{ PAGE_READ_PERMISSION, type Permission \} from '\.\.\/\.\.\/lib\/permissions';$/m);
+    assert.match(source, /const \{ canAny, permissions \} = usePermissions\(\);/);
+    assert.match(
+      source,
+      /filterNavByPermissions\(allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION\),\s*\[allowedKeys, isSuperAdmin, permissions\],/,
+    );
+    assert.match(source, /const permissionDenied = isNavPathDenied\(pathname, allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION\);/);
+  });
+});
+
 const LAYOUT_STATE_KEY = '__cardeliteDashboardLayoutTest';
 const APP_ROOT = fileURLToPath(new URL('../app/', import.meta.url));
 const LAYOUT_FILE = resolve(APP_ROOT, '(dashboard)', 'layout.tsx');
@@ -870,10 +1080,14 @@ describe('the dashboard layout', () => {
   let layout: LayoutModule;
   let state: LayoutState;
 
-  function ok(mfaStatus: string, policy: { mode: string; graceEndsAt: string | null; requiredNow: boolean }) {
+  function ok(
+    mfaStatus: string,
+    policy: { mode: string; graceEndsAt: string | null; requiredNow: boolean },
+    claims: typeof ADMIN = ADMIN,
+  ) {
     return {
       status: 'ok',
-      claims: ADMIN,
+      claims,
       session: null,
       mfa: { status: mfaStatus, lockedUntil: null },
       policy,
@@ -930,9 +1144,30 @@ describe('the dashboard layout', () => {
     assert.equal(props.initialCollapsed, true);
     assert.deepEqual(props.permissions, [...props.permissions].sort());
     assert.ok(props.permissions.includes('withdrawals.read'));
+    assert.deepEqual(props.permissions, Array.from(resolvePermissions(ADMIN.page_permissions, false)).sort());
+    assert.deepEqual(
+      hrefsOf(filterNavByPermissions(props.allowedKeys, props.isSuperAdmin, new Set(props.permissions), PAGE_READ_PERMISSION)),
+      [DASHBOARD, '/withdrawals', '/users'],
+    );
     assert.deepEqual(props.security, { prompt: 'none', graceEndsAt: null });
     assert.equal(props.children, 'page body');
     assert.deepEqual(state.redirects, []);
+  });
+
+  test('an admin who stores only withdrawals.read gets it in the resolved permissions the sidebar gates on', async () => {
+    const off = { mode: 'off', graceEndsAt: null, requiredNow: false };
+    prepare({ admin_token: 't' }, ok('active', off, { ...ADMIN, page_permissions: ['withdrawals.read'] }));
+    const { props } = await run();
+    assert.deepEqual(props.allowedKeys, ['withdrawals.read']);
+    assert.deepEqual(props.permissions, ['withdrawals.read']);
+    assert.equal(props.isSuperAdmin, false);
+    const held = new Set(props.permissions);
+    assert.deepEqual(
+      hrefsOf(filterNavByPermissions(props.allowedKeys, props.isSuperAdmin, held, PAGE_READ_PERMISSION)),
+      [DASHBOARD, '/withdrawals'],
+    );
+    assert.equal(isNavPathDenied('/withdrawals', props.allowedKeys, props.isSuperAdmin, held, PAGE_READ_PERMISSION), false);
+    assert.equal(isNavPathDenied('/users', props.allowedKeys, props.isSuperAdmin, held, PAGE_READ_PERMISSION), true);
   });
 
   test('the prompt comes from the same check: due during the grace, overdue after it, none once two-step is on', async () => {

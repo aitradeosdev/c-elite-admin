@@ -1,6 +1,6 @@
 import type { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { verifyAdminFromRequest, type VerifiedAdmin } from './jwt';
+import { verifyAdminFromRequest, type AdminRole, type VerifiedAdmin } from './jwt';
 import { resolvePermissions, type Permission } from './permissions';
 import { clientIpFrom } from './http';
 import { fail, requestId } from './api';
@@ -20,6 +20,7 @@ export interface AdminContext {
   admin_id: string;
   username: string;
   role_title: string;
+  role: AdminRole | null;
   is_super_admin: boolean;
   page_permissions: string[];
   permissions: Set<Permission>;
@@ -47,6 +48,7 @@ async function buildContext(claims: VerifiedAdmin): Promise<AdminContext> {
     admin_id: claims.admin_id,
     username: claims.username,
     role_title: claims.role_title,
+    role: claims.role ? { ...claims.role } : null,
     is_super_admin: claims.is_super_admin,
     page_permissions: pagePermissions,
     permissions,

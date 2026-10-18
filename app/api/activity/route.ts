@@ -1,12 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { supabaseAdmin } from '../../lib/supabase';
-import { requireAdmin, type AdminContext, type Guarded } from '../../lib/guard';
+import { requireAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit } from '../../lib/audit';
 import { buildPagination, fail, isUuid, ok } from '../../lib/api';
 import { sanitizeSearch } from '../../lib/sanitize';
 import { businessDateKey, lagosDateToRangeEnd, lagosDateToRangeStart } from '../../lib/time';
 import {
-  ACTIVITY_GRANT, EXPORT_CAP, LEGACY_DEFAULT_LIMIT, LEGACY_MAX_LIMIT, MAX_PAGE_SIZE, PAGE_SIZE, SEARCH_MAX,
+  EXPORT_CAP, LEGACY_DEFAULT_LIMIT, LEGACY_MAX_LIMIT, MAX_PAGE_SIZE, PAGE_SIZE, SEARCH_MAX,
   SEARCH_USER_CAP, actionFilterKeys, actionsMatching, forScreen, isActionKey, isEntityKey, isResultFilter,
   presentEvent, resolveTarget, screenValue, targetRefs, targetSpec, toCsv, toPrintable,
   type ActivityEvent, type AdminInfo, type LookupRow, type ResultFilter, type StoredAuditRow, type TargetLookup,
@@ -28,7 +28,7 @@ const LOOKUP_ROUNDS = 4;
 const RANGE_NOT_SATISFIABLE = 'PGRST103';
 
 const DENIED = 'The activity log is open to super administrators and to admins granted Admin Activity.';
-const ACCESS_UNCHECKED = 'Your access to the activity log could not be checked. Try again.';
+const EXPORT_DENIED = 'Exporting the activity log needs the “Export audit log” permission.';
 const LOAD_FAILED = 'The activity log could not be loaded.';
 const EVENT_FAILED = 'The activity event could not be loaded.';
 const EVENT_MISSING = 'That activity event could not be found. It may be older than the audit log keeps.';
@@ -58,26 +58,6 @@ interface Filters {
 interface TargetLoad {
   lookup: TargetLookup;
   failed: boolean;
-}
-
-async function requireActivityAccess(): Promise<Guarded> {
-  const guard = await requireAdmin();
-  if (!guard.ok || guard.admin.is_super_admin) return guard;
-  const { data, error } = await supabaseAdmin
-    .from('admin_users')
-    .select('page_permissions')
-    .eq('id', guard.admin.admin_id)
-    .maybeSingle();
-  if (error) {
-    console.error('activity access check:', error.message);
-    return { ok: false, response: await fail('INTERNAL_ERROR', ACCESS_UNCHECKED) };
-  }
-  const grants = (data as { page_permissions?: unknown } | null)?.page_permissions;
-  if (Array.isArray(grants) && grants.includes(ACTIVITY_GRANT)) return guard;
-  return {
-    ok: false,
-    response: await fail('PERMISSION_DENIED', DENIED, { details: { required: [ACTIVITY_GRANT] } }),
-  };
 }
 
 function trimmed(params: URLSearchParams, name: string): string {
@@ -449,6 +429,9 @@ async function collectExport(filters: Filters, clause: string | null, cap: numbe
 }
 
 async function exportEvents(admin: AdminContext, format: 'csv' | 'pdf', params: URLSearchParams) {
+  if (!admin.can('audit.export')) {
+    return fail('PERMISSION_DENIED', EXPORT_DENIED, { details: { required: ['audit.export'] } });
+  }
   const parsed = parseFilters(params);
   if (!parsed.ok) return fail('VALIDATION_ERROR', parsed.message);
   const filters = parsed.value;
@@ -542,7 +525,7 @@ async function legacyList(admin: AdminContext, params: URLSearchParams) {
 }
 
 export async function GET(req: NextRequest) {
-  const guard = await requireActivityAccess();
+  const guard = await requireAdmin('audit.read');
   if (!guard.ok) return guard.response;
   const { admin } = guard;
   const params = new URL(req.url).searchParams;

@@ -417,24 +417,31 @@ describe('Shell provides permissions to every page', () => {
     assert.equal(textById(html, 'probe'), 'read=true approve=true users=true super=true');
   });
 
-  test('navigation still follows allowedKeys, not the new permissions prop', () => {
+  test('navigation lists a page for its stored key or for its read permission in the permissions prop', () => {
     const html = inShell('/dashboard', {
       allowedKeys: ['withdrawals'],
       permissions: ['withdrawals.read', 'users.read', 'transactions.read'],
     }, createElement(Probe));
     const hrefs = tagsOf(html, 'a').map((a) => a.href);
     assert.ok(hrefs.includes('/withdrawals'));
-    assert.ok(!hrefs.includes('/users'));
-    assert.ok(!hrefs.includes('/transactions-overview'));
+    assert.ok(hrefs.includes('/users'));
+    assert.ok(hrefs.includes('/transactions-overview'));
+    assert.ok(!hrefs.includes('/activity'));
   });
 
-  test('the page access gate is unchanged: it still checks allowedKeys', () => {
-    const html = inShell('/users', {
+  test('the page access gate opens a page for its read permission and still refuses a page the admin cannot read', () => {
+    const open = inShell('/users', {
       allowedKeys: ['withdrawals'],
       permissions: ['users.read'],
     }, createElement(Probe));
-    assert.equal(textById(html, 'probe'), undefined);
-    assert.ok(textOf(html).includes('You do not have access to this page'));
+    assert.equal(textById(open, 'probe'), 'read=false approve=false users=true super=false');
+    assert.ok(!textOf(open).includes('You do not have access to this page'));
+    const refused = inShell('/transactions-overview', {
+      allowedKeys: ['withdrawals'],
+      permissions: ['users.read'],
+    }, createElement(Probe));
+    assert.equal(textById(refused, 'probe'), undefined);
+    assert.ok(textOf(refused).includes('You do not have access to this page'));
   });
 
   test('the provider wraps the toast and confirm providers, so dialog content shares the context', () => {

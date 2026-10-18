@@ -2,12 +2,14 @@ import { Notice, type ConfirmDetail, type ConfirmOptions } from '../../_ui';
 import { twoStepUnlockText } from '../../lib/http';
 import { isLocalAddress, isLockActive, type DeviceSession } from '../../lib/adminSecurity';
 import { formatAge, formatBusinessDate, formatBusinessDateTime } from '../../lib/time';
-import { REASON_MAX, diffGrants, normalizeGrants, type GrantChange } from './rules';
+import { REASON_MAX, diffGrants, sameGrants } from './rules';
 import {
-  RESERVED_ADDITIONAL,
+  NO_ROLE_LABEL,
   adminHandle,
   plural,
   policyRequirement,
+  type AccessPreview,
+  type AccessResult,
   type AdminRow,
   type EditProposal,
   type EditorDraft,
@@ -15,22 +17,24 @@ import {
   type RowActionKind,
   type SecurityPolicy,
 } from './model';
-import { Change, GrantDiff } from './GrantParts';
+import { Change, GrantDiff } from '../_access';
 import s from './page.module.css';
 
 export type ConfirmBase = Omit<ConfirmOptions, 'action'>;
 
-const RESERVED: ReadonlySet<string> = new Set(RESERVED_ADDITIONAL);
-
-function reservedNote(change: GrantChange | null): string[] {
-  const count = change ? change.added.filter((key) => RESERVED.has(key)).length : 0;
-  if (count === 0) return [];
-  return [
-    `${plural(count, 'granted permission is', 'granted permissions are')} not checked anywhere yet. ${
-      count === 1 ? 'It takes' : 'They take'
-    } effect on ${count === 1 ? 'its' : 'their'} own when the feature that uses ${count === 1 ? 'it' : 'them'} ships.`,
-  ];
+export interface AccessSide {
+  roleName: string | null;
+  direct: readonly string[];
 }
+
+const CREATE_WITHOUT_ACCESS =
+  'The account is created without access. Give it a role or additional access afterwards in its Access section.';
+
+const CREATE_THEN_ACCESS =
+  'The account is created without access first. Its access is then saved as a second change, which you review and confirm with its own reason.';
+
+const ACCESS_SAVED_SEPARATELY =
+  'Access does not change in this save. Your access changes are saved separately with Review access.';
 
 function lastSignIn(admin: AdminRow): string {
   if (!admin.last_login_at) return 'Never';
@@ -40,26 +44,33 @@ function lastSignIn(admin: AdminRow): string {
 function adminDetails(admin: AdminRow): ConfirmDetail[] {
   return [
     { label: 'Admin', value: adminHandle(admin) },
-    { label: 'Role title', value: admin.role_title || '—' },
+    { label: 'Title', value: admin.role_title || '—' },
   ];
 }
 
-export function createConfirm(draft: EditorDraft): ConfirmBase {
+function grantCount(keys: readonly string[]): string {
+  return keys.length ? plural(keys.length, 'grant') : 'None';
+}
+
+export function createConfirm(draft: EditorDraft, access: AccessSide | null): ConfirmBase {
   const handle = adminHandle({ username: draft.username });
-  const change = diffGrants([], normalizeGrants(draft.grants));
+  const details: ConfirmDetail[] = [
+    { label: 'Username', value: handle },
+    { label: 'Email', value: draft.email.trim() },
+    { label: 'Title', value: draft.roleTitle.trim() },
+    { label: 'Password', value: 'Set, not shown again' },
+  ];
+  if (access) {
+    details.push({ label: 'Role', value: access.roleName ?? NO_ROLE_LABEL });
+    if (access.direct.length) details.push({ label: 'Additional access', value: grantCount(access.direct) });
+  }
   return {
     title: `Create ${handle}?`,
-    message: <GrantDiff change={change} addedTitle="Access granted" />,
-    details: [
-      { label: 'Username', value: handle },
-      { label: 'Email', value: draft.email.trim() },
-      { label: 'Role title', value: draft.roleTitle.trim() },
-      { label: 'Password', value: 'Set, not shown again' },
-    ],
+    message: <p className={s.confirmLead}>{access ? CREATE_THEN_ACCESS : CREATE_WITHOUT_ACCESS}</p>,
+    details,
     consequences: [
       `${handle} can sign in straight away with this username, email and password.`,
       'Send the password through a secure channel. It cannot be read back once the account exists.',
-      ...reservedNote(change),
     ],
     reason: {
       required: true,
@@ -71,24 +82,23 @@ export function createConfirm(draft: EditorDraft): ConfirmBase {
   };
 }
 
-export function editConfirm(live: AdminRow, proposal: EditProposal, rebased: RebaseResult): ConfirmBase {
+export function editConfirm(
+  live: AdminRow,
+  proposal: EditProposal,
+  rebased: RebaseResult,
+  accessPending = false,
+): ConfirmBase {
   const handle = adminHandle(live);
   const details: ConfirmDetail[] = [{ label: 'Admin', value: handle }];
   if (proposal.roleTitle) {
-    details.push({ label: 'Role title', value: <Change before={proposal.roleTitle.before} after={proposal.roleTitle.after} /> });
+    details.push({ label: 'Title', value: <Change before={proposal.roleTitle.before} after={proposal.roleTitle.after} /> });
   }
   if (proposal.email) {
     details.push({ label: 'Email', value: <Change before={proposal.email.before} after={proposal.email.after} /> });
   }
   if (proposal.password) details.push({ label: 'Password', value: 'Replaced with the new password' });
-  if (proposal.grants) {
-    details.push({
-      label: 'Stored grants',
-      value: <Change before={String(live.page_permissions.length)} after={String(proposal.nextGrants.length)} />,
-    });
-  }
 
-  const conflictText = rebased.conflicts.map((field) => (field === 'email' ? 'email' : 'role title'));
+  const conflictText = rebased.conflicts.map((field) => (field === 'email' ? 'email' : 'title'));
   return {
     title: `Save changes to ${handle}?`,
     message: (
@@ -99,11 +109,7 @@ export function editConfirm(live: AdminRow, proposal: EditProposal, rebased: Reb
             {conflictText.length ? `; you both changed the ${conflictText.join(' and ')}, and yours wins` : ''}.
           </Notice>
         ) : null}
-        {proposal.grants ? (
-          <GrantDiff change={proposal.grants} />
-        ) : (
-          <p className={s.confirmLead}>Access does not change.</p>
-        )}
+        <p className={s.confirmLead}>{accessPending ? ACCESS_SAVED_SEPARATELY : 'Access does not change.'}</p>
       </div>
     ),
     details,
@@ -113,7 +119,6 @@ export function editConfirm(live: AdminRow, proposal: EditProposal, rebased: Reb
         : []),
       ...(proposal.email ? [`${handle} signs in with the new email from now on, and security alerts go there.`] : []),
       ...(live.is_active ? [] : [`${handle} is deactivated. These changes apply if the account is reactivated.`]),
-      ...reservedNote(proposal.grants),
     ],
     reason: {
       required: true,
@@ -123,6 +128,83 @@ export function editConfirm(live: AdminRow, proposal: EditProposal, rebased: Reb
     },
     confirmLabel: 'Save changes',
   };
+}
+
+export interface AccessConfirmInput {
+  admin: AdminRow;
+  preview: AccessPreview;
+  before: AccessSide;
+  after: AccessSide;
+  titlePending?: boolean;
+}
+
+export const ACCESS_PENDING = 'Saving the access change…';
+
+export function accessConfirm({ admin, preview, before, after, titlePending = false }: AccessConfirmInput): ConfirmBase {
+  const handle = adminHandle(admin);
+  const roleBefore = before.roleName ?? NO_ROLE_LABEL;
+  const roleAfter = after.roleName ?? NO_ROLE_LABEL;
+  const details: ConfirmDetail[] = [
+    { label: 'Admin', value: handle },
+    { label: 'Role', value: roleBefore === roleAfter ? roleAfter : <Change before={roleBefore} after={roleAfter} /> },
+  ];
+  if (!sameGrants(before.direct, after.direct)) {
+    details.push({
+      label: 'Additional access',
+      value: <Change before={grantCount(before.direct)} after={grantCount(after.direct)} />,
+    });
+  }
+  const staysSignedIn = !preview.changed && admin.is_active && !titlePending;
+  return {
+    title: `Change access for ${handle}?`,
+    message: (
+      <div className={s.confirmBody}>
+        {preview.changed ? (
+          <GrantDiff change={{ added: [], removed: [], gained: preview.gained, lost: preview.lost }} />
+        ) : (
+          <p className={s.confirmLead}>{staysSignedIn ? `Access unchanged. ${handle} stays signed in.` : 'Access unchanged.'}</p>
+        )}
+        {preview.folded.length ? (
+          <p className={s.confirmLead}>Moved into the role: {preview.folded.join(', ')}</p>
+        ) : null}
+      </div>
+    ),
+    details,
+    consequences: [
+      ...(preview.signsOut ? [`${handle} is signed out on every device, web and mobile, and must sign in again.`] : []),
+      ...(preview.changed && !admin.is_active
+        ? [`${handle} is deactivated. These changes apply if the account is reactivated.`]
+        : []),
+      ...(titlePending
+        ? [`The new title is saved separately with Review changes, and saving it signs ${handle} out on every device.`]
+        : []),
+    ],
+    reason: {
+      required: true,
+      label: 'Reason for the access change',
+      placeholder: 'Why does this admin need this access?',
+      maxLength: REASON_MAX,
+    },
+    confirmLabel: 'Save access',
+    pendingLabel: ACCESS_PENDING,
+  };
+}
+
+export function accessIdentityConfirm(admin: AdminRow): ConfirmBase {
+  return {
+    title: 'Confirm it is you',
+    message: `Access changes need a recent identity check. Enter a code from your authenticator app to save the change for ${adminHandle(admin)}.`,
+    credential: { kind: 'otp' },
+    confirmLabel: 'Save access',
+    pendingLabel: ACCESS_PENDING,
+  };
+}
+
+export function accessSavedText(admin: AdminRow, result: AccessResult): string {
+  const handle = adminHandle(admin);
+  if (!result.changed) return 'Nothing changed. This access was already live.';
+  if (result.signedOut) return `Saved access for ${handle}. They were signed out everywhere and must sign in again.`;
+  return admin.is_active ? `Saved access for ${handle}. They stay signed in.` : `Saved access for ${handle}.`;
 }
 
 const REVOKE_REASONS = [

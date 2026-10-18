@@ -22,7 +22,7 @@ import { findPageSearchInput, paletteChordHint, useApplePlatform, useHotkeys } f
 import { useFocusTrap } from '../../_ui/useFocusTrap';
 import { popOverlay, pushOverlay } from '../../_ui/overlayStack';
 import { RealtimeSignalsProvider } from '../../_ui/realtime/RealtimeSignals';
-import type { Permission } from '../../lib/permissions';
+import { PAGE_READ_PERMISSION, type Permission } from '../../lib/permissions';
 import { PROFILE_HREF, PROFILE_LABEL, ProfileLink, profileLinkLabel } from '../profile/ProfileLink';
 import { NO_SECURITY_PROMPT, type ShellSecurity } from '../profile/securityModel';
 import { leaveConsole, useSignOutEverywhere } from '../profile/signOut';
@@ -322,7 +322,7 @@ function ShellFrame({
   const wasDrawerOpen = useRef(false);
   const apple = useApplePlatform();
   const { mode, setMode } = useTheme();
-  const { canAny } = usePermissions();
+  const { canAny, permissions } = usePermissions();
   const { pending: logoutPending, logout } = useLogout(username);
   const signOutEverywhere = useSignOutEverywhere(username);
   const logoutHere = useCallback(() => {
@@ -338,8 +338,8 @@ function ShellFrame({
   const railTip = useRailTip(collapsed, railRef);
 
   const navGroups = useMemo(
-    () => filterNavByPermissions(allowedKeys, isSuperAdmin),
-    [allowedKeys, isSuperAdmin],
+    () => filterNavByPermissions(allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION),
+    [allowedKeys, isSuperAdmin, permissions],
   );
   const countKeys = useMemo(() => navCountKeys(navGroups), [navGroups]);
   const navCounts = useNavCounts(countKeys);
@@ -457,7 +457,7 @@ function ShellFrame({
   };
 
   const crumbs = breadcrumbTrail(pathname);
-  const permissionDenied = isNavPathDenied(pathname, allowedKeys, isSuperAdmin);
+  const permissionDenied = isNavPathDenied(pathname, allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION);
   const onProfile = hrefMatches(pathname, PROFILE_HREF);
   const toggleLabel = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
 

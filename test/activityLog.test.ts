@@ -59,6 +59,7 @@ const SUBMISSION_ID = '33333333-4444-4555-8666-777777777777';
 const CARD_ID = '44444444-5555-4666-8777-888888888888';
 const TYPE_ID = '55555555-6666-4777-8888-999999999999';
 const RANGE_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+const ROLE_ID = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
 const STAMP = '2026-10-02T13:05:33.000Z';
 
 const ADMIN: AdminInfo = {
@@ -765,6 +766,7 @@ describe('action labels', () => {
       'APPROVE_CARD', 'APPROVE_CARD_CORRECTED', 'LOGIN', 'RESUME_WITHDRAWAL_OK', 'RESUME_WITHDRAWAL_FAILED',
       'LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED', 'ADMIN_AUTO_DEACTIVATION_SKIPPED', 'MFA_BREAK_GLASS_RESET',
       'MFA_CHALLENGE_FAILED', 'MFA_LOCKED', 'LOGIN_MFA_SETUP_REQUIRED', 'LOGOUT',
+      'CREATE_ADMIN_ROLE', 'EDIT_ADMIN_ROLE', 'ARCHIVE_ADMIN_ROLE', 'RESTORE_ADMIN_ROLE', 'EDIT_ADMIN_ACCESS',
     ]) {
       assert.ok(written.has(expected), `${expected} was not derived from the SQL and edge functions`);
     }
@@ -1002,6 +1004,33 @@ describe('action labels', () => {
     }
   });
 
+  test('names role changes and access changes under Admins and sign-in', () => {
+    const expected: Array<[string, string]> = [
+      ['CREATE_ADMIN_ROLE', 'Created role'],
+      ['EDIT_ADMIN_ROLE', 'Edited role'],
+      ['ARCHIVE_ADMIN_ROLE', 'Archived role'],
+      ['RESTORE_ADMIN_ROLE', 'Restored role'],
+      ['EDIT_ADMIN_ACCESS', 'Changed admin access'],
+    ];
+    const signIn = rules.ACTION_GROUPS.find((group) => group.label === 'Admins and sign-in');
+    const values = signIn?.options.map((option) => option.value) ?? [];
+    for (const [action, label] of expected) {
+      assert.equal(rules.actionLabel(action), label, action);
+      assert.ok(rules.isListedAction(action), action);
+      assert.ok(values.includes(action), `${action} is not offered under Admins and sign-in`);
+    }
+    assert.equal(values.indexOf('EDIT_ADMIN_ACCESS'), values.indexOf('EDIT_ADMIN') + 1);
+    assert.deepEqual(
+      values.slice(values.indexOf('DELETE_ADMIN') + 1, values.indexOf('DELETE_ADMIN') + 5),
+      ['CREATE_ADMIN_ROLE', 'EDIT_ADMIN_ROLE', 'ARCHIVE_ADMIN_ROLE', 'RESTORE_ADMIN_ROLE'],
+    );
+    const role = rules.actionsMatching('role');
+    for (const action of ['CREATE_ADMIN_ROLE', 'EDIT_ADMIN_ROLE', 'ARCHIVE_ADMIN_ROLE', 'RESTORE_ADMIN_ROLE']) {
+      assert.ok(role.includes(action), action);
+    }
+    assert.ok(rules.actionsMatching('admin access').includes('EDIT_ADMIN_ACCESS'));
+  });
+
   test('derives the sign-in and identity-check actions from the routes and the shared session module', () => {
     const sessionModule = scanActions(join(APP_DIR, 'lib', 'session.ts'));
     assert.deepEqual(sessionModule.unresolved, []);
@@ -1090,6 +1119,13 @@ describe('results, sensitivity and record types', () => {
     assert.equal(rules.sensitivityLabel(null), null);
     assert.equal(rules.isElevatedSensitivity('security'), true);
     assert.equal(rules.isElevatedSensitivity('normal'), false);
+  });
+
+  test('names roles as a record type for the filter', () => {
+    assert.equal(rules.entityLabel('admin_roles'), 'Role');
+    assert.ok(rules.isListedEntity('admin_roles'));
+    assert.ok(rules.ENTITY_OPTIONS.some((option) => option.value === 'admin_roles' && option.label === 'Role'));
+    assert.equal(rules.entityLabel('admin_users'), 'Admin account');
   });
 
   test('labels record types without leaking object prototype names', () => {
@@ -1263,6 +1299,33 @@ describe('naming the target of each event', () => {
     assert.deepEqual(
       rules.resolveTarget({ entity: 'admin_users', entity_id: ADMIN_ID, user_id: null }, STORE, adminOf),
       { username: 'ops', label: '@ops' },
+    );
+  });
+
+  test('names a role target by its name, reading only its id and name', () => {
+    const spec = rules.targetSpec('admin_roles');
+    assert.equal(spec?.table, 'admin_roles');
+    assert.equal(spec?.columns, 'id, name');
+    assert.equal(spec?.owner, undefined);
+    assert.equal(spec?.refs, undefined);
+    const roles = lookupFrom({ admin_roles: [{ id: ROLE_ID, name: 'Manager' }] });
+    assert.deepEqual(
+      rules.resolveTarget({ entity: 'admin_roles', entity_id: ROLE_ID, user_id: null }, roles, adminOf),
+      { username: null, label: 'Manager' },
+    );
+    assert.deepEqual(
+      rules.resolveTarget({ entity: 'admin_roles', entity_id: '99999999-9999-4999-8999-999999999999', user_id: null }, roles, adminOf),
+      { username: null, label: null },
+    );
+    assert.deepEqual(rules.targetRefs('admin_roles', { id: ROLE_ID, name: 'Manager' }), []);
+  });
+
+  test('labels role targets the way the database list does', { skip: !SIBLINGS_PRESENT }, () => {
+    const sql = readFileSync(SQL_FILES[1], 'utf8');
+    const list = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION list_admin_activity('));
+    assert.match(
+      list.slice(0, list.indexOf('$$;')),
+      /WHEN al\.entity = 'admin_roles' THEN \(SELECT r\.name FROM admin_roles r WHERE r\.id::text = al\.entity_id\)/,
     );
   });
 
@@ -1586,15 +1649,29 @@ describe('event drawer', () => {
 describe('route contract', () => {
   const source = readFileSync(ROUTE_FILE, 'utf8');
 
-  test('keeps today’s access rule: super admins or the Admin Activity grant, never audit.* or super-only', () => {
-    assert.match(source, /requireAdmin\(\)/);
-    assert.match(source, /is_super_admin/);
-    assert.match(source, /page_permissions/);
-    assert.match(source, /ACTIVITY_GRANT/);
-    assert.equal(rules.ACTIVITY_GRANT, 'activity');
-    assert.doesNotMatch(source, /requireSuperAdmin|requireAdminAny|requireAdminAll|'audit\.(read|export)'/);
-    assert.match(source, /fail\('PERMISSION_DENIED'/);
+  test('opens the log on audit.read and exports only with audit.export, never on the raw Admin Activity key (D-19)', () => {
+    assert.match(source, /const guard = await requireAdmin\('audit\.read'\);\s*if \(!guard\.ok\) return guard\.response;/);
+    assert.equal((source.match(/requireAdmin\(/g) ?? []).length, 1);
+    assert.doesNotMatch(source, /requireActivityAccess|ACTIVITY_GRANT|page_permissions|requireSuperAdmin|requireAdminAny|requireAdminAll/);
+    assert.ok(!('ACTIVITY_GRANT' in rules));
+    const exporter = source.slice(source.indexOf('async function exportEvents('), source.indexOf('async function legacyList('));
+    assert.match(exporter, /^async function exportEvents\([^)]*\) \{\s*if \(!admin\.can\('audit\.export'\)\) \{\s*return fail\(/);
+    assert.match(
+      exporter,
+      /return fail\('PERMISSION_DENIED', EXPORT_DENIED, \{ details: \{ required: \['audit\.export'\] \} \}\);\s*\}\s*const parsed = parseFilters/,
+    );
+    assert.match(source, /const EXPORT_DENIED = 'Exporting the activity log needs the “Export audit log” permission\.';/);
+    assert.equal((source.match(/return exportEvents\(admin, /g) ?? []).length, 2);
     assert.doesNotMatch(source, /AUTH_REQUIRED|status: 401/);
+  });
+
+  test('the database list behind the mobile app’s request checks audit.read as well', { skip: !SIBLINGS_PRESENT }, () => {
+    const sql = readFileSync(SQL_FILES[1], 'utf8');
+    const list = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION list_admin_activity('));
+    const body = list.slice(0, list.indexOf('$$;'));
+    assert.match(body, /IF NOT \(v_super = TRUE OR 'audit\.read' = ANY \(admin_expand_grants\(v_perms\)\)\) THEN/);
+    assert.doesNotMatch(body, /'activity' = ANY/);
+    assert.match(source, /if \(\/forbidden\/i\.test\(listed\.error\.message \|\| ''\)\) return fail\('PERMISSION_DENIED', DENIED\);/);
   });
 
   test('still answers the mobile app’s request shape', () => {

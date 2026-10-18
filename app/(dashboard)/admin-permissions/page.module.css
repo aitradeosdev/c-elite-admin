@@ -1,0 +1,128 @@
+.listRegion {
+  min-width: 0;
+  border-radius: var(--radius-lg);
+  scroll-margin-top: var(--space-20);
+}
+
+.listRegion:focus {
+  outline: none;
+}
+
+.listRegion:focus-visible {
+  outline: 2px solid var(--accent-base);
+  outline-offset: 2px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.key {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.description {
+  display: block;
+  max-width: 44ch;
+  color: var(--fg-secondary);
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--fg-tertiary);
+}
+
+th.wrapHead {
+  min-width: 7.5rem;
+  white-space: normal;
+}
+
+.reservedRow > td,
+.reservedRow .name,
+.reservedRow .description {
+  color: var(--fg-tertiary);
+}
+
+.riskCell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.highRisk {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.highRiskCritical {
+  color: var(--tone-danger-fg);
+}
+
+.highRiskHigh {
+  color: var(--tone-warning-fg);
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.detailSection {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.detailText {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+
+.itemList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.item {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+
+.item:last-child {
+  border-bottom: 0;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-tertiary);
+}

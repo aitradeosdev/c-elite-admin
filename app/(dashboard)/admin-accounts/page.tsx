@@ -15,18 +15,17 @@ import {
 import { apiRequest, type ApiFailure } from '../../lib/apiClient';
 import { isUuid } from '../../lib/http';
 import { formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
-import { SecurityRequestError, reauthenticate } from '../../_security/reauth';
 import {
   ACTOR_TWO_STEP_FIRST, ADMINS_URL, POLICY_OFF, STATUS_LABEL, STATUS_TABS, STATUS_TONE, TWO_STEP_SETTINGS_HREF,
   TWO_STEP_STAT_UNAVAILABLE, actorCanReset, adminHandle, adminMfaPath, adminStats, allowsAction, capabilitiesFor,
-  classifyMutation, hasRowActions, hasSecurityPanel, isSelf, mfaCellState, resetBlockedText, rowActionRequest,
-  statusOf, tabCounts, toAdminList, toMutationResult, toResetResult, twoStepStat, twoStepStats, visibleAdmins,
-  withAdmin,
-  type AdminCapabilities, type AdminList, type AdminPanel, type AdminRow, type MutationOutcome, type ResetResult,
-  type RowActionKind, type SecurityPolicy, type StatusTab,
+  classifyMutation, confirmIdentity, hasRowActions, hasSecurityPanel, isSelf, mfaCellState, resetBlockedText,
+  roleLabel, rowActionRequest, statusOf, tabCounts, toAdminList, toMutationResult, toResetResult, twoStepStat,
+  twoStepStats, visibleAdmins, withAdmin,
+  type AccessHandoff, type AdminCapabilities, type AdminList, type AdminPanel, type AdminRow, type MutationOutcome,
+  type ResetResult, type RowActionKind, type SecurityPolicy, type StatusTab,
 } from './model';
 import { ROW_ACTION_PENDING, resetMfaConfirm, resetSuccess, rowActionConfirm, rowActionSuccess } from './confirmOptions';
-import { AccessCell } from './GrantParts';
+import { AccessCell } from '../_access';
 import { AdminEditor } from './AdminEditor';
 import { AdminDetails } from './AdminDetails';
 import { MfaBadge, MfaCell } from './SecurityParts';
@@ -35,7 +34,7 @@ import s from './page.module.css';
 
 const TITLE = 'Admin accounts';
 const SUBTITLE = 'Who can sign in to the console, what each admin can do, and their sessions. Super administrators only; times are WAT.';
-const COLUMN_COUNT = 7;
+const COLUMN_COUNT = 8;
 const BAD_LINK = 'That admin link is not valid, so nothing was opened.';
 const MISSING_LINK = 'That admin account could not be found, so nothing was opened.';
 const RESET_AUDIT_WARNING = 'Two-step sign-in was reset, but the change could not be written to the audit log.';
@@ -45,6 +44,7 @@ const STEP_UP_REASON_SHORT = `Give a reason of at least ${STEP_UP_REASON_MIN} ch
 const SKELETON_COLUMNS: readonly TableSkeletonColumn[] = [
   { width: 150, lines: 2 },
   { width: 180 },
+  { width: 120 },
   { width: 170, lines: 2 },
   { width: 130, lines: 2 },
   { width: 96 },
@@ -87,18 +87,6 @@ function signInText(value: string | null): string {
 
 function checkStepUpReason(reason: string): void {
   if (Array.from(reason.trim()).length < STEP_UP_REASON_MIN) throw new Error(STEP_UP_REASON_SHORT);
-}
-
-async function confirmIdentity(code: string): Promise<'ok' | 'expired'> {
-  try {
-    await reauthenticate('otp', code);
-    return 'ok';
-  } catch (error) {
-    if (error instanceof SecurityRequestError && error.failure.kind === 'http' && error.failure.status === 401) {
-      return 'expired';
-    }
-    throw error;
-  }
 }
 
 export default function AdminAccountsPage() {
@@ -148,9 +136,14 @@ function AdminCell({ admin, self }: { admin: AdminRow; self: boolean }) {
         <span className={s.lead}>{adminHandle(admin)}</span>
         {self ? <Badge tone="neutral">You</Badge> : null}
       </span>
-      <span className={s.sub}>{admin.role_title || 'No role title'}</span>
+      <span className={s.sub}>{admin.role_title || 'No title'}</span>
     </div>
   );
+}
+
+function RoleCell({ admin }: { admin: AdminRow }) {
+  const assigned = admin.is_super_admin || admin.role_id !== null;
+  return <span className={assigned ? s.roleName : s.muted}>{roleLabel(admin)}</span>;
 }
 
 function EmailCell({ admin }: { admin: AdminRow }) {
@@ -194,6 +187,7 @@ function AdminAccounts() {
   const [query, setQuery] = useState('');
   const { sort, setSort, toggle: toggleSort } = useTableSort(null);
   const [creating, setCreating] = useState(false);
+  const [handoff, setHandoff] = useState<AccessHandoff | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [securityRevision, setSecurityRevision] = useState(0);
   const actingRef = useRef(false);
@@ -251,18 +245,28 @@ function AdminAccounts() {
 
   const openRow = useCallback((admin: AdminRow) => {
     setCreating(false);
+    setHandoff(null);
     setUrl((value) => ({ ...value, id: admin.id, panel: 'account' }));
   }, [setUrl]);
 
   const closePanel = useCallback(() => {
     setCreating(false);
+    setHandoff(null);
     setUrl((value) => (value.id === null && value.panel === 'account' ? value : { ...value, id: null, panel: 'account' }));
   }, [setUrl]);
 
   const startCreate = useCallback(() => {
     setUrl((value) => (value.id === null && value.panel === 'account' ? value : { ...value, id: null, panel: 'account' }));
+    setHandoff(null);
     setCreating(true);
   }, [setUrl]);
+
+  const handOff = useCallback((admin: AdminRow, next: AccessHandoff) => {
+    applyAdmin(admin);
+    setHandoff(next);
+    setCreating(false);
+    setUrl((value) => ({ ...value, id: admin.id, panel: 'account' }));
+  }, [applyAdmin, setUrl]);
 
   const changePanel = useCallback((next: AdminPanel) => {
     setUrl((value) => ({ ...value, panel: next }));
@@ -524,7 +528,7 @@ function AdminAccounts() {
   const tableBusy = loaded && list.isRefreshing;
   const searching = query.trim() !== '';
   const emptyTitle = searching ? 'No admins match this search' : EMPTY_COPY[url.tab].title;
-  const emptyHint = searching ? 'Try a username, email or role title, or clear the search.' : EMPTY_COPY[url.tab].hint;
+  const emptyHint = searching ? 'Try a username, email or title, or clear the search.' : EMPTY_COPY[url.tab].hint;
   const clearSearch = searching ? (
     <Button variant="secondary" size="sm" onClick={() => setQuery('')}>Clear search</Button>
   ) : undefined;
@@ -557,6 +561,7 @@ function AdminAccounts() {
             <Tr>
               <Th sortKey="username" sort={sort} onSort={toggleSort}>Admin</Th>
               <Th>Email</Th>
+              <Th>Role</Th>
               <Th>Access</Th>
               <Th sortKey="last_login_at" sort={sort} onSort={toggleSort}>Last sign-in</Th>
               <Th>Status</Th>
@@ -585,6 +590,7 @@ function AdminAccounts() {
                 <Tr key={admin.id} selected={admin.id === url.id} onActivate={() => openRow(admin)}>
                   <Td><AdminCell admin={admin} self={isSelf(admin, currentAdminId)} /></Td>
                   <Td><EmailCell admin={admin} /></Td>
+                  <Td><RoleCell admin={admin} /></Td>
                   <Td><AccessCell admin={admin} /></Td>
                   <Td><SignInCell value={admin.last_login_at} /></Td>
                   <Td><StatusCell admin={admin} /></Td>
@@ -617,7 +623,7 @@ function AdminAccounts() {
       onSortChange={setSort}
       renderRow={(admin) => ({
         primary: isSelf(admin, currentAdminId) ? `${adminHandle(admin)} · You` : adminHandle(admin),
-        secondary: admin.role_title || 'No role title',
+        secondary: `${admin.role_title || 'No title'} · ${roleLabel(admin)}`,
         status: (
           <span className={s.statusStack}>
             <StatusCell admin={admin} />
@@ -718,7 +724,7 @@ function AdminAccounts() {
         search={
           <SearchInput
             aria-label="Search admin accounts"
-            placeholder="Username, email or role title"
+            placeholder="Username, email or title"
             value={query}
             onChange={setQuery}
           />
@@ -742,6 +748,7 @@ function AdminAccounts() {
           applyAdmin={applyAdmin}
           refreshList={refreshQuietly}
           onClose={closePanel}
+          onHandoff={handOff}
           returnFocusTo={() => createButtonRef.current}
         />
       ) : openAdmin ? (
@@ -754,6 +761,7 @@ function AdminAccounts() {
             applyAdmin={applyAdmin}
             refreshList={refreshQuietly}
             onClose={closePanel}
+            handoff={handoff?.adminId === openAdmin.id ? handoff : undefined}
             returnFocusTo={panelFocus}
             panel={url.panel}
             onPanelChange={changePanel}
