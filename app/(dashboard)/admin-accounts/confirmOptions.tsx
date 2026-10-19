@@ -5,9 +5,11 @@ import { formatAge, formatBusinessDate, formatBusinessDateTime } from '../../lib
 import { REASON_MAX, diffGrants, sameGrants } from './rules';
 import {
   NO_ROLE_LABEL,
+  SUPER_ADMIN_ROLE_LABEL,
   adminHandle,
   plural,
   policyRequirement,
+  roleLabel,
   type AccessPreview,
   type AccessResult,
   type AdminRow,
@@ -16,6 +18,8 @@ import {
   type RebaseResult,
   type RowActionKind,
   type SecurityPolicy,
+  type SuperAdminChange,
+  type SuperAdminResult,
 } from './model';
 import { Change, GrantDiff } from '../_access';
 import s from './page.module.css';
@@ -205,6 +209,90 @@ export function accessSavedText(admin: AdminRow, result: AccessResult): string {
   if (!result.changed) return 'Nothing changed. This access was already live.';
   if (result.signedOut) return `Saved access for ${handle}. They were signed out everywhere and must sign in again.`;
   return admin.is_active ? `Saved access for ${handle}. They stay signed in.` : `Saved access for ${handle}.`;
+}
+
+export const SUPER_ADMIN_PENDING = 'Saving the super admin change…';
+
+export function superAdminConfirm(admin: AdminRow, change: SuperAdminChange): ConfirmBase {
+  const handle = adminHandle(admin);
+  const signOut = admin.is_active
+    ? `${handle} is signed out on every device, web and mobile, and must sign in again.`
+    : `${handle} is deactivated, so they are already signed out.`;
+  if (change === 'make') {
+    return {
+      tone: 'danger',
+      title: `Make ${handle} a super admin?`,
+      message: (
+        <p className={s.confirmLead}>
+          Super administrators hold every permission, including managing admins, roles and other super administrators.
+        </p>
+      ),
+      details: [
+        { label: 'Admin', value: handle },
+        { label: 'Role', value: <Change before={roleLabel(admin)} after={SUPER_ADMIN_ROLE_LABEL} /> },
+      ],
+      consequences: [
+        `${handle} gets full access to every page and action.`,
+        ...(admin.role_id ? [`Their role ${roleLabel(admin)} is cleared, because roles do not apply to super admins.`] : []),
+        signOut,
+        'Every super administrator gets an alert.',
+      ],
+      reason: {
+        required: true,
+        label: 'Reason for making them a super admin',
+        placeholder: 'Why does this admin need full access?',
+        maxLength: REASON_MAX,
+      },
+      confirmLabel: 'Make super admin',
+      pendingLabel: SUPER_ADMIN_PENDING,
+    };
+  }
+  return {
+    tone: 'danger',
+    title: `Remove super admin from ${handle}?`,
+    message: (
+      <p className={s.confirmLead}>
+        They lose every permission. Give them a role in their Access section afterwards for the access they need.
+      </p>
+    ),
+    details: [
+      { label: 'Admin', value: handle },
+      { label: 'Role', value: <Change before={SUPER_ADMIN_ROLE_LABEL} after={NO_ROLE_LABEL} /> },
+    ],
+    consequences: [
+      `${handle} has no access until a role is given.`,
+      signOut,
+      'Every super administrator gets an alert.',
+    ],
+    reason: {
+      required: true,
+      label: 'Reason for removing super admin',
+      placeholder: 'Why should this admin stop being a super admin?',
+      maxLength: REASON_MAX,
+    },
+    confirmLabel: 'Remove super admin',
+    pendingLabel: SUPER_ADMIN_PENDING,
+  };
+}
+
+export function superAdminIdentityConfirm(admin: AdminRow, change: SuperAdminChange): ConfirmBase {
+  const handle = adminHandle(admin);
+  const goal = change === 'make' ? `make ${handle} a super admin` : `remove super admin from ${handle}`;
+  return {
+    title: 'Confirm it is you',
+    message: `Super admin changes need a recent identity check. Enter a code from your authenticator app to ${goal}.`,
+    credential: { kind: 'otp' },
+    confirmLabel: change === 'make' ? 'Make super admin' : 'Remove super admin',
+    pendingLabel: SUPER_ADMIN_PENDING,
+  };
+}
+
+export function superAdminSavedText(admin: AdminRow, change: SuperAdminChange, result: SuperAdminResult): string {
+  const handle = adminHandle(admin);
+  const signedOut = result.signedOut && admin.is_active ? ' They were signed out everywhere and must sign in again.' : '';
+  return change === 'make'
+    ? `${handle} is now a super admin.${signedOut}`
+    : `${handle} is no longer a super admin and has no access until a role is given.${signedOut}`;
 }
 
 const REVOKE_REASONS = [

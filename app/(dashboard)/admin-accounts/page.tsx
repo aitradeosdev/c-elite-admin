@@ -17,19 +17,25 @@ import { isUuid } from '../../lib/http';
 import { formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
   ACTOR_TWO_STEP_FIRST, ADMINS_URL, POLICY_OFF, STATUS_LABEL, STATUS_TABS, STATUS_TONE, TWO_STEP_SETTINGS_HREF,
-  TWO_STEP_STAT_UNAVAILABLE, actorCanReset, adminHandle, adminMfaPath, adminStats, allowsAction, capabilitiesFor,
-  classifyMutation, confirmIdentity, hasRowActions, hasSecurityPanel, isSelf, mfaCellState, resetBlockedText,
-  roleLabel, rowActionRequest, statusOf, tabCounts, toAdminList, toMutationResult, toResetResult, twoStepStat,
-  twoStepStats, visibleAdmins, withAdmin,
+  TWO_STEP_STAT_UNAVAILABLE, accessReasonProblem, actorCanReset, adminHandle, adminMfaPath, adminStats, allowsAction,
+  capabilitiesFor, classifyMutation, confirmIdentity, hasRowActions, hasSecurityPanel, isSelf, mfaCellState,
+  resetBlockedText, roleLabel, rowActionRequest, statusOf, superAdminChange, superAdminPath, superAdminRequestBody,
+  tabCounts, toAdminList, toMutationResult, toResetResult, toSuperAdminResult, twoStepStat, twoStepStats,
+  visibleAdmins, withAdmin,
   type AccessHandoff, type AdminCapabilities, type AdminList, type AdminPanel, type AdminRow, type MutationOutcome,
-  type ResetResult, type RowActionKind, type SecurityPolicy, type StatusTab,
+  type ResetResult, type RowActionKind, type SecurityPolicy, type StatusTab, type SuperAdminChange,
+  type SuperAdminResult,
 } from './model';
-import { ROW_ACTION_PENDING, resetMfaConfirm, resetSuccess, rowActionConfirm, rowActionSuccess } from './confirmOptions';
+import {
+  ROW_ACTION_PENDING, resetMfaConfirm, resetSuccess, rowActionConfirm, rowActionSuccess, superAdminConfirm,
+  superAdminIdentityConfirm, superAdminSavedText,
+} from './confirmOptions';
 import { AccessCell } from '../_access';
 import { AdminEditor } from './AdminEditor';
 import { AdminDetails } from './AdminDetails';
 import { MfaBadge, MfaCell } from './SecurityParts';
 import { AdminSecurityTab, type FocusTarget } from './SecurityTab';
+import { SuperAdminSection } from './SuperAdminSection';
 import s from './page.module.css';
 
 const TITLE = 'Admin accounts';
@@ -433,6 +439,83 @@ function AdminAccounts() {
     }
   };
 
+  const reportSuperAdmin = (admin: AdminRow, change: SuperAdminChange, outcome: MutationOutcome<SuperAdminResult>) => {
+    switch (outcome.kind) {
+      case 'done':
+        notify(superAdminSavedText(admin, change, outcome.result), 'success');
+        return;
+      case 'unknown':
+        notify(outcome.message, 'error');
+        return;
+      case 'stale':
+      case 'reauth':
+        notify(outcome.message, 'warning');
+        return;
+      case 'refused':
+        notify(outcome.message, 'error');
+        router.refresh();
+        return;
+      case 'expired':
+        return;
+    }
+  };
+
+  const runSuperAdmin = async (target: AdminRow, change: SuperAdminChange, returnFocusTo: FocusTarget) => {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setActing(target.id);
+    let sent = false;
+    let settled = false;
+    let reason = '';
+    const save = async () => {
+      sent = true;
+      return classifyMutation(await apiRequest(superAdminPath(target.id), {
+        method: 'POST',
+        body: superAdminRequestBody(change, reason),
+        select: toSuperAdminResult,
+      }));
+    };
+    try {
+      const first = await confirm<MutationOutcome<SuperAdminResult>>({
+        ...superAdminConfirm(target, change),
+        returnFocusTo,
+        action: async (result) => {
+          const problem = accessReasonProblem(result.reason);
+          if (problem) throw new Error(problem);
+          reason = result.reason;
+          const attempt = await save();
+          if (attempt.kind === 'retry') throw new Error(attempt.message);
+          return attempt;
+        },
+      });
+      let outcome = first?.value;
+      if (outcome?.kind === 'reauth' && outcome.code === 'REAUTH_REQUIRED') {
+        const second = await confirm<MutationOutcome<SuperAdminResult>>({
+          ...superAdminIdentityConfirm(target, change),
+          returnFocusTo,
+          action: async ({ credential }) => {
+            const identity = await confirmIdentity(credential ?? '');
+            if (identity === 'expired') return { kind: 'expired' };
+            const attempt = await save();
+            if (attempt.kind === 'retry') throw new Error(attempt.message);
+            if (attempt.kind === 'reauth' && attempt.code === 'REAUTH_REQUIRED') throw new Error(attempt.message);
+            return attempt;
+          },
+        });
+        outcome = second?.value;
+      }
+      if (!outcome) return;
+      settled = true;
+      reportSuperAdmin(target, change, outcome);
+      if (outcome.kind !== 'expired') refreshQuietly();
+    } finally {
+      actingRef.current = false;
+      setActing(null);
+      if (sent) setSecurityRevision((value) => value + 1);
+      if (sent && !settled) refreshQuietly();
+    }
+  };
+
   const menuItems = (admin: AdminRow, capabilities: AdminCapabilities): MenuEntryInput[] => [
     capabilities.revoke && {
       label: 'Sign out everywhere',
@@ -655,6 +738,16 @@ function AdminAccounts() {
     />
   ) : undefined;
 
+  const superAdminAction = openAdmin ? superAdminChange(openAdmin, currentAdminId) : null;
+  const superAdminSection = openAdmin && superAdminAction ? (
+    <SuperAdminSection
+      admin={openAdmin}
+      change={superAdminAction}
+      busy={acting !== null}
+      onChange={(admin, change, focus) => void runSuperAdmin(admin, change, focus)}
+    />
+  ) : undefined;
+
   return (
     <div>
       <PageHeader
@@ -767,6 +860,7 @@ function AdminAccounts() {
             onPanelChange={changePanel}
             security={securityTab}
             securityCount={openAdmin.security?.liveSessions ?? null}
+            superAdmin={superAdminSection}
           />
         ) : (
           <AdminDetails
@@ -778,6 +872,7 @@ function AdminAccounts() {
             onPanelChange={changePanel}
             security={securityTab}
             securityCount={openAdmin.security?.liveSessions ?? null}
+            superAdmin={superAdminSection}
           />
         )
       ) : url.id && !loaded ? (

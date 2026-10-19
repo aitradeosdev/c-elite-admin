@@ -138,6 +138,8 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
     ['CREATE_ADMIN', 'Created admin'],
     ['EDIT_ADMIN', 'Edited admin'],
     ['EDIT_ADMIN_ACCESS', 'Changed admin access'],
+    ['GRANT_SUPER_ADMIN', 'Granted super admin'],
+    ['REMOVE_SUPER_ADMIN', 'Removed super admin'],
     ['REVOKE_ADMIN_SESSIONS', 'Signed admin out everywhere'],
     ['DEACTIVATE_ADMIN', 'Deactivated admin'],
     ['REACTIVATE_ADMIN', 'Reactivated admin'],

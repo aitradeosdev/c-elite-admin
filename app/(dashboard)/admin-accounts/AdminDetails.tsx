@@ -33,10 +33,11 @@ export interface AdminDetailsProps {
   onPanelChange?: (next: AdminPanel) => void;
   security?: ReactNode;
   securityCount?: number | null;
+  superAdmin?: ReactNode;
 }
 
 export function AdminDetails({
-  admin, onClose, returnFocusTo, panel = 'account', onPanelChange, security, securityCount = null,
+  admin, onClose, returnFocusTo, panel = 'account', onPanelChange, security, securityCount = null, superAdmin,
 }: AdminDetailsProps) {
   const tabsId = useId();
   const status = statusOf(admin);
@@ -106,6 +107,7 @@ export function AdminDetails({
               {actions.length ? <ActionBreakdown actions={actions} /> : null}
             </section>
           )}
+          {superAdmin}
         </div>
       </DrawerPanels>
     </SidePanel>

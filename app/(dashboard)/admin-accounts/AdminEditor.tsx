@@ -195,6 +195,7 @@ export interface AdminEditorProps {
   onPanelChange?: (next: AdminPanel) => void;
   security?: ReactNode;
   securityCount?: number | null;
+  superAdmin?: ReactNode;
 }
 
 function subtitleFor(admin: AdminRow): string {
@@ -205,7 +206,7 @@ function subtitleFor(admin: AdminRow): string {
 
 export function AdminEditor({
   mode, admin, readFresh, applyAdmin, refreshList, onClose, onHandoff, handoff, returnFocusTo, panel = 'account',
-  onPanelChange, security, securityCount = null,
+  onPanelChange, security, securityCount = null, superAdmin,
 }: AdminEditorProps) {
   const confirm = useConfirm();
   const { show: notify } = useToast();
@@ -827,6 +828,7 @@ export function AdminEditor({
               reviewRef={reviewAccessRef}
             />
           ) : null}
+          {superAdmin}
         </div>
       </DrawerPanels>
     </SidePanel>

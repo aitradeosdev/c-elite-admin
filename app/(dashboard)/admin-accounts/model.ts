@@ -454,6 +454,33 @@ export function accessPath(id: string): string {
   return `/api/admin-accounts/${encodeURIComponent(id)}/access`;
 }
 
+export function superAdminPath(id: string): string {
+  return `/api/admin-accounts/${encodeURIComponent(id)}/super-admin`;
+}
+
+export type SuperAdminChange = 'make' | 'remove';
+
+export function superAdminChange(admin: AdminRow, currentAdminId: string | null): SuperAdminChange | null {
+  if (admin.deleted_at) return null;
+  if (!admin.is_super_admin) return admin.is_active ? 'make' : null;
+  return currentAdminId !== null && admin.id !== currentAdminId ? 'remove' : null;
+}
+
+export function superAdminRequestBody(change: SuperAdminChange, reason: string): Record<string, unknown> {
+  return { make: change === 'make', reason };
+}
+
+export interface SuperAdminResult {
+  isSuperAdmin: boolean;
+  signedOut: boolean;
+}
+
+export function toSuperAdminResult(body: ApiBody): SuperAdminResult | null {
+  const admin = isRecord(body.admin) ? body.admin : null;
+  if (!admin || typeof admin.is_super_admin !== 'boolean' || typeof body.signed_out !== 'boolean') return null;
+  return { isSuperAdmin: admin.is_super_admin, signedOut: body.signed_out };
+}
+
 export type RowActionKind = 'revoke' | 'deactivate' | 'reactivate' | 'remove';
 
 export function allowsAction(capabilities: AdminCapabilities, kind: RowActionKind): boolean {
