@@ -136,6 +136,8 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
   ]],
   ['Admins and sign-in', [
     ['CREATE_ADMIN', 'Created admin'],
+    ['ADMIN_INVITE_SENT', 'Sent admin invitation'],
+    ['ADMIN_INVITE_ACCEPTED', 'Accepted admin invitation'],
     ['EDIT_ADMIN', 'Edited admin'],
     ['EDIT_ADMIN_ACCESS', 'Changed admin access'],
     ['GRANT_SUPER_ADMIN', 'Granted super admin'],
@@ -156,6 +158,8 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
     ['LOGOUT', 'Signed out'],
     ['PASSWORD_CHANGED', 'Changed own password'],
     ['PASSWORD_CHANGE_FAILED', 'Password change failed'],
+    ['PASSWORD_RESET_REQUESTED', 'Requested password reset'],
+    ['PASSWORD_RESET_COMPLETED', 'Reset password from email link'],
     ['MFA_ENABLED', 'Turned on two-step sign-in'],
     ['MFA_CHALLENGE_FAILED', 'Two-step code failed'],
     ['MFA_LOCKED', 'Two-step sign-in locked'],

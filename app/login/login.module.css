@@ -156,6 +156,10 @@
   line-height: var(--leading-snug);
 }
 
+.forgot {
+  margin: var(--space-2) 0 0;
+}
+
 .formError {
   display: flex;
   align-items: flex-start;
@@ -189,7 +193,7 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.submit:hover:not(:disabled) { background: var(--accent-hover); }
+.submit:hover:not(:disabled) { background: var(--accent-hover); text-decoration: none; }
 .submit:active:not(:disabled) { background: var(--accent-active); }
 .submit:disabled { opacity: 0.6; cursor: not-allowed; }
 .submit:focus-visible { outline: 2px solid var(--accent-base); outline-offset: 2px; }
@@ -289,6 +293,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.checking {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) 0;
 }
 
 .secondary {

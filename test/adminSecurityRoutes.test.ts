@@ -19,6 +19,7 @@ const ROUTES = {
 
 const NEW_ROUTES = [ROUTES.sessions, ROUTES.session, ROUTES.reset, ROUTES.policy] as const;
 const MOBILE_CALLED = ['api/admin-accounts/route.ts', 'api/admin-settings/route.ts'] as const;
+const WEB_INVITE_BRANCH = /if \(admin\.session\.client === 'mobile'\) return createForPhone\(req, admin\);[\s\S]*?return inviteFromWeb\(req, admin\);/;
 
 const ACTOR_ID = '7b0c3c2e-5d1f-4a8e-9f00-1a2b3c4d5e6f';
 const TARGET_ID = '11111111-2222-4333-8444-555555555555';
@@ -856,7 +857,8 @@ describe('route sources', () => {
       assert.equal(/requireTwoStep\(admin\)/.test(source), expected, path);
     }
     for (const path of MOBILE_CALLED) {
-      assert.doesNotMatch(read(path), /requireRecentAuth|requireTwoStep|REAUTH_REQUIRED|MFA_REQUIRED/, path);
+      const phoneSide = read(path).replace(WEB_INVITE_BRANCH, '');
+      assert.doesNotMatch(phoneSide, /requireRecentAuth\(|requireTwoStep\(|REAUTH_REQUIRED|MFA_REQUIRED/, path);
     }
   });
 

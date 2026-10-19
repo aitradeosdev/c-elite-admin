@@ -42,6 +42,7 @@ export const ENROLL_START_PATH = '/api/auth/mfa/enroll/start';
 export const ENROLL_CONFIRM_PATH = '/api/auth/mfa/enroll/confirm';
 export const DEFAULT_NEXT = '/dashboard';
 export const PROFILE_TWO_STEP_HREF = '/profile#two-step-sign-in';
+export const FORGOT_PATH = '/forgot-password';
 
 export const CODE_HEADING = 'Two-step sign-in';
 export const CODE_LABEL = 'Authentication code';
@@ -56,6 +57,7 @@ export const SIGNING_IN_LABEL = 'Signing in…';
 export const USE_RECOVERY = 'Use a recovery code instead';
 export const USE_APP = 'Use your authenticator app instead';
 export const SWITCH_ACCOUNT = 'Sign in as someone else';
+export const FORGOT_LABEL = 'Forgot your password?';
 export const ENROLL_HEADING = 'Set up two-step sign-in';
 export const ENROLL_REQUIRED = 'Two-step sign-in is required for every admin. Set it up now to finish signing in.';
 export const ENROLL_HELP = 'Need help? Ask a super administrator.';

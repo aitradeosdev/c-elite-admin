@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../../../lib/supabase';
 import { requireAdmin, requireAdminAny } from '../../../lib/guard';
 import { writeAudit, type AuditInput } from '../../../lib/audit';
 import { buildPagination, fail, ok, parsePageParams } from '../../../lib/api';
+import { callEdgeFunction } from '../../../lib/edge';
 import {
   CONFIG_KEYS, DUPLICATE_ACTION, DUPLICATE_WINDOW_SECONDS, EDGE_TIMEOUT_MS, HISTORY_MAX_PAGE_SIZE, HISTORY_PAGE_SIZE,
   NOT_CONFIGURED_MESSAGE, READ_PERMISSION, SEND_PERMISSIONS, classifyEdgeFailure, classifyEdgeResponse, duplicateKey,
@@ -14,39 +15,9 @@ export const maxDuration = 60;
 
 const AUDIT_WARNING = 'The broadcast was sent, but it could not be written to the audit log.';
 
-function edgeUrl(): string | null {
-  const base = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-  return base ? `${base}/functions/v1/broadcast-notification` : null;
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-async function callEdge(url: string, secret: string, payload: Record<string, unknown>): Promise<EdgeOutcome> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-secret': secret },
-      body: JSON.stringify(payload),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(EDGE_TIMEOUT_MS),
-    });
-  } catch (error) {
-    return classifyEdgeFailure(error);
-  }
-  let raw: string;
-  try {
-    raw = await response.text();
-  } catch (error) {
-    return classifyEdgeFailure(error);
-  }
-  return classifyEdgeResponse(response.status, parseJson(raw));
+async function callEdge(payload: Record<string, unknown>): Promise<EdgeOutcome> {
+  const answer = await callEdgeFunction('broadcast-notification', payload, EDGE_TIMEOUT_MS);
+  return answer.kind === 'answered' ? classifyEdgeResponse(answer.status, answer.body) : classifyEdgeFailure(answer.error);
 }
 
 async function duplicateStartedAt(key: string): Promise<string | null> {
@@ -142,9 +113,7 @@ export async function POST(req: NextRequest) {
     return fail('PERMISSION_DENIED', sendDeniedMessage(request.audience), { details: { required: [permission] } });
   }
 
-  const url = edgeUrl();
-  const secret = process.env.ADMIN_FUNCTION_SECRET || '';
-  if (!url || !secret) {
+  if (!process.env.SUPABASE_URL || !process.env.ADMIN_FUNCTION_SECRET) {
     console.error('broadcast: SUPABASE_URL or ADMIN_FUNCTION_SECRET is not set');
     return fail('PROVIDER_ERROR', NOT_CONFIGURED_MESSAGE, {
       details: { outcome: 'not_sent', reason: 'misconfigured', edge_status: null },
@@ -194,7 +163,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const outcome = await callEdge(url, secret, {
+  const outcome = await callEdge({
     title: request.title,
     message: request.message,
     type: request.type,

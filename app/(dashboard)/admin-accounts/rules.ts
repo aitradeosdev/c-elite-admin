@@ -46,7 +46,9 @@ export const ROLE_TITLE_MIN = 2;
 export const ROLE_TITLE_MAX = 64;
 export const REASON_MAX = 500;
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+export const INVITE_PASSWORD_MESSAGE = 'Passwords are chosen by the new admin from the invitation email.';
 
 export const RESTRICTED_PAGE_KEYS: readonly string[] = ['admin_accounts'];
 
@@ -127,7 +129,11 @@ export function checkRoleTitle(value: unknown): string | null {
 }
 
 export function isEmail(value: unknown): value is string {
-  return typeof value === 'string' && EMAIL_PATTERN.test(value);
+  return typeof value === 'string' && EMAIL_PATTERN.test(value.trim());
+}
+
+export function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 export type ReasonCheck = { ok: true; reason: string | null } | { ok: false; message: string };
@@ -153,21 +159,25 @@ export interface CreateInput {
 export interface NewAdmin {
   username: string;
   email: string;
-  password: string;
+  password: string | null;
   role_title: string;
   page_permissions: string[];
 }
 
 export type CreateCheck = { ok: true; value: NewAdmin } | RuleFailure;
 
-export function checkCreate(input: CreateInput): CreateCheck {
+export function checkCreate(input: CreateInput, client: 'web' | 'mobile'): CreateCheck {
   const { username, email, password, role_title: roleTitle, page_permissions: grants } = input;
-  if (!username || !password || !roleTitle || !email) {
-    return invalid('Username, email, password and role title are required.');
+  const web = client === 'web';
+  if (web && password !== undefined) return invalid(INVITE_PASSWORD_MESSAGE);
+  if (!username || !roleTitle || !email || (!web && !password)) {
+    return invalid(web ? 'Username, email and role title are required.' : 'Username, email, password and role title are required.');
   }
   if (!isEmail(email)) return invalid('Enter a valid email address.');
-  const passwordProblem = checkPassword(password);
-  if (passwordProblem) return invalid(passwordProblem);
+  if (!web) {
+    const passwordProblem = checkPassword(password);
+    if (passwordProblem) return invalid(passwordProblem);
+  }
   const usernameProblem = checkUsername(username);
   if (usernameProblem) return invalid(usernameProblem);
   const roleProblem = checkRoleTitle(roleTitle);
@@ -182,8 +192,8 @@ export function checkCreate(input: CreateInput): CreateCheck {
     ok: true,
     value: {
       username: username as string,
-      email,
-      password: password as string,
+      email: normalizeEmail(email),
+      password: web ? null : (password as string),
       role_title: roleTitle as string,
       page_permissions: keys,
     },
@@ -351,7 +361,7 @@ export function planEdit(state: AdminState, input: EditInput, actorId: string): 
     let next: string | null = null;
     if (rawEmail) {
       if (!isEmail(rawEmail)) return invalid('Enter a valid email address.');
-      next = rawEmail;
+      next = normalizeEmail(rawEmail);
     }
     if (next === null && state.email) return invalid(EMAIL_REMOVAL_MESSAGE);
     if (next !== state.email) {

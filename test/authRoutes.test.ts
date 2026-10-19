@@ -765,6 +765,16 @@ describe('POST /api/auth: rate limiting', () => {
     assert.equal(state.compares.length, 0);
   });
 
+  test('padding the email cannot dodge the per-account limit: the key uses the same trimmed, lower-cased email as the lookup', async () => {
+    for (const padded of [` ${EMAIL}`, `${EMAIL} `, `\t${EMAIL.toUpperCase()}  `]) {
+      reset({ limits: { admin_login_account: { data: false } } });
+      const res = await signIn({ ...LOGIN_BODY, email: padded });
+      assert.equal(res.status, 429, JSON.stringify(padded));
+      assert.equal(state.rpcs[1]?.args.p_key, 'admin:ops.lead|ops@cardelite.test', JSON.stringify(padded));
+      assert.equal(state.queries.length, 0);
+    }
+  });
+
   test('both limits answer identically, so neither reveals which one tripped', async () => {
     reset({ limits: { admin_login: { data: false } } });
     const byIp = withoutRequestId(await bodyOf(await signIn()));
@@ -808,16 +818,18 @@ describe('POST /api/auth: rate limiting', () => {
 });
 
 describe('POST /api/auth: credentials', () => {
-  test('the account is looked up by username, email, the active flag and not deleted, exactly as sent', async () => {
-    reset({ account: null });
-    await signIn();
-    const lookups = queriesOn('admin_users', 'select');
-    assert.equal(lookups.length, 1);
-    assert.equal(lookups[0].columns, LOGIN_COLUMNS);
-    assert.deepEqual(lookups[0].filters, [
-      ['eq', 'username', USERNAME], ['eq', 'email', EMAIL], ['eq', 'is_active', true], ['is', 'deleted_at', null],
-    ]);
-    assert.equal(lookups[0].terminal, 'single');
+  test('the account is looked up by the username as sent, the trimmed lower-cased email, the active flag and not deleted', async () => {
+    for (const typed of [EMAIL, `  ${EMAIL.toUpperCase()} `]) {
+      reset({ account: null });
+      await signIn({ ...LOGIN_BODY, email: typed });
+      const lookups = queriesOn('admin_users', 'select');
+      assert.equal(lookups.length, 1, typed);
+      assert.equal(lookups[0].columns, LOGIN_COLUMNS);
+      assert.deepEqual(lookups[0].filters, [
+        ['eq', 'username', USERNAME], ['eq', 'email', 'ops@cardelite.test'], ['eq', 'is_active', true], ['is', 'deleted_at', null],
+      ], typed);
+      assert.equal(lookups[0].terminal, 'single');
+    }
   });
 
   test('an unknown account still runs one bcrypt compare against the dummy hash and records nothing', async () => {

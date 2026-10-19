@@ -99,6 +99,7 @@ function row(patch: Partial<AdminRow> = {}): AdminRow {
     deleted_at: null,
     created_at: '2026-01-02T09:00:00.000Z',
     security: null,
+    invitePending: false,
     ...patch,
   };
 }
@@ -348,34 +349,61 @@ describe('field rules', () => {
     assert.equal(rules.checkReason('x'.repeat(rules.REASON_MAX + 1)).ok, false);
   });
 
-  test('creating an admin keeps the required fields and takes grantable pages only, since catalog keys are set in the Access step', () => {
+  test('the phone’s create keeps the required fields and its password, and takes grantable pages only', () => {
     const base = {
       username: 'tolu',
       email: 'tolu@cardelite.ng',
       password: 'Correct-Horse-9',
       role_title: 'Payout Officer',
     };
-    const created = rules.checkCreate({ ...base, page_permissions: ['withdrawals', 'card_queue', 'withdrawals'] });
+    const created = rules.checkCreate({ ...base, page_permissions: ['withdrawals', 'card_queue', 'withdrawals'] }, 'mobile');
     assert.ok(created.ok);
     assert.deepEqual(created.ok ? created.value.page_permissions : null, ['withdrawals', 'card_queue']);
-    const bare = rules.checkCreate(base);
+    assert.equal(created.ok ? created.value.password : null, 'Correct-Horse-9');
+    const bare = rules.checkCreate(base, 'mobile');
     assert.deepEqual(bare.ok ? bare.value.page_permissions : null, []);
-    assert.equal(rules.checkCreate({ ...base, email: '' }).ok, false);
-    assert.equal(rules.checkCreate({ ...base, email: 'not-an-email' }).ok, false);
-    assert.equal(rules.checkCreate({ ...base, password: 'weak' }).ok, false);
-    assert.equal(rules.checkCreate({ ...base, username: 'ab' }).ok, false);
-    assert.equal(rules.checkCreate({ ...base, role_title: 'x' }).ok, false);
-    const missing = rules.checkCreate({ ...base, email: '' });
+    assert.equal(rules.checkCreate({ ...base, email: '' }, 'mobile').ok, false);
+    assert.equal(rules.checkCreate({ ...base, email: 'not-an-email' }, 'mobile').ok, false);
+    assert.equal(rules.checkCreate({ ...base, password: 'weak' }, 'mobile').ok, false);
+    assert.equal(rules.checkCreate({ ...base, username: 'ab' }, 'mobile').ok, false);
+    assert.equal(rules.checkCreate({ ...base, role_title: 'x' }, 'mobile').ok, false);
+    const missing = rules.checkCreate({ ...base, password: undefined }, 'mobile');
     assert.equal(missing.ok ? '' : missing.code, 'VALIDATION_ERROR');
+    assert.equal(missing.ok ? '' : missing.message, 'Username, email, password and role title are required.');
     for (const key of ['withdrawals.approve', 'sensitive_data.share']) {
-      const dotted = rules.checkCreate({ ...base, page_permissions: ['withdrawals', key] });
+      const dotted = rules.checkCreate({ ...base, page_permissions: ['withdrawals', key] }, 'mobile');
       assert.equal(dotted.ok ? '' : dotted.code, 'STATE_CONFLICT', key);
     }
     for (const key of ['admin_accounts', 'giftbox', 'mystery']) {
-      const refused = rules.checkCreate({ ...base, page_permissions: ['withdrawals', key] });
+      const refused = rules.checkCreate({ ...base, page_permissions: ['withdrawals', key] }, 'mobile');
       assert.equal(refused.ok ? '' : refused.code, 'VALIDATION_ERROR', key);
       assert.deepEqual(refused.ok ? null : refused.details, { reason: 'not_grantable', keys: [key] }, key);
     }
+  });
+
+  test('the web invite takes no password, needs a username, email and title, and stores the email trimmed in lowercase', () => {
+    const base = { username: 'tolu', email: ' Tolu.Ade@CardElite.NG ', role_title: 'Payout Officer' };
+    assert.deepEqual(rules.checkCreate(base, 'web'), {
+      ok: true,
+      value: { username: 'tolu', email: 'tolu.ade@cardelite.ng', password: null, role_title: 'Payout Officer', page_permissions: [] },
+    });
+    assert.equal(rules.INVITE_PASSWORD_MESSAGE, 'Passwords are chosen by the new admin from the invitation email.');
+    for (const password of ['Correct-Horse-9', '', null]) {
+      const refused = rules.checkCreate({ ...base, password }, 'web');
+      assert.equal(refused.ok ? '' : refused.message, rules.INVITE_PASSWORD_MESSAGE);
+    }
+    const missing = rules.checkCreate({ ...base, role_title: '' }, 'web');
+    assert.equal(missing.ok ? '' : missing.message, 'Username, email and role title are required.');
+    assert.equal(rules.checkCreate({ ...base, username: 'ab' }, 'web').ok, false);
+    assert.equal(rules.checkCreate({ ...base, email: 'x<a@b.co>' }, 'web').ok, false);
+  });
+
+  test('admin emails allow only letters, digits and . _ % + -, are checked trimmed, and are stored in lowercase', () => {
+    for (const good of ['ada@cardelite.ng', ' Ada.Obi+ops@Card-Elite.co.uk ', 'a_b%c@x.io']) assert.equal(rules.isEmail(good), true, good);
+    for (const bad of ['x<a@b.co>', 'a"b@x.ng', 'a,b@x.ng', 'a;b@x.ng', 'a(b)@x.ng', 'a b@x.ng', 'ada@cardelite', 'ada@x.n', '@x.ng', 7]) {
+      assert.equal(rules.isEmail(bad), false, String(bad));
+    }
+    assert.equal(rules.normalizeEmail('  Ada@CardElite.NG '), 'ada@cardelite.ng');
   });
 });
 
@@ -460,6 +488,12 @@ describe('planEdit', () => {
     assert.equal(refusal({ email: '' })?.message, rules.EMAIL_REMOVAL_MESSAGE);
     assert.equal(refusal({ email: 'nope' })?.code, 'VALIDATION_ERROR');
     assert.deepEqual(plan({ email: '' }, { email: null }).changed, []);
+  });
+
+  test('an email edit is saved trimmed and in lowercase, so the same address in other letters is no change', () => {
+    assert.deepEqual(plan({ email: ' Ada.Obi@CardElite.NG ' }).updates, { email: 'ada.obi@cardelite.ng' });
+    assert.deepEqual(plan({ email: 'ADA@CardElite.ng' }).changed, []);
+    assert.equal(refusal({ email: 'x<a@b.co>' })?.message, 'Enter a valid email address.');
   });
 
   test('a new password is hashed by the route and never written to the audit record', () => {
@@ -746,6 +780,36 @@ describe('list model', () => {
     assert.equal(model.toAdminList({ admins: 'nope' }), null);
   });
 
+  test('reads invite_pending as true, false, or null when the list could not tell', () => {
+    const list = model.toAdminList({
+      admins: [
+        { id: ADMIN_ID, username: 'ada', invite_pending: true },
+        { id: SELF_ID, username: 'owner', invite_pending: false },
+        { id: 'c', username: 'old' },
+        { id: 'd', username: 'odd', invite_pending: 'yes' },
+      ],
+    });
+    assert.deepEqual(list?.admins.map((admin) => admin.invitePending), [true, false, null, null]);
+  });
+
+  test('an invited admin reads as Invited while active, but stays under the Active tab and in its count', () => {
+    const invited = row({ id: 'i', invitePending: true, last_login_at: null });
+    assert.equal(model.INVITED_LABEL, 'Invited');
+    assert.equal(model.isInvited(invited), true);
+    assert.equal(model.statusOf(invited), 'active');
+    for (const patch of [
+      { invitePending: true, is_active: false },
+      { invitePending: true, is_active: false, deleted_at: '2026-09-01T00:00:00.000Z' },
+      { invitePending: null },
+      { invitePending: false },
+    ]) {
+      assert.equal(model.isInvited(row(patch)), false, JSON.stringify(patch));
+    }
+    const admins = [row(), invited, row({ id: 'c', is_active: false, invitePending: true })];
+    assert.deepEqual(model.tabCounts(admins), { all: 3, active: 2, inactive: 1, deleted: 0 });
+    assert.deepEqual(model.visibleAdmins(admins, 'active', '', null).map((admin) => admin.id), [ADMIN_ID, 'i']);
+  });
+
   test('reads the role, its id and the direct grants, and names the role for the table', () => {
     const list = model.toAdminList({
       admins: [
@@ -797,19 +861,64 @@ describe('list model', () => {
   test('capabilities follow the route safeguards', () => {
     const self = model.capabilitiesFor(row({ id: SELF_ID, is_super_admin: true }), SELF_ID);
     assert.deepEqual(self, {
-      edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: false,
+      edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: false, resendInvite: false,
     });
     const otherSuper = model.capabilitiesFor(row({ is_super_admin: true }), SELF_ID);
     assert.deepEqual(otherSuper, {
-      edit: false, revoke: true, deactivate: true, reactivate: false, remove: false, resetMfa: false,
+      edit: false, revoke: true, deactivate: true, reactivate: false, remove: false, resetMfa: false, resendInvite: false,
     });
     const inactive = model.capabilitiesFor(row({ is_active: false }), SELF_ID);
     assert.deepEqual(inactive, {
-      edit: true, revoke: false, deactivate: false, reactivate: true, remove: true, resetMfa: false,
+      edit: true, revoke: false, deactivate: false, reactivate: true, remove: true, resetMfa: false, resendInvite: false,
     });
     const deleted = model.capabilitiesFor(row({ is_active: false, deleted_at: '2026-09-01T00:00:00.000Z' }), SELF_ID);
     assert.equal(model.hasRowActions(deleted), false);
     assert.equal(deleted.edit, false);
+  });
+
+  test('Resend invitation is offered for another admin’s pending invitation only, beside the usual actions', () => {
+    const invited = model.capabilitiesFor(row({ invitePending: true, last_login_at: null }), SELF_ID);
+    assert.deepEqual(invited, {
+      edit: true, revoke: true, deactivate: true, reactivate: false, remove: false, resetMfa: false, resendInvite: true,
+    });
+    assert.equal(model.hasRowActions({
+      edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: false, resendInvite: true,
+    }), true);
+    for (const patch of [
+      { invitePending: true, id: SELF_ID },
+      { invitePending: true, is_active: false },
+      { invitePending: true, is_active: false, deleted_at: '2026-09-01T00:00:00.000Z' },
+      { invitePending: null },
+      { invitePending: false },
+    ]) {
+      assert.equal(model.capabilitiesFor(row(patch), SELF_ID).resendInvite, false, JSON.stringify(patch));
+    }
+    assert.equal(model.invitePath(ADMIN_ID), `/api/admin-accounts/${ADMIN_ID}/invite`);
+  });
+
+  test('reads the invitation outcome of a create and of a resend strictly', () => {
+    const invite = { outcome: 'sent', expires_at: '2026-10-22T13:30:00.000Z' };
+    assert.deepEqual(model.toInviteResult(invite), { outcome: 'sent', expiresAt: '2026-10-22T13:30:00.000Z' });
+    assert.deepEqual(model.toInviteResult({ outcome: 'not_sent', expires_at: null }), { outcome: 'not_sent', expiresAt: null });
+    for (const bad of [null, 'sent', { outcome: 'queued' }, { expires_at: invite.expires_at }]) {
+      assert.equal(model.toInviteResult(bad), null, JSON.stringify(bad));
+    }
+    assert.deepEqual(model.toResentInvite({ success: true, invite: { outcome: 'unknown', expires_at: invite.expires_at } }), {
+      outcome: 'unknown', expiresAt: invite.expires_at,
+    });
+    assert.equal(model.toResentInvite({ success: true }), null);
+    const created = model.toCreatedAdmin({
+      id: ADMIN_ID,
+      admin: { id: ADMIN_ID, username: 'tolu', email: 'tolu@cardelite.ng', role_title: 'Payout Officer' },
+      invite,
+      audit_recorded: false,
+      warning: 'The change was saved, but it could not be written to the audit log.',
+    });
+    assert.equal(created?.admin?.username, 'tolu');
+    assert.deepEqual(created?.invite, { outcome: 'sent', expiresAt: invite.expires_at });
+    assert.equal(created?.warning, 'The change was saved, but it could not be written to the audit log.');
+    assert.equal(model.toCreatedAdmin({ id: ADMIN_ID, admin: null, invite })?.admin, null);
+    assert.equal(model.toCreatedAdmin({ id: ADMIN_ID, admin: { id: ADMIN_ID } }), null);
   });
 
   test('row actions send the existing request shapes plus a reason', () => {
@@ -829,24 +938,22 @@ describe('list model', () => {
 describe('editor model', () => {
   const draft = (patch: Partial<ReturnType<ModelModule['draftFor']>> = {}) => ({ ...model.EMPTY_DRAFT, ...patch });
 
-  test('creating needs a username, email, title and password, and no grant, since access is its own step', () => {
+  test('creating needs a username, email and title, and no password, since the new admin chooses it from the email', () => {
     const errors = model.validateDraft('create', draft());
-    assert.deepEqual(Object.keys(errors).sort(), ['email', 'password', 'roleTitle', 'username']);
+    assert.deepEqual(Object.keys(errors).sort(), ['email', 'roleTitle', 'username']);
     assert.equal(errors.roleTitle, 'Enter a title.');
-    const ready = draft({
-      username: 'tolu', email: 'tolu@cardelite.ng', roleTitle: 'Payout Officer',
-      password: 'Correct-Horse-9', confirmPassword: 'Correct-Horse-9',
-    });
+    const ready = draft({ username: 'tolu', email: 'tolu@cardelite.ng', roleTitle: 'Payout Officer' });
     assert.deepEqual(model.validateDraft('create', ready), {});
-    assert.ok(model.validateDraft('create', { ...ready, confirmPassword: 'Other-Horse-9' }).confirmPassword);
     assert.equal(model.validateDraft('create', { ...ready, roleTitle: 'x' }).roleTitle, 'Title must be 2–64 characters.');
-    assert.equal('grants' in model.EMPTY_DRAFT, false);
-    assert.deepEqual([...model.EDITOR_FIELD_ORDER], ['username', 'email', 'roleTitle', 'password', 'confirmPassword']);
+    assert.equal(model.validateDraft('create', { ...ready, email: 'x<a@b.co>' }).email, 'Enter a valid email address.');
+    assert.deepEqual(Object.keys(model.EMPTY_DRAFT).sort(), ['email', 'roleTitle', 'username']);
+    assert.deepEqual([...model.EDITOR_FIELD_ORDER], ['username', 'email', 'roleTitle']);
   });
 
-  test('editing keeps the password optional and the email required', () => {
+  test('editing keeps the email required', () => {
     const base = model.draftFor(row());
     assert.deepEqual(model.validateDraft('edit', base), {});
+    assert.deepEqual(Object.keys(base).sort(), ['email', 'roleTitle', 'username']);
     assert.ok(model.validateDraft('edit', { ...base, email: ' ' }).email);
     assert.equal(model.firstError(model.validateDraft('edit', { ...base, email: '', roleTitle: '' })), 'email');
   });
@@ -857,7 +964,7 @@ describe('editor model', () => {
     assert.deepEqual(base, { email: 'ada@cardelite.ng', roleTitle: 'Card Reviewer' });
     const current = model.draftFor(admin);
     assert.equal(model.isDraftDirty('edit', { ...current, roleTitle: ' Card Reviewer ' }, base), false);
-    assert.equal(model.isDraftDirty('edit', { ...current, password: 'x' }, base), true);
+    assert.equal(model.isDraftDirty('edit', { ...current, email: 'ada.obi@cardelite.ng' }, base), true);
     assert.equal(model.isDraftDirty('create', draft(), model.valuesOf(row({ email: null, role_title: '' }))), false);
   });
 
@@ -872,40 +979,34 @@ describe('editor model', () => {
     assert.equal(model.rebaseValues(base, local, base).changedElsewhere, false);
   });
 
-  test('an edit proposal sends only the changed account fields, and never any access field', () => {
+  test('an edit proposal sends only the changed account fields, never a password and never any access field', () => {
     const live = row();
-    const title = model.proposeEdit(live, { email: 'ada@cardelite.ng', roleTitle: 'Lead' }, '');
+    const title = model.proposeEdit(live, { email: 'ada@cardelite.ng', roleTitle: 'Lead' });
     assert.equal(title.email, null);
     assert.deepEqual(title.roleTitle, { before: 'Card Reviewer', after: 'Lead' });
     assert.equal(title.revokesSessions, true);
-    assert.deepEqual(model.editRequestBody(live.id, title, '', 'Promoted'), {
+    assert.deepEqual(model.editRequestBody(live.id, title, 'Promoted'), {
       id: ADMIN_ID, reason: 'Promoted', role_title: 'Lead', expected: { role_title: 'Card Reviewer' },
     });
-    const email = model.proposeEdit(live, { ...model.valuesOf(live), email: 'new@cardelite.ng' }, '');
+    const email = model.proposeEdit(live, { ...model.valuesOf(live), email: 'new@cardelite.ng' });
     assert.deepEqual(email.email, { before: 'ada@cardelite.ng', after: 'new@cardelite.ng' });
     assert.equal(email.revokesSessions, false);
-    assert.equal(model.isEmptyProposal(model.proposeEdit(live, model.valuesOf(live), '')), true);
-    const password = model.proposeEdit(live, model.valuesOf(live), 'Correct-Horse-9');
-    assert.equal(model.isEmptyProposal(password), false);
-    assert.equal(password.revokesSessions, true);
-    for (const body of [
-      model.editRequestBody(live.id, title, '', 'x'),
-      model.editRequestBody(live.id, email, '', 'x'),
-      model.editRequestBody(live.id, password, 'Correct-Horse-9', 'x'),
-    ]) {
-      for (const field of ['page_permissions', 'role_id', 'direct_permissions']) assert.equal(field in body, false, field);
+    assert.equal('password' in email, false);
+    assert.equal(model.isEmptyProposal(model.proposeEdit(live, model.valuesOf(live))), true);
+    for (const body of [model.editRequestBody(live.id, title, 'x'), model.editRequestBody(live.id, email, 'x')]) {
+      for (const field of ['password', 'page_permissions', 'role_id', 'direct_permissions']) assert.equal(field in body, false, field);
       const expected = (body.expected ?? {}) as Record<string, unknown>;
       assert.equal('page_permissions' in expected, false);
     }
   });
 
-  test('the create body trims names and carries no access, so the route creates the account without any', () => {
-    const body = model.createRequestBody(draft({
-      username: ' tolu ', email: ' tolu@cardelite.ng ', roleTitle: ' Payout ', password: 'Correct-Horse-9',
-      confirmPassword: 'Correct-Horse-9',
-    }), 'New hire');
-    assert.deepEqual(body, {
-      username: 'tolu', email: 'tolu@cardelite.ng', password: 'Correct-Horse-9', role_title: 'Payout', reason: 'New hire',
+  test('the create body trims the account fields and carries the chosen role, or null for No role, and no password', () => {
+    const snapshot = draft({ username: ' tolu ', email: ' tolu@cardelite.ng ', roleTitle: ' Payout ' });
+    assert.deepEqual(model.createRequestBody(snapshot, ROLE_ID, 'New hire'), {
+      username: 'tolu', email: 'tolu@cardelite.ng', role_title: 'Payout', role_id: ROLE_ID, reason: 'New hire',
+    });
+    assert.deepEqual(model.createRequestBody(snapshot, null, 'New hire'), {
+      username: 'tolu', email: 'tolu@cardelite.ng', role_title: 'Payout', role_id: null, reason: 'New hire',
     });
   });
 });
@@ -1098,7 +1199,7 @@ describe('access model', () => {
     assert.equal(model.rebaseAccess(base, local, { ...base, page_permissions: ['users'] }).changedElsewhere, true);
   });
 
-  test('a stopped preview or save keeps its own outcome, and a create that stops leaves the notice the plan names', () => {
+  test('a stopped preview or save keeps its own outcome, and the old create hand-off notice is gone', () => {
     const failure = (patch: Partial<ApiFailure>): ApiFailure => ({
       kind: 'http', status: 500, code: 'INTERNAL_ERROR', message: 'The access preview could not be loaded. Try again.',
       requestId: null, details: null, outcomeUnknown: false, ...patch,
@@ -1119,9 +1220,7 @@ describe('access model', () => {
     });
     const result = { access: null, changed: true, signedOut: false };
     assert.deepEqual(model.accessStepOf({ kind: 'done', result }), { kind: 'saved', result });
-    assert.equal(model.createdNotice({ kind: 'failed', message: 'This role is archived.' }), 'The account was created without access. This role is archived.');
-    assert.equal(model.createdNotice({ kind: 'cancelled' }), 'The account was created without access. The access change was cancelled.');
-    assert.match(model.createdNotice({ kind: 'unknown', message: 'Could not reach the server.' }), /^The account was created\. Could not reach/);
+    for (const name of ['createdNotice', 'CREATED_WITHOUT_ACCESS']) assert.equal(name in model, false, name);
   });
 });
 
@@ -1167,9 +1266,9 @@ describe('confirmations', () => {
     assert.deepEqual(revoking.find((detail) => detail.label === 'Title')?.value, 'Card Reviewer');
   });
 
-  test('the edit confirmation shows before and after values, never the password, and leaves access to its own step', () => {
+  test('the edit confirmation shows before and after values, has no password row, and leaves access to its own step', () => {
     const live = row();
-    const proposal = model.proposeEdit(live, { email: 'new@cardelite.ng', roleTitle: 'Lead' }, 'Correct-Horse-9');
+    const proposal = model.proposeEdit(live, { email: 'new@cardelite.ng', roleTitle: 'Lead' });
     const rebased = { values: model.valuesOf(live), conflicts: [], changedElsewhere: false };
     const options = confirmOptions.editConfirm(live, proposal, rebased);
     assert.equal(options.reason?.required, true);
@@ -1178,31 +1277,99 @@ describe('confirmations', () => {
     assert.match(text, /ada@cardelite\.ng → changes to new@cardelite\.ng/);
     assert.match(text, /Access does not change\./);
     assert.match(text, /signed out on every device/);
-    assert.doesNotMatch(text, /Correct-Horse-9/);
+    assert.deepEqual(options.details?.map((detail) => detail.label), ['Admin', 'Title', 'Email']);
     const pending = textOf(html(confirmOptions.editConfirm(live, proposal, rebased, true).message));
     assert.match(pending, /Your access changes are saved separately with Review access\./);
   });
 
-  test('the create confirmation keeps the password hidden and says access is a second, separate change', () => {
-    const snapshot = {
-      ...model.EMPTY_DRAFT,
-      username: 'tolu', email: 'tolu@cardelite.ng', roleTitle: 'Payout', password: 'Correct-Horse-9',
-      confirmPassword: 'Correct-Horse-9',
-    };
-    const bare = confirmOptions.createConfirm(snapshot, null);
-    const bareText = textOf(html(bare.message, ...detailRows(bare), ...(bare.consequences ?? [])));
-    assert.match(bareText, /The account is created without access\./);
-    assert.match(bareText, /Title Payout/);
-    assert.doesNotMatch(bareText, /Correct-Horse-9/);
-    assert.equal(bare.reason?.required, true);
-    assert.equal(bare.details?.some((detail) => detail.label === 'Role'), false);
-    const planned = confirmOptions.createConfirm(snapshot, { roleName: 'Manager', direct: ['coupons'] });
-    assert.deepEqual(planned.details?.slice(-2).map((detail) => [detail.label, detail.value]), [
+  test('the create confirmation shows the account and its role, says an invitation goes out, and asks for a reason', () => {
+    const snapshot = { ...model.EMPTY_DRAFT, username: 'tolu', email: ' tolu@cardelite.ng ', roleTitle: 'Payout' };
+    const withRole = confirmOptions.createConfirm(snapshot, 'Manager');
+    assert.equal(withRole.title, 'Create @tolu?');
+    assert.equal(textOf(html(withRole.message)), 'The account is created with this role and an invitation email is sent.');
+    assert.deepEqual(withRole.details?.map((detail) => [detail.label, detail.value]), [
+      ['Username', '@tolu'],
+      ['Email', 'tolu@cardelite.ng'],
+      ['Title', 'Payout'],
       ['Role', 'Manager'],
-      ['Additional access', '1 grant'],
     ]);
-    assert.match(textOf(html(planned.message)), /saved as a second change/);
-    assert.equal(planned.credential, undefined);
+    assert.deepEqual(withRole.consequences, [
+      '@tolu gets an email at tolu@cardelite.ng with a link to choose a password. The link works once, for 72 hours.',
+      'They get every action the role Manager holds once they sign in.',
+      'Every super administrator gets an alert.',
+    ]);
+    assert.equal(withRole.reason?.required, true);
+    assert.equal(withRole.reason?.maxLength, 500);
+    assert.equal(withRole.credential, undefined);
+    assert.equal(withRole.confirmLabel, 'Create and send invitation');
+    const noRole = confirmOptions.createConfirm(snapshot, null);
+    assert.deepEqual(noRole.details?.find((detail) => detail.label === 'Role')?.value, 'No role');
+    assert.equal(noRole.consequences?.[1], 'The account has no access until you give it a role in Access.');
+    const text = textOf(html(noRole.message, ...detailRows(noRole), ...(noRole.consequences ?? [])));
+    assert.doesNotMatch(text, /[Pp]assword:|secure channel|straight away|second change|Additional access/);
+  });
+
+  test('the create’s identity check is a follow-up that asks only for a code', () => {
+    const options = confirmOptions.createIdentityConfirm({ ...model.EMPTY_DRAFT, username: 'tolu' });
+    assert.equal(options.title, 'Confirm it is you');
+    assert.equal(
+      options.message,
+      'New admin accounts need a recent identity check. Enter a code from your authenticator app to create @tolu and send the invitation.',
+    );
+    assert.deepEqual(options.credential, { kind: 'otp' });
+    assert.equal(options.reason, undefined);
+    assert.equal(options.confirmLabel, 'Create and send invitation');
+  });
+
+  test('after a create or a resend the toast says whether the invitation email went out, with the expiry in WAT', () => {
+    const expiresAt = '2026-10-22T13:30:00.000Z';
+    const sent = { outcome: 'sent' as const, expiresAt };
+    assert.equal(
+      confirmOptions.inviteSentText('create', 'tolu@cardelite.ng', sent),
+      'Invitation sent to tolu@cardelite.ng. The link works until 22 Oct 2026, 14:30 WAT.',
+    );
+    assert.equal(confirmOptions.inviteSentText('resend', 'tolu@cardelite.ng', sent), confirmOptions.inviteSentText('create', 'tolu@cardelite.ng', sent));
+    assert.equal(
+      confirmOptions.inviteSentText('create', 'tolu@cardelite.ng', { outcome: 'not_sent', expiresAt }),
+      'The account was created, but the invitation email was not sent. Use Resend invitation.',
+    );
+    assert.equal(
+      confirmOptions.inviteSentText('create', 'tolu@cardelite.ng', { outcome: 'unknown', expiresAt }),
+      'The account was created, but we could not confirm the email went out. If it does not arrive, use Resend invitation.',
+    );
+    assert.equal(
+      confirmOptions.inviteSentText('resend', 'tolu@cardelite.ng', { outcome: 'not_sent', expiresAt }),
+      'The invitation email was not sent. Use Resend invitation to try again.',
+    );
+    assert.equal(
+      confirmOptions.inviteSentText('resend', 'tolu@cardelite.ng', { outcome: 'unknown', expiresAt }),
+      'We could not confirm the email went out. If it does not arrive, use Resend invitation again.',
+    );
+  });
+
+  test('Resend invitation asks a plain question, with no reason, and Revoke invitation says the link stops working', () => {
+    const invited = row({ invitePending: true, last_login_at: null });
+    const resend = confirmOptions.resendInviteConfirm(invited);
+    assert.equal(resend.title, 'Send a new invitation to ada@cardelite.ng?');
+    assert.equal(resend.message, 'The previous link stops working.');
+    assert.equal(resend.confirmLabel, 'Send invitation');
+    assert.equal(resend.reason, undefined);
+    assert.equal(resend.credential, undefined);
+    const revoke = confirmOptions.rowActionConfirm('deactivate', invited).consequences ?? [];
+    assert.equal(revoke.at(-1), 'The invitation link stops working. Reactivating the account later needs a new invitation.');
+    for (const admin of [row(), row({ invitePending: null }), row({ invitePending: true, is_active: false })]) {
+      assert.ok(!(confirmOptions.rowActionConfirm('deactivate', admin).consequences ?? []).some((line) => /invitation/.test(line)));
+    }
+    const revoked = row({ invitePending: true, is_active: false, last_login_at: null });
+    const restore = confirmOptions.rowActionConfirm('reactivate', revoked).consequences ?? [];
+    assert.equal(restore[0], '@ada has not chosen a password yet, so send a new invitation after reactivating.');
+    assert.ok(!restore.some((line) => /existing email and password/.test(line)));
+    for (const admin of [row({ is_active: false }), row({ invitePending: null, is_active: false })]) {
+      assert.equal(
+        (confirmOptions.rowActionConfirm('reactivate', admin).consequences ?? [])[0],
+        '@ada can sign in again with their existing email and password.',
+      );
+    }
   });
 
   test('moving the live Manager onto a role that matches reads as no change and lists the moved keys', () => {
@@ -1344,8 +1511,23 @@ describe('rendered access section', () => {
   });
 
   test('creating has no Review access button, and the roles list has its loading and error states', () => {
-    assert.equal(buttonByText(section({ mode: 'create', onReview: undefined }), 'Review access'), undefined);
-    assert.match(textOf(section({ mode: 'create', onReview: undefined })), /Saved right after the account is created/);
+    const creating = section({
+      mode: 'create',
+      onReview: undefined,
+      base: model.NO_ACCESS,
+      draft: { roleId: null, direct: [], folded: [] },
+    });
+    assert.equal(buttonByText(creating, 'Review access'), undefined);
+    assert.match(
+      textOf(creating),
+      /Given with the account\. Creating it needs two-step sign-in, a recent identity check and a reason\./,
+    );
+    assert.doesNotMatch(textOf(creating), /Saved right after the account is created/);
+    assert.deepEqual(optionsOf(creating).map((option) => [option.value, option.label]), [
+      ['', 'No role'],
+      [ROLE_ID, 'Manager'],
+      [OTHER_ROLE_ID, 'Reviewer'],
+    ]);
     assert.match(textOf(section({ roles: undefined })), /Loading roles…/);
     const failed = section({ roles: undefined, rolesError: roleFailure });
     assert.match(textOf(failed), /Roles could not be loaded/);
@@ -1391,6 +1573,15 @@ describe('rendered admin details', () => {
     assert.doesNotMatch(root, /Effective access/);
     const gone = details(row({ is_active: false, deleted_at: '2026-09-01T00:00:00.000Z' }));
     assert.match(gone, /Access it held/);
+  });
+
+  test('an invited admin reads Invited for the status and the last sign-in, and an unknown invite state reads as today', () => {
+    const invited = details(row({ invitePending: true, last_login_at: null }));
+    assert.match(invited, /Status Invited Last sign-in Invited Created/);
+    const unknown = details(row({ invitePending: null, last_login_at: null }));
+    assert.match(unknown, /Status Active Last sign-in Never Created/);
+    const revoked = details(row({ invitePending: true, is_active: false, last_login_at: null }));
+    assert.match(revoked, /Status Inactive Last sign-in Never Created/);
   });
 });
 
@@ -1562,7 +1753,7 @@ describe('resetting another admin’s two-step sign-in', () => {
     assert.equal(can({ id: SELF_ID, security: security() }), false);
     assert.equal(can({ is_active: false, deleted_at: '2026-09-01T00:00:00.000Z', security: security() }), false);
     assert.equal(model.hasRowActions({
-      edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: true,
+      edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: true, resendInvite: false,
     }), true);
   });
 
@@ -1859,8 +2050,8 @@ describe('the Access step wiring', () => {
 
   test('account saves go to /api/admin-accounts with no access fields, and access goes to its own route', () => {
     const editor = source('AdminEditor.tsx');
-    assert.match(editor, /body: createRequestBody\(snapshot, reason\)/);
-    assert.match(editor, /body: editRequestBody\(live\.id, proposal, password, reason\)/);
+    assert.match(editor, /body: createRequestBody\(snapshot, roleId, reason\)/);
+    assert.match(editor, /body: editRequestBody\(live\.id, proposal, reason\)/);
     assert.match(editor, /body: accessPreviewBody\(expected, next\)/);
     assert.match(editor, /body: accessSaveBody\(expected, next, reason\)/);
     assert.equal((editor.match(/apiRequest\(accessPath\(target\.id\)/g) ?? []).length, 2);
@@ -1895,10 +2086,60 @@ describe('the Access step wiring', () => {
     assert.doesNotMatch(editor, /label="Role title"/);
   });
 
-  test('the create form shows no Access section, so a new account is created without access and given it afterwards', () => {
+  test('the create form shows the role picker with no Review button, so the role is given with the account', () => {
     const editor = source('AdminEditor.tsx');
-    assert.match(editor, /const showsAccess = !creating && admin !== null && !admin\.is_super_admin;/);
+    assert.match(editor, /const showsAccess = creating \|\| \(admin !== null && !admin\.is_super_admin\);/);
     assert.match(editor, /useResource<RoleRow\[\]>\(showsAccess \? 'admin-roles' : null, fetchRoles\)/);
+    assert.match(editor, /onReview=\{creating \? undefined : \(\) => void reviewAccess\(\)\}/);
+    assert.match(editor, /subtitle=\{creating \? 'They choose their password from the invitation email\.'/);
+  });
+
+  test('the editor has no password fields, and the old create hand-off is gone from the page, the editor and the model', () => {
+    const editor = source('AdminEditor.tsx');
+    assert.doesNotMatch(editor, /type=\{reveal|new-password|PASSWORD_RULES|PASSWORD_MAX|unmetPasswordRules|draft\.password|confirmPassword|Change password/);
+    assert.doesNotMatch(editor, /lucide-react/);
+    for (const name of ['page.tsx', 'AdminEditor.tsx', 'model.ts', 'confirmOptions.tsx']) {
+      assert.doesNotMatch(source(name), /AccessHandoff|handoff|handOff|createdNotice|createdText|CREATED_WITHOUT_ACCESS|CREATE_THEN_ACCESS|CREATE_WITHOUT_ACCESS|wantsAccess/i, name);
+    }
+    assert.match(editor, /mode=\{mode\}/);
+    assert.match(editor, /mode === 'create' \? CREATE_ACCESS_HINT : EDIT_ACCESS_HINT/);
+  });
+
+  test('the create asks for a reason, sends the invite, and asks for a code only after REAUTH_REQUIRED, like Make super admin', () => {
+    const editor = source('AdminEditor.tsx');
+    let at = editor.indexOf('const submit = async (event?: FormEvent<HTMLFormElement>) => {');
+    assert.ok(at > 0, 'submit is missing');
+    for (const needle of [
+      'if (creating) {',
+      'body: createRequestBody(snapshot, roleId, reason),',
+      'select: toCreatedAdmin,',
+      '...createConfirm(snapshot, roleNameOf(roleId)),',
+      'accessReasonProblem(result.reason)',
+      'const attempt = await save();',
+      "outcome?.kind === 'reauth' && outcome.code === 'REAUTH_REQUIRED'",
+      '...createIdentityConfirm(snapshot),',
+      "await confirmIdentity(credential ?? '')",
+      "settleCreate(outcome.result, snapshot)",
+      'else reportFailure(outcome);',
+    ]) {
+      const next = editor.indexOf(needle, at);
+      assert.ok(next > at, `${needle} is missing or out of order`);
+      at = next;
+    }
+    assert.match(editor, /notify\(inviteSentText\('create', email, result\.invite\), result\.invite\.outcome === 'sent' \? 'success' : 'warning'\);/);
+  });
+
+  test('invited rows read Invited, offer Resend invitation, and call Deactivate Revoke invitation', () => {
+    const page = source('page.tsx');
+    assert.match(page, /capabilities\.resendInvite && \{\s*label: 'Resend invitation',\s*icon: <Send size=\{14\} aria-hidden \/>,\s*onSelect: \(\) => void runResend\(admin\),/);
+    assert.match(page, /capabilities\.deactivate && \{\s*label: isInvited\(admin\) \? 'Revoke invitation' : 'Deactivate',/);
+    assert.match(page, /\.\.\.resendInviteConfirm\(target\),/);
+    assert.match(page, /apiRequest\(invitePath\(target\.id\), \{\s*method: 'POST',\s*select: toResentInvite,\s*\}\)/);
+    assert.match(page, /inviteSentText\('resend', admin\.email \?\? adminHandle\(admin\), outcome\.result\)/);
+    assert.match(page, /label=\{isInvited\(admin\) \? INVITED_LABEL : STATUS_LABEL\[status\]\}/);
+    assert.match(page, /if \(isInvited\(admin\)\) return <span className=\{s\.muted\}>\{INVITED_LABEL\}<\/span>;/);
+    assert.match(page, /<Td><SignInCell admin=\{admin\} \/><\/Td>/);
+    assert.doesNotMatch(page, /credential: \{ kind: 'otp' \}/);
   });
 
   test('the table shows each admin’s role, and the page shares the identity check with the editor', () => {
@@ -1960,6 +2201,27 @@ const UPDATE_FAILED = 'The admin account could not be updated.';
 const DELETE_FAILED = 'The admin account could not be deleted.';
 const CREATED_ID = '33333333-4444-4555-8666-777777777777';
 const CREATED_AT = '2026-10-16T09:00:00.000Z';
+const INVITE_FILE = join(APP_DIR, 'api', 'admin-accounts', '[id]', 'invite', 'route.ts');
+const LINK_TOKEN = `${'a'.repeat(21)}-_${'B'.repeat(20)}`;
+const LINK_TOKEN_HASH = '0123456789abcdef'.repeat(4);
+const INVITE_EXPIRES = '2026-10-22T13:30:00.000Z';
+const INVITE_REASON = 'New payout officer for the night shift';
+const REASON_TEXT = 'Enter a reason of 3 to 500 characters.';
+const CREATE_FAILED = 'The admin account could not be created.';
+const SUPER_ONLY = 'This action is restricted to super administrators.';
+
+type LinkOutcome = 'sent' | 'not_sent' | 'unknown';
+
+interface LinkStub {
+  configured: boolean;
+  minted: number;
+  send: { outcome: LinkOutcome; reason: string | null };
+  issue: { outcome: LinkOutcome; reason: string | null; expiresAt: string | null };
+  sends: Array<Record<string, unknown>>;
+  issues: Array<Record<string, unknown>>;
+}
+
+type RouteRpcReply = { data?: unknown; error?: RouteDbError | null } | 'throw';
 
 interface RouteSession {
   id: string;
@@ -1979,6 +2241,7 @@ interface RouteClaims {
   page_permissions: string[];
   token_version: number;
   session: RouteSession;
+  mfa?: { status: 'none' | 'pending' | 'active'; lockedUntil: string | null };
 }
 
 interface RouteDbError {
@@ -2007,13 +2270,24 @@ interface RouteScenario {
   saved: Partial<StoredAdmin> | null;
   list: Array<Record<string, unknown>>;
   insertError: RouteDbError | null;
+  pending: Array<Record<string, unknown>>;
+  pendingError: RouteDbError | null;
+  readError: RouteDbError | null;
+  invite: RouteRpcReply;
+}
+
+interface RouteRpc {
+  name: string;
+  args: unknown;
 }
 
 interface RouteHarness {
   scenario: RouteScenario;
   queries: RouteQuery[];
-  claims: RouteClaims;
+  rpcs: RouteRpc[];
+  claims: RouteClaims | null;
   logs: string[];
+  links: LinkStub;
   db: {
     from(table: string): object;
     rpc(name: string, args: unknown): Promise<unknown>;
@@ -2025,6 +2299,12 @@ interface AccountsRoute {
   POST: (req: Request) => Promise<Response>;
   PATCH: (req: Request) => Promise<Response>;
   DELETE: (req: Request) => Promise<Response>;
+  maxDuration: number;
+}
+
+interface InviteRoute {
+  POST: (req: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
+  maxDuration: number;
 }
 
 interface Reply {
@@ -2056,6 +2336,14 @@ const OWNER: RouteClaims = {
 
 const WEB_OWNER: RouteClaims = { ...OWNER, session: routeSession('web') };
 
+function webInviter(session: Partial<RouteSession> = {}, status: 'none' | 'pending' | 'active' = 'active'): RouteClaims {
+  return {
+    ...OWNER,
+    mfa: { status, lockedUntil: null },
+    session: { ...routeSession('web'), createdAt: new Date(Date.now() - 60 * 1000).toISOString(), ...session },
+  };
+}
+
 function stored(patch: Partial<StoredAdmin> = {}): StoredAdmin {
   return {
     id: ADMIN_ID,
@@ -2076,20 +2364,64 @@ function stored(patch: Partial<StoredAdmin> = {}): StoredAdmin {
   };
 }
 
+const INVITE_CREATED: RouteRpcReply = {
+  data: {
+    ok: true,
+    admin_id: CREATED_ID,
+    username: 'tolu',
+    email: 'tolu@cardelite.ng',
+    role_id: ROLE_ID,
+    expires_at: INVITE_EXPIRES,
+  },
+};
+
 function routeScenario(patch: Partial<RouteScenario> = {}): RouteScenario {
-  return { target: stored(), superAdmins: 2, updateError: null, saved: null, list: [], insertError: null, ...patch };
+  return {
+    target: stored(),
+    superAdmins: 2,
+    updateError: null,
+    saved: null,
+    list: [],
+    insertError: null,
+    pending: [],
+    pendingError: null,
+    readError: null,
+    invite: INVITE_CREATED,
+    ...patch,
+  };
+}
+
+function linkStub(patch: Partial<LinkStub> = {}): LinkStub {
+  return {
+    configured: true,
+    minted: 0,
+    send: { outcome: 'sent', reason: null },
+    issue: { outcome: 'sent', reason: null, expiresAt: INVITE_EXPIRES },
+    sends: [],
+    issues: [],
+    ...patch,
+  };
+}
+
+function routeRpc(name: string, args: unknown): Promise<unknown> {
+  routeHarness.rpcs.push({ name, args });
+  if (name === 'admin_security_overview') return Promise.resolve({ data: [], error: null });
+  if (name !== 'admin_invite_create') return Promise.reject(new Error(`unexpected rpc ${name}`));
+  const reply = routeHarness.scenario.invite;
+  if (reply === 'throw') return Promise.reject(new Error('fetch failed'));
+  return Promise.resolve({ data: null, error: null, ...reply });
 }
 
 const routeHarness: RouteHarness = {
   scenario: routeScenario(),
   queries: [],
+  rpcs: [],
   claims: OWNER,
   logs: [],
+  links: linkStub(),
   db: {
     from: (table) => routeChain(table),
-    rpc: (name) => (name === 'admin_security_overview'
-      ? Promise.resolve({ data: [], error: null })
-      : Promise.reject(new Error(`unexpected rpc ${name}`))),
+    rpc: (name, args) => routeRpc(name, args),
   },
 };
 
@@ -2114,10 +2446,18 @@ function createdRow(payload: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+function isInviteStatusRead(query: RouteQuery): boolean {
+  return query.table === 'admin_users' && query.op === 'select'
+    && query.filters.some(([kind, column]) => kind === 'is' && column === 'password_hash');
+}
+
 function routeAnswer(query: RouteQuery): Record<string, unknown> {
   const s = routeHarness.scenario;
   if (query.table === 'audit_log' && query.op === 'insert') return { error: null };
-  if (query.table === 'admin_users' && query.op === 'select' && query.terminal === 'maybeSingle') return { data: s.target };
+  if (isInviteStatusRead(query)) return s.pendingError ? { error: s.pendingError } : { data: s.pending };
+  if (query.table === 'admin_users' && query.op === 'select' && query.terminal === 'maybeSingle') {
+    return s.readError ? { error: s.readError } : { data: s.target };
+  }
   if (query.table === 'admin_users' && query.op === 'select' && query.columns === 'id') return { count: s.superAdmins };
   if (query.table === 'admin_users' && query.op === 'select' && query.terminal === null) return { data: s.list };
   if (query.table === 'admin_users' && query.op === 'insert') {
@@ -2187,6 +2527,21 @@ const ROUTE_FILE_STUBS: Readonly<Record<string, string>> = {
     '};',
   ]),
   [resolve(APP_DIR, 'lib', 'jwt.ts')]: routeStub(['export async function verifyAdminFromRequest() { return harness().claims; }']),
+  [resolve(APP_DIR, 'lib', 'passwordLinks.ts')]: routeStub([
+    'export function linksConfigured() { return harness().links.configured; }',
+    'export function mintLinkToken() {',
+    '  harness().links.minted += 1;',
+    `  return { token: '${LINK_TOKEN}', tokenHash: '${LINK_TOKEN_HASH}' };`,
+    '}',
+    'export async function sendLinkEmail(input) {',
+    '  harness().links.sends.push(input);',
+    '  return { ...harness().links.send };',
+    '}',
+    'export async function issueAndSend(input) {',
+    '  harness().links.issues.push(input);',
+    '  return { ...harness().links.issue };',
+    '}',
+  ]),
 };
 
 const ROUTE_PACKAGE_STUBS: Readonly<Record<string, string>> = {
@@ -2244,16 +2599,30 @@ function routeBundle(file: string): Promise<string> {
 }
 
 let accountsRoute: AccountsRoute;
+let inviteRoute: InviteRoute;
 
 before(async () => {
   accountsRoute = (await import(await routeBundle(ROUTE_FILE))) as AccountsRoute;
+  inviteRoute = (await import(await routeBundle(INVITE_FILE))) as InviteRoute;
 });
 
-function routeReset(patch: Partial<RouteScenario> = {}, claims: RouteClaims = OWNER): void {
+function routeReset(patch: Partial<RouteScenario> = {}, claims: RouteClaims | null = OWNER, links: Partial<LinkStub> = {}): void {
   routeHarness.scenario = routeScenario(patch);
   routeHarness.claims = claims;
   routeHarness.queries = [];
+  routeHarness.rpcs = [];
+  routeHarness.links = linkStub(links);
   routeHarness.logs.length = 0;
+}
+
+async function resend(id: string = ADMIN_ID): Promise<Reply> {
+  const req = new Request(`http://localhost/api/admin-accounts/${id}/invite`, { method: 'POST' });
+  const res = await inviteRoute.POST(req, { params: Promise.resolve({ id }) });
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+function inviteCalls(): unknown[] {
+  return routeHarness.rpcs.filter((call) => call.name === 'admin_invite_create').map((call) => call.args);
 }
 
 async function send(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: unknown): Promise<Reply> {
@@ -2529,6 +2898,28 @@ describe('GET /api/admin-accounts: roles beside the fields the phone reads', () 
     assert.ok(columnsOf(list).includes('role_id') && columnsOf(list).includes('direct_permissions'));
     assert.equal(columnsOf(list).includes('token_version'), false);
   });
+
+  test('marks each admin invite_pending from one extra query that never reads a hash, and still lists when it fails', async () => {
+    const listed = [
+      listedRow({ is_super_admin: false, last_login_at: null }, null),
+      listedRow({ id: SELF_ID, username: 'owner' }, null),
+    ];
+    routeReset({ list: listed, pending: [{ id: ADMIN_ID.toUpperCase() }, { id: 'not-a-uuid' }] });
+    const reply = await send('GET');
+    assert.equal(reply.status, 200);
+    const admins = reply.body.admins as Array<Record<string, unknown>>;
+    assert.deepEqual(admins.map((admin) => [admin.id, admin.invite_pending]), [[ADMIN_ID, true], [SELF_ID, false]]);
+    const status = routeHarness.queries.filter(isInviteStatusRead);
+    assert.deepEqual(status.map((query) => [query.columns, query.filters, query.terminal]), [[
+      'id', [['is', 'password_hash', null], ['is', 'deleted_at', null]], null,
+    ]]);
+    assert.equal(routeHarness.logs.length, 0);
+    routeReset({ list: listed, pendingError: CONNECTION_LOST });
+    const degraded = await send('GET');
+    assert.equal(degraded.status, 200);
+    assert.deepEqual((degraded.body.admins as Array<Record<string, unknown>>).map((admin) => admin.invite_pending), [null, null]);
+    assert.ok(routeHarness.logs.some((line) => line.startsWith('admin invite status read:')));
+  });
 });
 
 describe('PATCH /api/admin-accounts: the phone’s edits once roles exist', () => {
@@ -2708,17 +3099,18 @@ describe('POST /api/admin-accounts: creating from the phone and from the web', (
     assert.deepEqual((audit?.after_value as Record<string, unknown>).page_permissions, ['card_queue', 'withdrawals']);
   });
 
-  test('a web create carries no pages and makes an account with no access, and pages from the web answer 400', async () => {
-    routeReset({ target: null }, WEB_OWNER);
-    const { page_permissions: _pages, ...account } = PHONE_CREATE;
-    const created = await send('POST', { ...account, reason: 'New payout officer' });
-    assert.equal(created.status, 200);
-    assert.deepEqual((routeQueries('admin_users', 'insert')[0]?.payload as Record<string, unknown>).page_permissions, []);
-    routeReset({ target: null }, WEB_OWNER);
-    const refused = await send('POST', { ...PHONE_CREATE, reason: 'New payout officer' });
+  test('the phone keeps its password create with no step-up, stores the email in lowercase and sends no invitation', async () => {
+    routeReset({ target: null });
+    const reply = await send('POST', { ...PHONE_CREATE, email: ' Tolu@CardElite.NG ' });
+    assert.equal(reply.status, 200);
+    assert.equal((routeQueries('admin_users', 'insert')[0]?.payload as Record<string, unknown>).email, 'tolu@cardelite.ng');
+    assert.deepEqual(inviteCalls(), []);
+    assert.deepEqual([routeHarness.links.minted, routeHarness.links.sends.length], [0, 0]);
+    routeReset({ target: null });
+    const refused = await send('POST', { ...PHONE_CREATE, email: 'x<a@b.co>' });
     assert.equal(refused.status, 400);
-    assert.deepEqual(refused.body, failureBody(ACCESS_ELSEWHERE, 'VALIDATION_ERROR'));
-    assert.deepEqual(routeHarness.queries, []);
+    assert.deepEqual(refused.body, failureBody('Enter a valid email address.', 'VALIDATION_ERROR'));
+    assert.deepEqual(routeQueries('admin_users', 'insert'), []);
   });
 
   test('a database refusal on create is a 400 with a failure audit', async () => {
@@ -2731,26 +3123,405 @@ describe('POST /api/admin-accounts: creating from the phone and from the web', (
   });
 });
 
+const WEB_INVITE = {
+  username: 'tolu',
+  email: ' Tolu@CardElite.NG ',
+  role_title: 'Payout Officer',
+  role_id: ROLE_ID.toUpperCase(),
+  reason: `  ${INVITE_REASON} `,
+};
+
+function createdStored(): StoredAdmin {
+  return stored({
+    id: CREATED_ID,
+    username: 'tolu',
+    email: 'tolu@cardelite.ng',
+    role_title: 'Payout Officer',
+    page_permissions: [...MANAGER_KEYS],
+    role_id: ROLE_ID,
+    direct_permissions: [],
+    role: { id: ROLE_ID, name: 'Manager', archived_at: null },
+    last_login_at: null,
+    is_super_admin: false,
+    created_at: CREATED_AT,
+  });
+}
+
+function nothingSent(): void {
+  assert.deepEqual(inviteCalls(), []);
+  assert.deepEqual([routeHarness.links.minted, routeHarness.links.sends.length], [0, 0]);
+  assert.deepEqual(routeAudits(), []);
+}
+
+describe('POST /api/admin-accounts: the web invite', () => {
+  captureRouteLogs();
+
+  test('needs two-step sign-in, then an identity check within 5 minutes, before the body is read', async () => {
+    routeReset({ target: null }, webInviter({}, 'none'));
+    const withoutTwoStep = await send('POST', []);
+    assert.equal(withoutTwoStep.status, 403);
+    assert.equal(withoutTwoStep.body.code, 'MFA_REQUIRED');
+    assert.deepEqual(routeHarness.queries, []);
+    nothingSent();
+    routeReset({ target: null }, WEB_OWNER);
+    assert.equal((await send('POST', WEB_INVITE)).body.code, 'MFA_REQUIRED');
+    routeReset({ target: null }, webInviter({ createdAt: '2026-10-16T08:00:00.000Z' }));
+    const stale = await send('POST', []);
+    assert.equal(stale.status, 403);
+    assert.equal(stale.body.code, 'REAUTH_REQUIRED');
+    assert.deepEqual(stale.body.details, { method: 'otp', max_age_secs: 300 });
+    assert.deepEqual(routeHarness.queries, []);
+    nothingSent();
+    routeReset({ target: null }, webInviter({ createdAt: '2026-10-16T08:00:00.000Z', reauthAt: new Date().toISOString() }));
+    assert.equal((await send('POST', WEB_INVITE)).status, 200);
+  });
+
+  test('a password, direct_permissions or page_permissions answer 400 before anything is created', async () => {
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ ...WEB_INVITE, password: 'Correct-Horse-9' }, 'Passwords are chosen by the new admin from the invitation email.'],
+      [{ ...WEB_INVITE, password: '' }, 'Passwords are chosen by the new admin from the invitation email.'],
+      [{ ...WEB_INVITE, direct_permissions: ['coupons'] }, ACCESS_ELSEWHERE],
+      [{ ...WEB_INVITE, page_permissions: ['withdrawals'] }, ACCESS_ELSEWHERE],
+    ];
+    for (const [body, message] of cases) {
+      routeReset({ target: null }, webInviter());
+      const reply = await send('POST', body);
+      assert.equal(reply.status, 400, JSON.stringify(body));
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR'));
+      assert.deepEqual(routeHarness.queries, []);
+      nothingSent();
+    }
+  });
+
+  test('needs a reason of 3 to 500 characters and a role id or null, and checks the account before anything is created', async () => {
+    for (const reason of [undefined, '   ', 'ab', 'x'.repeat(501), 42]) {
+      routeReset({ target: null }, webInviter());
+      const reply = await send('POST', { ...WEB_INVITE, reason });
+      assert.equal(reply.status, 400, String(reason));
+      assert.deepEqual(reply.body, {
+        ...failureBody(REASON_TEXT, 'VALIDATION_ERROR'),
+        details: { field: 'reason', reason: 'reason_required' },
+      });
+      nothingSent();
+    }
+    for (const role_id of ['nope', 42, {}, '']) {
+      routeReset({ target: null }, webInviter());
+      const reply = await send('POST', { ...WEB_INVITE, role_id });
+      assert.equal(reply.status, 400, JSON.stringify(role_id));
+      assert.deepEqual(reply.body, {
+        ...failureBody('role_id must be a role id or null.', 'VALIDATION_ERROR'),
+        details: { field: 'role_id', reason: 'invalid' },
+      });
+      nothingSent();
+    }
+    for (const [patch, message] of [
+      [{ email: 'x<a@b.co>' }, 'Enter a valid email address.'],
+      [{ username: 'ab' }, 'Username must be 3–32 characters.'],
+      [{ role_title: '' }, 'Username, email and role title are required.'],
+    ] as const) {
+      routeReset({ target: null }, webInviter());
+      const reply = await send('POST', { ...WEB_INVITE, ...patch });
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR'), message);
+      nothingSent();
+    }
+  });
+
+  test('answers 500 before anything is created when invitation links are not set up', async () => {
+    routeReset({ target: null }, webInviter(), { configured: false });
+    const reply = await send('POST', WEB_INVITE);
+    assert.equal(reply.status, 500);
+    assert.deepEqual(reply.body, failureBody('Invitations are not set up on the server, so no account was created.', 'INTERNAL_ERROR'));
+    assert.deepEqual(routeHarness.queries, []);
+    nothingSent();
+  });
+
+  test('creates the account with its role and link in one call, emails the link and records only the send', async () => {
+    routeReset({ target: createdStored() }, webInviter());
+    const reply = await send('POST', WEB_INVITE);
+    assert.equal(reply.status, 200);
+    assert.deepEqual(inviteCalls(), [{
+      p_actor: SELF_ID,
+      p_username: 'tolu',
+      p_email: 'tolu@cardelite.ng',
+      p_role_title: 'Payout Officer',
+      p_role_id: ROLE_ID,
+      p_token_hash: LINK_TOKEN_HASH,
+      p_reason: INVITE_REASON,
+      p_ip: ROUTE_IP,
+      p_user_agent: ROUTE_USER_AGENT,
+      p_request_id: ROUTE_REQUEST_ID,
+    }]);
+    assert.match(LINK_TOKEN_HASH, /^[0-9a-f]{64}$/);
+    assert.equal(routeHarness.links.minted, 1);
+    assert.deepEqual(routeQueries('admin_users', 'insert'), []);
+    const [readBack] = routeQueries('admin_users', 'select');
+    assert.deepEqual([readBack?.filters, readBack?.terminal], [[['eq', 'id', CREATED_ID]], 'maybeSingle']);
+    assert.ok(readBack?.columns?.includes(LIST_ROLE_EMBED));
+    assert.deepEqual(routeHarness.links.sends, [{
+      purpose: 'invite',
+      token: LINK_TOKEN,
+      email: 'tolu@cardelite.ng',
+      username: 'tolu',
+      expiresAt: INVITE_EXPIRES,
+      inviter: 'owner',
+    }]);
+    const audits = routeAudits();
+    assert.deepEqual(audits.map(auditSummary), [{
+      admin_id: SELF_ID,
+      action: 'ADMIN_INVITE_SENT',
+      entity: 'admin_users',
+      entity_id: CREATED_ID,
+      reason: null,
+      result: 'success',
+      error: null,
+      sensitivity: 'security',
+    }]);
+    assert.deepEqual(audits[0]?.after_value, { outcome: 'sent', expires_at: INVITE_EXPIRES, resend: false });
+    assert.ok(!JSON.stringify(audits).includes(LINK_TOKEN) && !JSON.stringify(reply.body).includes(LINK_TOKEN));
+    assert.deepEqual(reply.body, {
+      success: true,
+      request_id: ROUTE_REQUEST_ID,
+      id: CREATED_ID,
+      admin: {
+        id: CREATED_ID,
+        username: 'tolu',
+        email: 'tolu@cardelite.ng',
+        role_title: 'Payout Officer',
+        page_permissions: MANAGER_KEYS,
+        role_id: ROLE_ID,
+        role: { id: ROLE_ID, name: 'Manager', archived: false },
+        direct_permissions: [],
+        last_login_at: null,
+        is_active: true,
+        is_super_admin: false,
+        deleted_at: null,
+        created_at: CREATED_AT,
+      },
+      invite: { outcome: 'sent', expires_at: INVITE_EXPIRES },
+      audit_recorded: true,
+    });
+    assert.deepEqual(routeHarness.logs, []);
+  });
+
+  test('No role sends role_id null, from a missing role_id or an explicit null', async () => {
+    for (const body of [{ ...WEB_INVITE, role_id: undefined }, { ...WEB_INVITE, role_id: null }]) {
+      routeReset({ target: createdStored() }, webInviter());
+      assert.equal((await send('POST', body)).status, 200);
+      assert.deepEqual(inviteCalls().map((args) => (args as Record<string, unknown>).p_role_id), [null]);
+    }
+  });
+
+  test('an email that was not sent, or may have gone out, still answers 200 with the outcome and keeps the account', async () => {
+    for (const delivery of [{ outcome: 'not_sent', reason: 'Template not available' }, { outcome: 'unknown', reason: 'timeout' }] as const) {
+      routeReset({ target: createdStored() }, webInviter(), { send: delivery });
+      const reply = await send('POST', WEB_INVITE);
+      assert.equal(reply.status, 200);
+      assert.deepEqual(reply.body.invite, { outcome: delivery.outcome, expires_at: INVITE_EXPIRES });
+      assert.deepEqual(routeAudits().map((row) => [row.action, row.result, row.error]), [['ADMIN_INVITE_SENT', 'failure', delivery.reason]]);
+      assert.deepEqual(routeQueries('admin_users', 'update'), []);
+    }
+  });
+
+  test('a failed read-back still answers 200 with admin null, and sends the email', async () => {
+    routeReset({ target: createdStored(), readError: CONNECTION_LOST }, webInviter());
+    const reply = await send('POST', WEB_INVITE);
+    assert.equal(reply.status, 200);
+    assert.equal(reply.body.admin, null);
+    assert.equal(reply.body.id, CREATED_ID);
+    assert.equal(routeHarness.links.sends.length, 1);
+    assert.ok(routeHarness.logs.some((line) => line.startsWith('admin invite read back:')));
+  });
+
+  test('database refusals answer 400, 403 or 409 with a CREATE_ADMIN failure audit and no email', async () => {
+    const cases: Array<[RouteRpcReply, number, string, string, Record<string, unknown> | undefined]> = [
+      [{ data: { ok: false, reason: 'role_not_found' } }, 400, 'VALIDATION_ERROR', 'That role does not exist.', { reason: 'role_not_found' }],
+      [{ data: { ok: false, reason: 'role_protected' } }, 409, 'STATE_CONFLICT', 'This role cannot be assigned.', { reason: 'role_protected' }],
+      [{ data: { ok: false, reason: 'role_archived' } }, 409, 'STATE_CONFLICT', 'This role is archived.', { reason: 'role_archived' }],
+      [{ data: { ok: false, reason: 'reason_required' } }, 400, 'VALIDATION_ERROR', REASON_TEXT, { reason: 'reason_required' }],
+      [
+        { error: { message: 'duplicate key value violates unique constraint "admin_users_username_key"', code: '23505' } },
+        400, 'VALIDATION_ERROR', 'That username is already taken.', undefined,
+      ],
+      [{ error: { message: 'Not authorized', code: 'P0001' } }, 403, 'PERMISSION_DENIED', SUPER_ONLY, undefined],
+      [{ error: { message: 'This role is archived', code: 'P0001' } }, 409, 'STATE_CONFLICT', 'This role is archived.', { reason: 'role_archived' }],
+    ];
+    for (const [invite, status, code, message, details] of cases) {
+      routeReset({ target: null, invite }, webInviter());
+      const reply = await send('POST', WEB_INVITE);
+      assert.equal(reply.status, status, message);
+      assert.deepEqual(reply.body, details ? { ...failureBody(message, code), details } : failureBody(message, code));
+      const audits = routeAudits();
+      assert.deepEqual(audits.map(auditSummary), [{
+        admin_id: SELF_ID,
+        action: 'CREATE_ADMIN',
+        entity: 'admin_users',
+        entity_id: null,
+        reason: INVITE_REASON,
+        result: 'failure',
+        error: audits[0]?.error,
+        sensitivity: 'security',
+      }]);
+      assert.equal(typeof audits[0]?.error, 'string');
+      assert.deepEqual(audits[0]?.after_value, {
+        username: 'tolu', email: 'tolu@cardelite.ng', role_title: 'Payout Officer', role_id: ROLE_ID,
+      });
+      assert.equal(routeHarness.links.sends.length, 0);
+      assert.deepEqual(routeHarness.logs, []);
+    }
+  });
+
+  test('an outage or an unreadable answer is a 500, never a 401, logged and recorded, with no email', async () => {
+    const replies: RouteRpcReply[] = [
+      { error: CONNECTION_LOST },
+      'throw',
+      { data: null },
+      { data: { ok: false } },
+      { data: { ok: false, reason: 'mystery' } },
+      { data: { ok: true } },
+      { data: { ok: true, admin_id: 'nope', username: 'tolu', email: 'tolu@cardelite.ng', expires_at: INVITE_EXPIRES } },
+      { data: { ok: true, admin_id: CREATED_ID, username: 'tolu', email: 'tolu@cardelite.ng' } },
+    ];
+    for (const invite of replies) {
+      routeReset({ target: null, invite }, webInviter());
+      const reply = await send('POST', WEB_INVITE);
+      assert.equal(reply.status, 500, JSON.stringify(invite));
+      assert.deepEqual(reply.body, failureBody(CREATE_FAILED, 'INTERNAL_ERROR'));
+      assert.deepEqual(routeAudits().map((row) => [row.action, row.result]), [['CREATE_ADMIN', 'failure']]);
+      assert.equal(routeHarness.links.sends.length, 0);
+      assert.ok(routeHarness.logs.some((line) => line.startsWith('admin invite failed:')), JSON.stringify(invite));
+    }
+  });
+
+  test('waits up to 30 seconds for the email', () => {
+    assert.equal(accountsRoute.maxDuration, 30);
+    assert.equal(inviteRoute.maxDuration, 30);
+  });
+});
+
+describe('POST /api/admin-accounts/[id]/invite: resending an invitation', () => {
+  captureRouteLogs();
+
+  test('only a signed-in super admin may resend; a bad id answers 400 and missing links 500, before anything is issued', async () => {
+    routeReset({}, { ...OWNER, is_super_admin: false });
+    assert.equal((await resend()).status, 403);
+    routeReset({}, null);
+    assert.equal((await resend()).status, 401);
+    routeReset({}, OWNER);
+    const bad = await resend('nope');
+    assert.equal(bad.status, 400);
+    assert.deepEqual(bad.body, failureBody('A valid admin account id is required.', 'VALIDATION_ERROR'));
+    routeReset({}, OWNER, { configured: false });
+    const unset = await resend();
+    assert.equal(unset.status, 500);
+    assert.deepEqual(unset.body, failureBody('Invitations are not set up on the server, so nothing was sent.', 'INTERNAL_ERROR'));
+    assert.deepEqual(routeHarness.links.issues, []);
+    assert.deepEqual(routeAudits(), []);
+  });
+
+  test('issue refusals answer 404 or 409 and an outage 500, with no audit row', async () => {
+    const cases: Array<[string, number, string, string]> = [
+      ['not_found', 404, 'RESOURCE_NOT_FOUND', 'Admin account not found.'],
+      ['inactive', 409, 'STATE_CONFLICT', 'Reactivate this account before sending a new invitation.'],
+      ['password_set', 409, 'STATE_CONFLICT', 'This admin has already chosen a password.'],
+      ['no_email', 409, 'STATE_CONFLICT', 'Add an email address first.'],
+      ['unavailable', 500, 'INTERNAL_ERROR', 'The invitation could not be sent right now. Try again shortly.'],
+    ];
+    for (const [reason, status, code, message] of cases) {
+      routeReset({}, OWNER, { issue: { outcome: 'not_sent', reason, expiresAt: null } });
+      const reply = await resend();
+      assert.equal(reply.status, status, reason);
+      assert.deepEqual(reply.body, failureBody(message, code));
+      assert.deepEqual(routeAudits(), []);
+    }
+  });
+
+  test('a resend needs no reason or step-up, keeps the role, and answers 200 with the outcome for every send', async () => {
+    for (const issue of [
+      { outcome: 'sent', reason: null, expiresAt: INVITE_EXPIRES },
+      { outcome: 'not_sent', reason: 'SMTP not configured', expiresAt: INVITE_EXPIRES },
+      { outcome: 'unknown', reason: 'timeout', expiresAt: INVITE_EXPIRES },
+    ] as const) {
+      routeReset({}, WEB_OWNER, { issue });
+      const reply = await resend(ADMIN_ID.toUpperCase());
+      assert.equal(reply.status, 200, issue.outcome);
+      assert.deepEqual(reply.body, {
+        success: true, request_id: ROUTE_REQUEST_ID, invite: { outcome: issue.outcome, expires_at: INVITE_EXPIRES },
+      });
+      assert.deepEqual(routeHarness.links.issues, [{ adminId: ADMIN_ID, purpose: 'invite', inviter: 'owner' }]);
+      const audits = routeAudits();
+      assert.deepEqual(audits.map(auditSummary), [{
+        admin_id: SELF_ID,
+        action: 'ADMIN_INVITE_SENT',
+        entity: 'admin_users',
+        entity_id: ADMIN_ID,
+        reason: null,
+        result: issue.outcome === 'sent' ? 'success' : 'failure',
+        error: issue.reason,
+        sensitivity: 'security',
+      }]);
+      assert.deepEqual(audits[0]?.after_value, { outcome: issue.outcome, expires_at: INVITE_EXPIRES, resend: true });
+      assert.deepEqual(routeHarness.queries.filter((query) => query.table === 'admin_users'), []);
+      assert.deepEqual(routeHarness.rpcs, []);
+    }
+  });
+
+  test('the route exports only POST, is guarded by requireSuperAdmin and writes its action as a literal', () => {
+    const source = readFileSync(INVITE_FILE, 'utf8');
+    assert.deepEqual([...source.matchAll(/^export\s+(?:async\s+)?(?:function|const)\s+(\w+)/gm)].map((match) => match[1]), [
+      'maxDuration', 'POST',
+    ]);
+    assert.match(source, /await requireSuperAdmin\(\)/);
+    assert.doesNotMatch(source, /requireRecentAuth|requireTwoStep|req\.json|readBody|body\./);
+    assert.match(source, /action: 'ADMIN_INVITE_SENT'/);
+    assert.match(source, /issueAndSend\(\{ adminId: id, purpose: 'invite', inviter: admin\.username \}\)/);
+  });
+});
+
 describe('/api/admin-accounts: access fields belong to the Access step', () => {
   captureRouteLogs();
 
-  test('role_id or direct_permissions answer 400 from any session before anything is read, also beside page_permissions', async () => {
-    const requests: Array<['POST' | 'PATCH', Record<string, unknown>]> = [
-      ['PATCH', { id: ADMIN_ID, role_id: ROLE_ID }],
-      ['PATCH', { id: ADMIN_ID, role_id: null }],
-      ['PATCH', { id: ADMIN_ID, direct_permissions: [] }],
-      ['PATCH', { ...phoneEdit(['card_queue', 'users']), role_id: ROLE_ID }],
-      ['POST', { ...PHONE_CREATE, role_id: ROLE_ID }],
-      ['POST', { ...PHONE_CREATE, direct_permissions: ['coupons'] }],
-    ];
+  test('role_id or direct_permissions answer 400 before anything is read, from any edit and from the phone’s create', async () => {
+    const requests: Array<[RouteClaims, 'POST' | 'PATCH', Record<string, unknown>]> = [];
     for (const claims of [OWNER, WEB_OWNER]) {
-      for (const [method, body] of requests) {
-        routeReset({}, claims);
-        const reply = await send(method, body);
-        assert.equal(reply.status, 400, `${claims.session.client} ${method} ${JSON.stringify(body)}`);
-        assert.deepEqual(reply.body, failureBody(ACCESS_ELSEWHERE, 'VALIDATION_ERROR'));
-        assert.deepEqual(routeHarness.queries, []);
-      }
+      requests.push(
+        [claims, 'PATCH', { id: ADMIN_ID, role_id: ROLE_ID }],
+        [claims, 'PATCH', { id: ADMIN_ID, role_id: null }],
+        [claims, 'PATCH', { id: ADMIN_ID, direct_permissions: [] }],
+        [claims, 'PATCH', { ...phoneEdit(['card_queue', 'users']), role_id: ROLE_ID }],
+      );
+    }
+    requests.push(
+      [OWNER, 'POST', { ...PHONE_CREATE, role_id: ROLE_ID }],
+      [OWNER, 'POST', { ...PHONE_CREATE, direct_permissions: ['coupons'] }],
+    );
+    for (const [claims, method, body] of requests) {
+      routeReset({}, claims);
+      const reply = await send(method, body);
+      assert.equal(reply.status, 400, `${claims.session.client} ${method} ${JSON.stringify(body)}`);
+      assert.deepEqual(reply.body, failureBody(ACCESS_ELSEWHERE, 'VALIDATION_ERROR'));
+      assert.deepEqual(routeHarness.queries, []);
+    }
+  });
+
+  test('a web edit cannot set a password, while the phone’s password edit still saves', async () => {
+    routeReset({ target: member() }, WEB_OWNER);
+    const refused = await send('PATCH', { id: ADMIN_ID, password: 'Correct-Horse-9', reason: 'Forgot it' });
+    assert.equal(refused.status, 400);
+    assert.deepEqual(refused.body, failureBody('Passwords are chosen by the admin from a reset email.', 'VALIDATION_ERROR'));
+    assert.deepEqual(routeHarness.queries, []);
+    routeReset({ target: member() });
+    const phone = await send('PATCH', { id: ADMIN_ID, password: 'Correct-Horse-9' });
+    assert.equal(phone.status, 200);
+    assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, { token_version: 5, password_hash: 'bcrypt-hash:12' });
+    assert.equal(phone.body.sessions_revoked, true);
+  });
+
+  test('an email edit from either client is saved trimmed and in lowercase', async () => {
+    for (const claims of [OWNER, WEB_OWNER]) {
+      routeReset({ target: member() }, claims);
+      const reply = await send('PATCH', { id: ADMIN_ID, email: ' Ada.Obi@CardElite.NG ', reason: 'New mailbox' });
+      assert.equal(reply.status, 200, claims.session.client);
+      assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, { email: 'ada.obi@cardelite.ng' });
     }
   });
 
@@ -2766,9 +3537,52 @@ describe('/api/admin-accounts: access fields belong to the Access step', () => {
     assert.deepEqual(routeQueries('admin_users', 'update')[0]?.payload, { role_title: 'Lead', token_version: 5 });
   });
 
-  test('the route takes pages from phone sessions only and still asks for no fresh identity check', () => {
+  test('the web create asks for two-step sign-in, then a recent identity check, before its body; the phone, PATCH and DELETE ask for neither', () => {
     const source = readFileSync(ROUTE_FILE, 'utf8');
     assert.match(source, /admin\.session\.client !== 'mobile'/);
-    assert.doesNotMatch(source, /requireRecentAuth|requireTwoStep|REAUTH_REQUIRED|MFA_REQUIRED/);
+    const handler = (name: string) => {
+      const start = source.indexOf(`export async function ${name}(`);
+      assert.ok(start > 0, name);
+      const next = source.indexOf('\nexport async function ', start + 1);
+      return source.slice(start, next < 0 ? source.length : next);
+    };
+    const post = handler('POST');
+    const order = [
+      'await requireSuperAdmin()',
+      "if (admin.session.client === 'mobile') return createForPhone(req, admin);",
+      'await requireTwoStep(admin)',
+      'await requireRecentAuth(admin)',
+      'return inviteFromWeb(req, admin);',
+    ].map((needle) => post.indexOf(needle));
+    assert.ok(order.every((at) => at > 0), JSON.stringify(order));
+    assert.deepEqual(order, [...order].sort((a, b) => a - b));
+    assert.doesNotMatch(post, /readBody/);
+    for (const name of ['GET', 'PATCH', 'DELETE']) {
+      assert.doesNotMatch(handler(name), /requireRecentAuth|requireTwoStep|REAUTH_REQUIRED|MFA_REQUIRED/, name);
+    }
+    const phone = source.slice(source.indexOf('async function createForPhone('), source.indexOf('async function inviteFromWeb('));
+    assert.ok(phone.length > 0);
+    assert.doesNotMatch(phone, /requireRecentAuth|requireTwoStep|admin_invite_create|mintLinkToken|sendLinkEmail/);
+    assert.equal((source.match(/requireTwoStep\(admin\)|requireRecentAuth\(admin\)/g) ?? []).length, 2);
+    const invite = source.slice(source.indexOf('async function inviteFromWeb('), source.indexOf('export async function POST('));
+    const steps = [
+      'await readBody(req)',
+      'body.password !== undefined',
+      'body.direct_permissions !== undefined || body.page_permissions !== undefined',
+      'readReason(body.reason)',
+      'readRole(body.role_id)',
+      "checkCreate(body as CreateInput, 'web')",
+      'if (!linksConfigured())',
+      'mintLinkToken()',
+      'await createInvite(',
+      'await readCreated(',
+      'await sendLinkEmail({',
+      "action: 'ADMIN_INVITE_SENT'",
+    ].map((needle) => invite.indexOf(needle));
+    assert.ok(steps.every((at) => at >= 0), JSON.stringify(steps));
+    assert.deepEqual(steps, [...steps].sort((a, b) => a - b));
+    assert.deepEqual([...source.matchAll(/\.rpc\('([a-z_]+)'/g)].map((match) => match[1]), [
+      'admin_security_overview', 'admin_invite_create',
+    ]);
   });
 });

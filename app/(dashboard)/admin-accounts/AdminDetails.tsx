@@ -6,7 +6,8 @@ import { ALL_PERMISSIONS, type Permission } from '../../lib/permissions';
 import { formatAge, formatBusinessDateTime } from '../../lib/time';
 import { effectiveActions, sortGrants } from './rules';
 import {
-  STATUS_LABEL, STATUS_TONE, adminHandle, plural, roleLabel, statusOf, type AdminPanel, type AdminRow,
+  INVITED_LABEL, STATUS_LABEL, STATUS_TONE, adminHandle, isInvited, plural, roleLabel, statusOf, type AdminPanel,
+  type AdminRow,
 } from './model';
 import { ActionBreakdown, GrantList } from '../_access';
 import { DrawerPanels, drawerPanel } from './SecurityParts';
@@ -41,6 +42,7 @@ export function AdminDetails({
 }: AdminDetailsProps) {
   const tabsId = useId();
   const status = statusOf(admin);
+  const invited = isInvited(admin);
   const actions = admin.is_super_admin ? [] : (() => {
     const held = effectiveActions(admin.page_permissions);
     return ALL_PERMISSIONS.filter((permission) => held.has(permission));
@@ -86,9 +88,11 @@ export function AdminDetails({
               <DetailRow label="Title" value={admin.role_title || '—'} wrap />
               <DetailRow
                 label="Status"
-                value={<StatusDot status={status} tone={STATUS_TONE[status]} label={STATUS_LABEL[status]} />}
+                value={
+                  <StatusDot status={status} tone={STATUS_TONE[status]} label={invited ? INVITED_LABEL : STATUS_LABEL[status]} />
+                }
               />
-              <DetailRow label="Last sign-in" value={when(admin.last_login_at)} />
+              <DetailRow label="Last sign-in" value={invited ? INVITED_LABEL : when(admin.last_login_at)} />
               <DetailRow label="Created" value={admin.created_at ? `${formatBusinessDateTime(admin.created_at)} WAT` : '—'} />
             </div>
           </section>

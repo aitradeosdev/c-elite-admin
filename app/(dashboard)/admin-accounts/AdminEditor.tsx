@@ -4,7 +4,6 @@ import {
   useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Circle, Eye, EyeOff } from 'lucide-react';
 import {
   Button, ErrorState, FieldShell, Input, Notice, Select, SidePanel, SkeletonLines, useConfirm,
   useResource, useToast,
@@ -12,14 +11,7 @@ import {
 import { apiRequest, type ApiFailure } from '../../lib/apiClient';
 import type { RoleRow } from '../../lib/roles';
 import { formatAge } from '../../lib/time';
-import {
-  PASSWORD_MAX,
-  PASSWORD_RULES,
-  ROLE_TITLE_MAX,
-  USERNAME_MAX,
-  USERNAME_MIN,
-  unmetPasswordRules,
-} from './rules';
+import { ROLE_TITLE_MAX, USERNAME_MAX, USERNAME_MIN } from './rules';
 import {
   ACCESS_CHANGED_ELSEWHERE,
   EMPTY_DRAFT,
@@ -36,7 +28,6 @@ import {
   classifyMutation,
   confirmIdentity,
   createRequestBody,
-  createdNotice,
   draftFor,
   editRequestBody,
   firstError,
@@ -53,6 +44,7 @@ import {
   statusOf,
   toAccessPreview,
   toAccessResult,
+  toCreatedAdmin,
   toMutationResult,
   toRoleList,
   validateDraft,
@@ -60,12 +52,12 @@ import {
   withAccess,
   type AccessDraft,
   type AccessExpected,
-  type AccessHandoff,
   type AccessResult,
   type AccessStep,
   type AdminList,
   type AdminPanel,
   type AdminRow,
+  type CreatedAdmin,
   type EditableValues,
   type EditorDraft,
   type EditorErrors,
@@ -74,7 +66,9 @@ import {
   type MutationOutcome,
   type MutationResult,
 } from './model';
-import { accessConfirm, accessIdentityConfirm, accessSavedText, createConfirm, editConfirm } from './confirmOptions';
+import {
+  accessConfirm, accessIdentityConfirm, accessSavedText, createConfirm, createIdentityConfirm, editConfirm, inviteSentText,
+} from './confirmOptions';
 import { DrawerPanels, drawerPanel } from './SecurityParts';
 import s from './page.module.css';
 
@@ -84,10 +78,12 @@ const TAKEN = 'That username is already taken.';
 
 const ROLES_PATH = '/api/admin-roles';
 
+const CREATE_PENDING = 'Creating the account…';
+
 const TITLE_HELP =
   'Shown next to their name, and grants nothing. Picking a role fills it in while it is empty or still names the previous role.';
 
-const CREATE_ACCESS_HINT = 'Saved right after the account is created, as a second change that you review and confirm.';
+const CREATE_ACCESS_HINT = 'Given with the account. Creating it needs two-step sign-in, a recent identity check and a reason.';
 
 const EDIT_ACCESS_HINT =
   'Saved on its own with Review access, with a reason and a recent identity check. The account details above are saved separately.';
@@ -188,8 +184,6 @@ export interface AdminEditorProps {
   applyAdmin: (admin: AdminRow) => void;
   refreshList: () => void;
   onClose: () => void;
-  onHandoff?: (admin: AdminRow, handoff: AccessHandoff) => void;
-  handoff?: AccessHandoff;
   returnFocusTo?: () => HTMLElement | null;
   panel?: AdminPanel;
   onPanelChange?: (next: AdminPanel) => void;
@@ -205,41 +199,34 @@ function subtitleFor(admin: AdminRow): string {
 }
 
 export function AdminEditor({
-  mode, admin, readFresh, applyAdmin, refreshList, onClose, onHandoff, handoff, returnFocusTo, panel = 'account',
+  mode, admin, readFresh, applyAdmin, refreshList, onClose, returnFocusTo, panel = 'account',
   onPanelChange, security, securityCount = null, superAdmin,
 }: AdminEditorProps) {
   const confirm = useConfirm();
   const { show: notify } = useToast();
   const router = useRouter();
   const formId = useId();
-  const rulesId = useId();
   const tabsId = useId();
   const [draft, setDraft] = useState<EditorDraft>(() => draftFor(admin));
   const [base, setBase] = useState<EditableValues>(() => (admin ? valuesOf(admin) : EMPTY_VALUES));
   const [accessBase, setAccessBase] = useState<AccessExpected>(() => (admin ? accessOf(admin) : NO_ACCESS));
-  const [access, setAccess] = useState<AccessDraft>(
-    () => handoff?.access ?? accessDraftFor(admin ? accessOf(admin) : NO_ACCESS),
-  );
-  const [createdText, setCreatedText] = useState<string | null>(() => handoff?.notice ?? null);
+  const [access, setAccess] = useState<AccessDraft>(() => accessDraftFor(admin ? accessOf(admin) : NO_ACCESS));
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
   const [takenName, setTakenName] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewingAccess, setReviewingAccess] = useState(false);
-  const [reveal, setReveal] = useState(false);
   const busyRef = useRef(false);
   const aliveRef = useRef(true);
   const usernameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
-  const confirmPasswordRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const accessRef = useRef<HTMLElement>(null);
   const reviewAccessRef = useRef<HTMLButtonElement>(null);
 
   const creating = mode === 'create';
-  const showsAccess = !creating && admin !== null && !admin.is_super_admin;
+  const showsAccess = creating || (admin !== null && !admin.is_super_admin);
   const roles = useResource<RoleRow[]>(showsAccess ? 'admin-roles' : null, fetchRoles);
   const { refresh: refreshRoles } = roles;
   const roleList = roles.data;
@@ -253,7 +240,6 @@ export function AdminEditor({
   const nameTaken = creating && takenName !== null && draft.username.trim() === takenName;
   const errors: EditorErrors = showErrors ? validation : {};
   const usernameError = errors.username ?? (nameTaken ? TAKEN : undefined);
-  const unmet = useMemo(() => unmetPasswordRules(draft.password), [draft.password]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -281,8 +267,6 @@ export function AdminEditor({
       username: usernameRef,
       email: emailRef,
       roleTitle: titleRef,
-      password: passwordRef,
-      confirmPassword: confirmPasswordRef,
     }[field].current;
     if (!target) return;
     target.focus({ preventScroll: true });
@@ -366,7 +350,7 @@ export function AdminEditor({
     }
     const next = saved ? valuesOf(saved) : values;
     setBase(next);
-    setDraft((current) => ({ ...current, ...next, password: '', confirmPassword: '' }));
+    setDraft((current) => ({ ...current, ...next }));
   };
 
   const runAccessStep = async (
@@ -437,7 +421,6 @@ export function AdminEditor({
       setAccess(accessDraftFor(saved));
     }
     setAccessNotice(null);
-    setCreatedText(null);
     if (!saved || !keepOpen) onClose();
   };
 
@@ -506,6 +489,15 @@ export function AdminEditor({
     }
   };
 
+  const settleCreate = (result: CreatedAdmin, snapshot: EditorDraft) => {
+    if (result.admin) applyAdmin(result.admin);
+    refreshList();
+    const email = result.admin?.email ?? snapshot.email.trim();
+    notify(inviteSentText('create', email, result.invite), result.invite.outcome === 'sent' ? 'success' : 'warning');
+    if (result.warning) notify(result.warning, 'warning');
+    onClose();
+  };
+
   const submit = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     if (busyRef.current) return;
@@ -519,14 +511,13 @@ export function AdminEditor({
     setReviewing(true);
     let sent = false;
     let settled = false;
-    const password = draft.password;
     try {
       const fresh = await readFresh();
       if (!fresh || !aliveRef.current) return;
 
       if (creating) {
         const snapshot = draft;
-        const planned = access;
+        const roleId = access.roleId;
         const username = snapshot.username.trim();
         if (fresh.admins.some((row) => row.username === username)) {
           setTakenName(username);
@@ -534,54 +525,49 @@ export function AdminEditor({
           focusField('username');
           return;
         }
-        const wantsAccess = isAccessDirty(NO_ACCESS, planned);
-        const decision = await confirm<MutationOutcome>({
-          ...createConfirm(snapshot, wantsAccess ? { roleName: roleNameOf(planned.roleId), direct: planned.direct } : null),
-          pendingLabel: 'Creating the account…',
+        let reason = '';
+        const save = async () => {
+          sent = true;
+          return classifyMutation(await apiRequest('/api/admin-accounts', {
+            method: 'POST',
+            body: createRequestBody(snapshot, roleId, reason),
+            select: toCreatedAdmin,
+          }));
+        };
+        const first = await confirm<MutationOutcome<CreatedAdmin>>({
+          ...createConfirm(snapshot, roleNameOf(roleId)),
+          pendingLabel: CREATE_PENDING,
           returnFocusTo: () => formRef.current,
-          action: async ({ reason }) => {
-            sent = true;
-            const attempt = classifyMutation(await apiRequest('/api/admin-accounts', {
-              method: 'POST',
-              body: createRequestBody(snapshot, reason),
-              select: toMutationResult,
-            }));
+          action: async (result) => {
+            const problem = accessReasonProblem(result.reason);
+            if (problem) throw new Error(problem);
+            reason = result.reason;
+            const attempt = await save();
             if (attempt.kind === 'retry') throw new Error(attempt.message);
-            settled = true;
             return attempt;
           },
         });
-        const outcome = decision?.value;
+        let outcome = first?.value;
+        if (outcome?.kind === 'reauth' && outcome.code === 'REAUTH_REQUIRED' && aliveRef.current) {
+          const second = await confirm<MutationOutcome<CreatedAdmin>>({
+            ...createIdentityConfirm(snapshot),
+            pendingLabel: CREATE_PENDING,
+            returnFocusTo: () => formRef.current,
+            action: async ({ credential }) => {
+              const identity = await confirmIdentity(credential ?? '');
+              if (identity === 'expired') return { kind: 'expired' };
+              const attempt = await save();
+              if (attempt.kind === 'retry') throw new Error(attempt.message);
+              if (attempt.kind === 'reauth' && attempt.code === 'REAUTH_REQUIRED') throw new Error(attempt.message);
+              return attempt;
+            },
+          });
+          outcome = second?.value;
+        }
         if (!outcome) return;
-        if (outcome.kind !== 'done') {
-          reportFailure(outcome);
-          return;
-        }
-        const created = outcome.result.admin;
-        if (created) applyAdmin(created);
-        refreshList();
-        notify(`Admin account ${adminHandle({ username })} created.`, 'success');
-        if (outcome.result.warning) notify(outcome.result.warning, 'warning');
-        if (!wantsAccess) {
-          onClose();
-          return;
-        }
-        if (!created) {
-          notify('Its access was not saved, because the new account could not be read back. Open the account to set it.', 'warning');
-          onClose();
-          return;
-        }
-        const step = await runAccessStep(created, accessOf(created), planned, false, () => formRef.current);
-        if (!aliveRef.current) return;
-        if (step.kind === 'saved') {
-          notify(accessSavedText(created, step.result), 'success');
-          refreshList();
-          onClose();
-          return;
-        }
-        if (step.kind === 'refused') router.refresh();
-        if (onHandoff) onHandoff(created, { adminId: created.id, access: planned, notice: createdNotice(step) });
-        else onClose();
+        settled = true;
+        if (outcome.kind === 'done') settleCreate(outcome.result, snapshot);
+        else reportFailure(outcome);
         return;
       }
 
@@ -609,7 +595,7 @@ export function AdminEditor({
         focusField(recheck);
         return;
       }
-      const proposal = proposeEdit(live, rebased.values, password);
+      const proposal = proposeEdit(live, rebased.values);
       if (isEmptyProposal(proposal)) {
         notify('Nothing to save. These values are already live.');
         return;
@@ -623,7 +609,7 @@ export function AdminEditor({
           sent = true;
           const attempt = classifyMutation(await apiRequest('/api/admin-accounts', {
             method: 'PATCH',
-            body: editRequestBody(live.id, proposal, password, reason),
+            body: editRequestBody(live.id, proposal, reason),
             select: toMutationResult,
           }));
           if (attempt.kind === 'retry') throw new Error(attempt.message);
@@ -651,7 +637,7 @@ export function AdminEditor({
       wide
       onClose={() => void requestClose()}
       title={creating ? 'New admin account' : `Edit ${handle}`}
-      subtitle={creating ? 'They can sign in as soon as the account is created.' : admin ? subtitleFor(admin) : undefined}
+      subtitle={creating ? 'They choose their password from the invitation email.' : admin ? subtitleFor(admin) : undefined}
       returnFocusTo={returnFocusTo}
       footer={active === 'account' ? (
         <div className={s.panelFooter}>
@@ -672,9 +658,6 @@ export function AdminEditor({
     >
       <DrawerPanels id={tabsId} panel={active} onPanelChange={onPanelChange} sessions={securityCount} security={tabs}>
         <div className={s.editor}>
-          {createdText ? (
-            <Notice tone="warning" compact flush announce="polite">{createdText}</Notice>
-          ) : null}
           <form
             ref={formRef}
             id={formId}
@@ -744,68 +727,6 @@ export function AdminEditor({
                   />
                 </FieldShell>
               </div>
-            </section>
-
-            <section className={s.formSection}>
-              <h3 className={s.formHeading}>{creating ? 'Password' : 'Change password'}</h3>
-              <p className={s.formHint}>
-                {creating
-                  ? 'Send it to them through a secure channel. It cannot be read back once the account exists.'
-                  : `Leave both fields empty to keep the current password. A new password signs ${handle} out everywhere.`}
-              </p>
-              <div className={s.fieldGrid}>
-                <FieldShell label={creating ? 'Password' : 'New password'} required={creating} error={errors.password}>
-                  <div className={s.passwordField}>
-                    <Input
-                      ref={passwordRef}
-                      className={s.passwordInput}
-                      type={reveal ? 'text' : 'password'}
-                      value={draft.password}
-                      maxLength={PASSWORD_MAX}
-                      autoComplete="new-password"
-                      spellCheck={false}
-                      aria-describedby={rulesId}
-                      readOnly={busy}
-                      onChange={(event) => update('password', event.target.value)}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      iconOnly
-                      className={s.passwordToggle}
-                      leftIcon={reveal ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
-                      aria-label="Show passwords"
-                      aria-pressed={reveal}
-                      onClick={() => setReveal((shown) => !shown)}
-                    />
-                  </div>
-                </FieldShell>
-                <FieldShell label="Confirm password" required={creating} error={errors.confirmPassword}>
-                  <Input
-                    ref={confirmPasswordRef}
-                    type={reveal ? 'text' : 'password'}
-                    value={draft.confirmPassword}
-                    maxLength={PASSWORD_MAX}
-                    autoComplete="new-password"
-                    spellCheck={false}
-                    readOnly={busy}
-                    onChange={(event) => update('confirmPassword', event.target.value)}
-                  />
-                </FieldShell>
-              </div>
-              <ul id={rulesId} className={s.rules} aria-label="Password requirements">
-                {PASSWORD_RULES.map((rule) => {
-                  const met = draft.password !== '' && !unmet.includes(rule.id);
-                  return (
-                    <li key={rule.id} className={met ? s.ruleMet : s.rule}>
-                      {met ? <Check size={12} aria-hidden /> : <Circle size={12} aria-hidden />}
-                      <span>{rule.label}</span>
-                      <span className={s.srOnly}>{met ? ', met' : ', not met yet'}</span>
-                    </li>
-                  );
-                })}
-              </ul>
             </section>
           </form>
 

@@ -120,12 +120,13 @@ async function askForSetup(admin: AdminRow, meta: RequestMeta): Promise<NextResp
 export async function POST(req: NextRequest) {
   const credentials = readCredentials(await req.json().catch(() => null));
   if (!credentials) return fail('VALIDATION_ERROR', MISSING_FIELDS);
-  const { email, username, password } = credentials;
+  const { username, password } = credentials;
+  const email = credentials.email.trim().toLowerCase();
   const meta = await requestMeta(req.headers);
 
   const byIp = await checkLimit(meta.ip, 'admin_login', 20, 600);
   if (byIp !== 'allowed') return limitRefusal(byIp);
-  const byAccount = await checkLimit(`admin:${username.toLowerCase()}|${email.toLowerCase()}`, 'admin_login_account', 10, 1800);
+  const byAccount = await checkLimit(`admin:${username.toLowerCase()}|${email}`, 'admin_login_account', 10, 1800);
   if (byAccount !== 'allowed') return limitRefusal(byAccount);
 
   const { data: admin, error } = await supabaseAdmin

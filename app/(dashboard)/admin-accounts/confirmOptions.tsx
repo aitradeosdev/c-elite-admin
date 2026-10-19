@@ -7,6 +7,7 @@ import {
   NO_ROLE_LABEL,
   SUPER_ADMIN_ROLE_LABEL,
   adminHandle,
+  isInvited,
   plural,
   policyRequirement,
   roleLabel,
@@ -15,6 +16,7 @@ import {
   type AdminRow,
   type EditProposal,
   type EditorDraft,
+  type InviteResult,
   type RebaseResult,
   type RowActionKind,
   type SecurityPolicy,
@@ -31,11 +33,11 @@ export interface AccessSide {
   direct: readonly string[];
 }
 
-const CREATE_WITHOUT_ACCESS =
-  'The account is created without access. Give it a role or additional access afterwards in its Access section.';
+const CREATE_LEAD = 'The account is created with this role and an invitation email is sent.';
 
-const CREATE_THEN_ACCESS =
-  'The account is created without access first. Its access is then saved as a second change, which you review and confirm with its own reason.';
+const CREATE_LABEL = 'Create and send invitation';
+
+const INVITE_REVOKED = 'The invitation link stops working. Reactivating the account later needs a new invitation.';
 
 const ACCESS_SAVED_SEPARATELY =
   'Access does not change in this save. Your access changes are saved separately with Review access.';
@@ -56,25 +58,24 @@ function grantCount(keys: readonly string[]): string {
   return keys.length ? plural(keys.length, 'grant') : 'None';
 }
 
-export function createConfirm(draft: EditorDraft, access: AccessSide | null): ConfirmBase {
+export function createConfirm(draft: EditorDraft, roleName: string | null): ConfirmBase {
   const handle = adminHandle({ username: draft.username });
-  const details: ConfirmDetail[] = [
-    { label: 'Username', value: handle },
-    { label: 'Email', value: draft.email.trim() },
-    { label: 'Title', value: draft.roleTitle.trim() },
-    { label: 'Password', value: 'Set, not shown again' },
-  ];
-  if (access) {
-    details.push({ label: 'Role', value: access.roleName ?? NO_ROLE_LABEL });
-    if (access.direct.length) details.push({ label: 'Additional access', value: grantCount(access.direct) });
-  }
+  const email = draft.email.trim();
   return {
     title: `Create ${handle}?`,
-    message: <p className={s.confirmLead}>{access ? CREATE_THEN_ACCESS : CREATE_WITHOUT_ACCESS}</p>,
-    details,
+    message: <p className={s.confirmLead}>{CREATE_LEAD}</p>,
+    details: [
+      { label: 'Username', value: handle },
+      { label: 'Email', value: email },
+      { label: 'Title', value: draft.roleTitle.trim() },
+      { label: 'Role', value: roleName ?? NO_ROLE_LABEL },
+    ],
     consequences: [
-      `${handle} can sign in straight away with this username, email and password.`,
-      'Send the password through a secure channel. It cannot be read back once the account exists.',
+      `${handle} gets an email at ${email} with a link to choose a password. The link works once, for 72 hours.`,
+      roleName
+        ? `They get every action the role ${roleName} holds once they sign in.`
+        : 'The account has no access until you give it a role in Access.',
+      'Every super administrator gets an alert.',
     ],
     reason: {
       required: true,
@@ -82,7 +83,44 @@ export function createConfirm(draft: EditorDraft, access: AccessSide | null): Co
       placeholder: 'For example: new card reviewer for the night shift',
       maxLength: REASON_MAX,
     },
-    confirmLabel: 'Create account',
+    confirmLabel: CREATE_LABEL,
+  };
+}
+
+export function createIdentityConfirm(draft: EditorDraft): ConfirmBase {
+  const handle = adminHandle({ username: draft.username });
+  return {
+    title: 'Confirm it is you',
+    message: `New admin accounts need a recent identity check. Enter a code from your authenticator app to create ${handle} and send the invitation.`,
+    credential: { kind: 'otp' },
+    confirmLabel: CREATE_LABEL,
+  };
+}
+
+export type InviteSend = 'create' | 'resend';
+
+export function inviteSentText(send: InviteSend, email: string, invite: InviteResult): string {
+  switch (invite.outcome) {
+    case 'sent':
+      return invite.expiresAt
+        ? `Invitation sent to ${email}. The link works until ${formatBusinessDateTime(invite.expiresAt)} WAT.`
+        : `Invitation sent to ${email}.`;
+    case 'not_sent':
+      return send === 'create'
+        ? 'The account was created, but the invitation email was not sent. Use Resend invitation.'
+        : 'The invitation email was not sent. Use Resend invitation to try again.';
+    case 'unknown':
+      return send === 'create'
+        ? 'The account was created, but we could not confirm the email went out. If it does not arrive, use Resend invitation.'
+        : 'We could not confirm the email went out. If it does not arrive, use Resend invitation again.';
+  }
+}
+
+export function resendInviteConfirm(admin: AdminRow): ConfirmBase {
+  return {
+    title: `Send a new invitation to ${admin.email ?? adminHandle(admin)}?`,
+    message: 'The previous link stops working.',
+    confirmLabel: 'Send invitation',
   };
 }
 
@@ -100,7 +138,6 @@ export function editConfirm(
   if (proposal.email) {
     details.push({ label: 'Email', value: <Change before={proposal.email.before} after={proposal.email.after} /> });
   }
-  if (proposal.password) details.push({ label: 'Password', value: 'Replaced with the new password' });
 
   const conflictText = rebased.conflicts.map((field) => (field === 'email' ? 'email' : 'title'));
   return {
@@ -376,6 +413,7 @@ export function rowActionConfirm(kind: RowActionKind, admin: AdminRow): ConfirmB
           'Admin alerts and push notifications stop for this account.',
           'Grants are kept and come back if the account is reactivated.',
           ...(admin.is_super_admin ? ['The last active super admin cannot be deactivated.'] : []),
+          ...(isInvited(admin) ? [INVITE_REVOKED] : []),
         ],
         reason: { required: true, label: 'Reason for deactivating', presets: DEACTIVATE_REASONS, maxLength: REASON_MAX },
         confirmLabel: 'Deactivate',
@@ -390,7 +428,9 @@ export function rowActionConfirm(kind: RowActionKind, admin: AdminRow): ConfirmB
           { label: 'Email', value: admin.email || 'None' },
         ],
         consequences: [
-          `${handle} can sign in again with their existing email and password.`,
+          admin.invitePending === true
+            ? `${handle} has not chosen a password yet, so send a new invitation after reactivating.`
+            : `${handle} can sign in again with their existing email and password.`,
           'Sessions from before the deactivation stay signed out.',
           ...(admin.email ? [] : ['This account has no email, so it cannot sign in until one is added.']),
         ],

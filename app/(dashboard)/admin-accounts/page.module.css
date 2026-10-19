@@ -147,43 +147,6 @@
   gap: var(--space-3) var(--space-4);
 }
 
-.passwordField {
-  position: relative;
-}
-
-.passwordField .passwordInput {
-  padding-right: var(--space-10);
-}
-
-.passwordField .passwordToggle {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-}
-
-.rules {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-xs);
-  line-height: var(--leading-snug);
-}
-
-.rule,
-.ruleMet {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--fg-tertiary);
-}
-
-.ruleMet {
-  color: var(--tone-success-fg);
-}
-
 .panelFooter,
 .accessActions {
   display: flex;

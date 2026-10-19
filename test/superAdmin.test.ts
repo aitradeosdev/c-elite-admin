@@ -470,6 +470,7 @@ describe('POST /api/admin-accounts/[id]/super-admin: database answers', () => {
     ['unchanged', true, 409, 'STATE_CONFLICT', 'This admin is already a super admin.'],
     ['unchanged', false, 409, 'STATE_CONFLICT', 'This admin is not a super admin.'],
     ['inactive', true, 409, 'STATE_CONFLICT', 'This admin is deactivated. Reactivate the account before making it a super admin.'],
+    ['invite_pending', true, 409, 'STATE_CONFLICT', 'This admin has not accepted their invitation yet.'],
     ['last_super_admin', false, 409, 'STATE_CONFLICT', 'Cannot remove the last active super admin.'],
   ];
 
@@ -599,6 +600,7 @@ function adminRow(patch: Partial<AdminRow> = {}): AdminRow {
     deleted_at: null,
     created_at: null,
     security: null,
+    invitePending: false,
     ...patch,
   };
 }
@@ -625,6 +627,13 @@ describe('super admin in Admin accounts: who it is offered for', () => {
     assert.equal(model.superAdminChange(superRow(), null), null);
     assert.equal(model.superAdminChange(adminRow({ is_active: false, deleted_at: deleted }), ACTOR_ID), null);
     assert.equal(model.superAdminChange(superRow({ is_active: false, deleted_at: deleted }), ACTOR_ID), null);
+  });
+
+  test('Make super admin is hidden while an invitation is pending, and shown when the invite state is unknown', () => {
+    assert.equal(model.superAdminChange(adminRow({ invitePending: true, last_login_at: null }), ACTOR_ID), null);
+    assert.equal(model.superAdminChange(adminRow({ invitePending: null }), ACTOR_ID), 'make');
+    assert.equal(model.superAdminChange(adminRow({ invitePending: false }), ACTOR_ID), 'make');
+    assert.equal(model.superAdminChange(adminRow({ invitePending: true, is_active: false }), ACTOR_ID), null);
   });
 
   test('the change goes to its own route with make and the reason, and the answer is read strictly', () => {
@@ -838,7 +847,9 @@ describe('admin_set_super_admin in schema_admin_app.sql', { skip: !existsSync(AD
 
   test('every refusal the function can return is mapped by the route to a 4xx answer', async () => {
     const reasons = [...new Set([...fn().matchAll(/'ok', false, 'reason', '([a-z_]+)'/g)].map((match) => match[1]))].sort();
-    assert.deepEqual(reasons, ['inactive', 'invalid', 'last_super_admin', 'not_found', 'reason_required', 'self', 'unchanged']);
+    assert.deepEqual(reasons, [
+      'inactive', 'invalid', 'invite_pending', 'last_super_admin', 'not_found', 'reason_required', 'self', 'unchanged',
+    ]);
     for (const reason of reasons) {
       for (const body of [grant(), removal()]) {
         reset({ data: { ok: false, reason } });

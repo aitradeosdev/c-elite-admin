@@ -3,17 +3,18 @@
 import { Suspense, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AlertTriangle, Eye, EyeOff, Loader2 } from 'lucide-react';
-import { ThemeSwitcher } from '../_ui/ThemeSwitcher';
+import { Eye, EyeOff } from 'lucide-react';
 import { Notice } from '../_ui/Notice';
 import { EnrollFlow, type EnrollStage } from '../_security/EnrollFlow';
 import { apiRequest, type ApiFailure } from '../lib/apiClient';
 import { OTP_INPUT_ATTRIBUTES, RECOVERY_INPUT_ATTRIBUTES, sanitizeOtp } from '../lib/adminSecurity';
+import { AuthShell, ButtonText, FormError } from './AuthParts';
 import {
   CODE_HEADING, CODE_HELP, CODE_LABEL, CONTINUE_LABEL, ENROLL_CONFIRM_LABEL, ENROLL_CONFIRM_PATH, ENROLL_FINISH_LABEL,
-  ENROLL_HEADING, ENROLL_HELP, ENROLL_REQUIRED, ENROLL_START_PATH, FOOTNOTE, OPEN_PROFILE_LABEL, PROFILE_TWO_STEP_HREF,
-  RECOVERED_HEADING, RECOVERY_HELP, RECOVERY_HINT, RECOVERY_LABEL, SIGN_IN_LABEL, SIGN_IN_PATH, SIGNING_IN_LABEL,
-  SWITCH_ACCOUNT, USE_APP, USE_RECOVERY, VERIFY_LABEL, VERIFY_PATH, VERIFYING_LABEL,
+  ENROLL_HEADING, ENROLL_HELP, ENROLL_REQUIRED, ENROLL_START_PATH, FOOTNOTE, FORGOT_LABEL, FORGOT_PATH,
+  OPEN_PROFILE_LABEL, PROFILE_TWO_STEP_HREF, RECOVERED_HEADING, RECOVERY_HELP, RECOVERY_HINT, RECOVERY_LABEL,
+  SIGN_IN_LABEL, SIGN_IN_PATH, SIGNING_IN_LABEL, SWITCH_ACCOUNT, USE_APP, USE_RECOVERY, VERIFY_LABEL, VERIFY_PATH,
+  VERIFYING_LABEL,
   accountKey, classifySignIn, classifyVerify, codeError, codeModeOf, credentialError, credentialsComplete,
   enrollEndedMessage, lockApplies, lockFrom, recoveredNotice, safeNext, signInBody, signingInAs, verifyBody,
   type CredentialField, type Credentials, type LoginStep, type SignInLock, type SignInOutcome,
@@ -42,26 +43,6 @@ const ALL_TOUCHED: Readonly<Record<CredentialField, boolean>> = Object.freeze({
 
 const MAX_TIMER_MS = 2147483647;
 const STEP_HEADING_ID = 'login-step-heading';
-
-function FormError({ message }: { message: string }) {
-  if (!message) return null;
-  return (
-    <div className={s.formError} role="alert">
-      <AlertTriangle size={15} className={s.formErrorIcon} aria-hidden />
-      <span>{message}</span>
-    </div>
-  );
-}
-
-function ButtonText({ working, idle, busy }: { working: boolean; idle: string; busy: string }) {
-  if (!working) return <span>{idle}</span>;
-  return (
-    <>
-      <Loader2 size={15} className={s.spin} aria-hidden />
-      <span>{busy}</span>
-    </>
-  );
-}
 
 function LoginForm() {
   const router = useRouter();
@@ -416,6 +397,9 @@ function LoginForm() {
           {fieldError('password') ? (
             <p id="login-password-error" className={s.fieldError}>{fieldError('password')}</p>
           ) : null}
+          <p className={s.forgot}>
+            <Link href={FORGOT_PATH} className={s.linkBtn}>{FORGOT_LABEL}</Link>
+          </p>
         </div>
 
         <FormError message={error} />
@@ -428,25 +412,9 @@ function LoginForm() {
   }
 
   return (
-    <main className={s.page}>
-      <div className={s.themeSlot}>
-        <ThemeSwitcher />
-      </div>
-
-      <section className={s.panel} aria-labelledby="login-heading">
-        <header className={s.head}>
-          <span className={s.mark} aria-hidden>CE</span>
-          <div className={s.headText}>
-            <h1 id="login-heading" className={s.wordmark}>CardElite</h1>
-            <p className={s.kicker}>Admin console</p>
-          </div>
-        </header>
-
-        {body}
-
-        <p className={s.foot}>{FOOTNOTE}</p>
-      </section>
-    </main>
+    <AuthShell headingId="login-heading" foot={FOOTNOTE}>
+      {body}
+    </AuthShell>
   );
 }
 

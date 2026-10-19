@@ -16,6 +16,8 @@ const CHANNEL = EMAIL_CHANNEL;
 const COLUMNS = 'key, subject, html, description, variables, is_active, updated_at';
 const SAVE_ATTEMPTS = 3;
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
+const ADMIN_TEMPLATE_PREFIX = 'admin_';
+const ADMIN_TEMPLATES_DENIED = 'Only super administrators can change admin email templates.';
 
 type TemplateRead = { ok: true; template: TemplateRecord | null } | { ok: false };
 
@@ -59,6 +61,9 @@ export async function PATCH(req: NextRequest) {
   const parsed = readTemplatePatch(CHANNEL, body);
   if (!parsed.ok) return fail('VALIDATION_ERROR', parsed.message);
   const { request } = parsed;
+  if (request.key.startsWith(ADMIN_TEMPLATE_PREFIX) && !admin.is_super_admin) {
+    return fail('PERMISSION_DENIED', ADMIN_TEMPLATES_DENIED);
+  }
 
   for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt++) {
     const read = await readTemplate(request.key);

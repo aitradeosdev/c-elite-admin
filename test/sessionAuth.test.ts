@@ -42,6 +42,7 @@ const MOBILE_WEB_PATHS = [
   '/api/user-activity-monitor', '/api/user-activity-monitor/[id]', '/api/user-activity-monitor/[id]/terminate',
   '/api/users', '/api/users/[id]', '/api/withdrawals', '/api/withdrawals/[id]/approve', '/api/withdrawals/[id]/reject',
 ] as const;
+const WEB_INVITE_BRANCH = /if \(admin\.session\.client === 'mobile'\) return createForPhone\(req, admin\);[\s\S]*?return inviteFromWeb\(req, admin\);/;
 
 interface DbError {
   message: string;
@@ -1114,8 +1115,8 @@ describe('routes the mobile app calls', () => {
     for (const path of MOBILE_WEB_PATHS) {
       const file = routeFile(path);
       assert.ok(existsSync(file), path);
-      const source = readFileSync(file, 'utf8');
-      assert.doesNotMatch(source, /requireRecentAuth|requireTwoStep|REAUTH_REQUIRED|MFA_REQUIRED/, path);
+      const source = readFileSync(file, 'utf8').replace(WEB_INVITE_BRANCH, '');
+      assert.doesNotMatch(source, /requireRecentAuth\(|requireTwoStep\(|REAUTH_REQUIRED|MFA_REQUIRED/, path);
     }
   });
 

@@ -922,7 +922,7 @@ describe('routes and hard rules', () => {
     assert.match(broadcast, /broadcasts: history\.data/);
     assert.match(broadcast, /recipient_count: counts\.recipients/);
     assert.match(broadcast, /check_rate_limit_by_key/);
-    assert.match(broadcast, /AbortSignal\.timeout\(EDGE_TIMEOUT_MS\)/);
+    assert.match(broadcast, /callEdgeFunction\('broadcast-notification', payload, EDGE_TIMEOUT_MS\)/);
     const count = readFileSync(COUNT_ROUTE, 'utf8');
     assert.match(count, /requireAdmin\(READ_PERMISSION\)/);
     assert.match(count, /count: accountCount \+ anonymousCount/);

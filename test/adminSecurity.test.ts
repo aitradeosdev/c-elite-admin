@@ -687,6 +687,11 @@ describe('house rules for the security UI', () => {
     join(APP_DIR, 'login', 'page.tsx'),
     join(APP_DIR, 'login', 'model.ts'),
     join(APP_DIR, 'login', 'login.module.css'),
+    join(APP_DIR, 'login', 'AuthParts.tsx'),
+    join(APP_DIR, 'forgot-password', 'page.tsx'),
+    join(APP_DIR, 'forgot-password', 'model.ts'),
+    join(APP_DIR, 'set-password', 'page.tsx'),
+    join(APP_DIR, 'set-password', 'model.ts'),
     TEST_FILE,
     fileURLToPath(new URL('./loginFlow.test.ts', import.meta.url)),
   ];

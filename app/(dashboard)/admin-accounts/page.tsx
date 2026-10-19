@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Eye, KeyRound, LogOut, MoreHorizontal, Pencil, RotateCw, ShieldCheck, Trash2, UserCheck, UserPlus, UserX,
+  Eye, KeyRound, LogOut, MoreHorizontal, Pencil, RotateCw, Send, ShieldCheck, Trash2, UserCheck, UserPlus, UserX,
 } from 'lucide-react';
 import {
   AccessDenied, Badge, Button, Card, CardBody, ErrorState, FilterBar, Menu, MobileDataList, Notice, PageHeader,
@@ -16,19 +16,19 @@ import { apiRequest, type ApiFailure } from '../../lib/apiClient';
 import { isUuid } from '../../lib/http';
 import { formatAge, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
-  ACTOR_TWO_STEP_FIRST, ADMINS_URL, POLICY_OFF, STATUS_LABEL, STATUS_TABS, STATUS_TONE, TWO_STEP_SETTINGS_HREF,
-  TWO_STEP_STAT_UNAVAILABLE, accessReasonProblem, actorCanReset, adminHandle, adminMfaPath, adminStats, allowsAction,
-  capabilitiesFor, classifyMutation, confirmIdentity, hasRowActions, hasSecurityPanel, isSelf, mfaCellState,
-  resetBlockedText, roleLabel, rowActionRequest, statusOf, superAdminChange, superAdminPath, superAdminRequestBody,
-  tabCounts, toAdminList, toMutationResult, toResetResult, toSuperAdminResult, twoStepStat, twoStepStats,
-  visibleAdmins, withAdmin,
-  type AccessHandoff, type AdminCapabilities, type AdminList, type AdminPanel, type AdminRow, type MutationOutcome,
+  ACTOR_TWO_STEP_FIRST, ADMINS_URL, INVITED_LABEL, POLICY_OFF, STATUS_LABEL, STATUS_TABS, STATUS_TONE,
+  TWO_STEP_SETTINGS_HREF, TWO_STEP_STAT_UNAVAILABLE, accessReasonProblem, actorCanReset, adminHandle, adminMfaPath,
+  adminStats, allowsAction, capabilitiesFor, classifyMutation, confirmIdentity, hasRowActions, hasSecurityPanel,
+  invitePath, isInvited, isSelf, mfaCellState, resetBlockedText, roleLabel, rowActionRequest, statusOf,
+  superAdminChange, superAdminPath, superAdminRequestBody, tabCounts, toAdminList, toMutationResult, toResentInvite,
+  toResetResult, toSuperAdminResult, twoStepStat, twoStepStats, visibleAdmins, withAdmin,
+  type AdminCapabilities, type AdminList, type AdminPanel, type AdminRow, type InviteResult, type MutationOutcome,
   type ResetResult, type RowActionKind, type SecurityPolicy, type StatusTab, type SuperAdminChange,
   type SuperAdminResult,
 } from './model';
 import {
-  ROW_ACTION_PENDING, resetMfaConfirm, resetSuccess, rowActionConfirm, rowActionSuccess, superAdminConfirm,
-  superAdminIdentityConfirm, superAdminSavedText,
+  ROW_ACTION_PENDING, inviteSentText, resendInviteConfirm, resetMfaConfirm, resetSuccess, rowActionConfirm,
+  rowActionSuccess, superAdminConfirm, superAdminIdentityConfirm, superAdminSavedText,
 } from './confirmOptions';
 import { AccessCell } from '../_access';
 import { AdminEditor } from './AdminEditor';
@@ -157,7 +157,9 @@ function EmailCell({ admin }: { admin: AdminRow }) {
   return <span className={s.warnText}>No email, cannot sign in</span>;
 }
 
-function SignInCell({ value }: { value: string | null }) {
+function SignInCell({ admin }: { admin: AdminRow }) {
+  const value = admin.last_login_at;
+  if (isInvited(admin)) return <span className={s.muted}>{INVITED_LABEL}</span>;
   if (!value) return <span className={s.muted}>Never</span>;
   return (
     <div className={s.stack}>
@@ -171,7 +173,11 @@ function StatusCell({ admin }: { admin: AdminRow }) {
   const status = statusOf(admin);
   return (
     <span className={s.statusCell}>
-      <StatusDot status={status} tone={STATUS_TONE[status]} label={STATUS_LABEL[status]} />
+      <StatusDot
+        status={status}
+        tone={STATUS_TONE[status]}
+        label={isInvited(admin) ? INVITED_LABEL : STATUS_LABEL[status]}
+      />
       {admin.is_super_admin ? (
         <Badge tone="neutral">
           <ShieldCheck size={12} aria-hidden />
@@ -193,7 +199,6 @@ function AdminAccounts() {
   const [query, setQuery] = useState('');
   const { sort, setSort, toggle: toggleSort } = useTableSort(null);
   const [creating, setCreating] = useState(false);
-  const [handoff, setHandoff] = useState<AccessHandoff | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [securityRevision, setSecurityRevision] = useState(0);
   const actingRef = useRef(false);
@@ -251,28 +256,18 @@ function AdminAccounts() {
 
   const openRow = useCallback((admin: AdminRow) => {
     setCreating(false);
-    setHandoff(null);
     setUrl((value) => ({ ...value, id: admin.id, panel: 'account' }));
   }, [setUrl]);
 
   const closePanel = useCallback(() => {
     setCreating(false);
-    setHandoff(null);
     setUrl((value) => (value.id === null && value.panel === 'account' ? value : { ...value, id: null, panel: 'account' }));
   }, [setUrl]);
 
   const startCreate = useCallback(() => {
     setUrl((value) => (value.id === null && value.panel === 'account' ? value : { ...value, id: null, panel: 'account' }));
-    setHandoff(null);
     setCreating(true);
   }, [setUrl]);
-
-  const handOff = useCallback((admin: AdminRow, next: AccessHandoff) => {
-    applyAdmin(admin);
-    setHandoff(next);
-    setCreating(false);
-    setUrl((value) => ({ ...value, id: admin.id, panel: 'account' }));
-  }, [applyAdmin, setUrl]);
 
   const changePanel = useCallback((next: AdminPanel) => {
     setUrl((value) => ({ ...value, panel: next }));
@@ -362,6 +357,60 @@ function AdminAccounts() {
       actingRef.current = false;
       setActing(null);
       if (sent) setSecurityRevision((value) => value + 1);
+      if (sent && !settled) refreshQuietly();
+    }
+  };
+
+  const reportResend = (admin: AdminRow, outcome: MutationOutcome<InviteResult>) => {
+    switch (outcome.kind) {
+      case 'done':
+        notify(
+          inviteSentText('resend', admin.email ?? adminHandle(admin), outcome.result),
+          outcome.result.outcome === 'sent' ? 'success' : 'warning',
+        );
+        return;
+      case 'unknown':
+        notify(outcome.message, 'error');
+        return;
+      case 'stale':
+      case 'reauth':
+        notify(outcome.message, 'warning');
+        return;
+      case 'refused':
+        notify(outcome.message, 'error');
+        router.refresh();
+        return;
+      case 'expired':
+        return;
+    }
+  };
+
+  const runResend = async (target: AdminRow) => {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setActing(target.id);
+    let sent = false;
+    let settled = false;
+    try {
+      const decision = await confirm<MutationOutcome<InviteResult>>({
+        ...resendInviteConfirm(target),
+        action: async () => {
+          sent = true;
+          const attempt = classifyMutation(await apiRequest(invitePath(target.id), {
+            method: 'POST',
+            select: toResentInvite,
+          }));
+          if (attempt.kind === 'retry') throw new Error(attempt.message);
+          settled = true;
+          if (attempt.kind !== 'expired') await refreshList({ background: true });
+          return attempt;
+        },
+        returnFocusTo: rowFocus(target.id),
+      });
+      if (decision?.value) reportResend(target, decision.value);
+    } finally {
+      actingRef.current = false;
+      setActing(null);
       if (sent && !settled) refreshQuietly();
     }
   };
@@ -517,6 +566,11 @@ function AdminAccounts() {
   };
 
   const menuItems = (admin: AdminRow, capabilities: AdminCapabilities): MenuEntryInput[] => [
+    capabilities.resendInvite && {
+      label: 'Resend invitation',
+      icon: <Send size={14} aria-hidden />,
+      onSelect: () => void runResend(admin),
+    },
     capabilities.revoke && {
       label: 'Sign out everywhere',
       icon: <LogOut size={14} aria-hidden />,
@@ -530,7 +584,7 @@ function AdminAccounts() {
       onSelect: () => void runReset(admin),
     },
     capabilities.deactivate && {
-      label: 'Deactivate',
+      label: isInvited(admin) ? 'Revoke invitation' : 'Deactivate',
       icon: <UserX size={14} aria-hidden />,
       onSelect: () => void runAction('deactivate', admin),
     },
@@ -675,7 +729,7 @@ function AdminAccounts() {
                   <Td><EmailCell admin={admin} /></Td>
                   <Td><RoleCell admin={admin} /></Td>
                   <Td><AccessCell admin={admin} /></Td>
-                  <Td><SignInCell value={admin.last_login_at} /></Td>
+                  <Td><SignInCell admin={admin} /></Td>
                   <Td><StatusCell admin={admin} /></Td>
                   <Td><MfaCell state={mfaCellState(admin, policy, now)} /></Td>
                   <Td align="right">{actionsFor(admin, true)}</Td>
@@ -841,7 +895,6 @@ function AdminAccounts() {
           applyAdmin={applyAdmin}
           refreshList={refreshQuietly}
           onClose={closePanel}
-          onHandoff={handOff}
           returnFocusTo={() => createButtonRef.current}
         />
       ) : openAdmin ? (
@@ -854,7 +907,6 @@ function AdminAccounts() {
             applyAdmin={applyAdmin}
             refreshList={refreshQuietly}
             onClose={closePanel}
-            handoff={handoff?.adminId === openAdmin.id ? handoff : undefined}
             returnFocusTo={panelFocus}
             panel={url.panel}
             onPanelChange={changePanel}

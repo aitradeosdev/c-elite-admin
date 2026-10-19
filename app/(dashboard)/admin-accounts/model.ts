@@ -25,7 +25,6 @@ import {
   PAGE_KEYS,
   ROLE_TITLE_MAX,
   ROLE_TITLE_MIN,
-  checkPassword,
   checkRoleTitle,
   checkUsername,
   effectiveActions,
@@ -71,6 +70,7 @@ export interface AdminRow {
   deleted_at: string | null;
   created_at: string | null;
   security: AdminSecurity | null;
+  invitePending: boolean | null;
 }
 
 export type PolicyMode = 'off' | 'all';
@@ -160,6 +160,7 @@ export function toAdminRow(row: unknown): AdminRow | null {
     deleted_at: text(row.deleted_at),
     created_at: text(row.created_at),
     security: toAdminSecurity(row),
+    invitePending: typeof row.invite_pending === 'boolean' ? row.invite_pending : null,
   };
 }
 
@@ -231,6 +232,12 @@ export function statusOf(admin: AdminRow): AdminStatus {
   return admin.is_active ? 'active' : 'inactive';
 }
 
+export const INVITED_LABEL = 'Invited';
+
+export function isInvited(admin: Pick<AdminRow, 'invitePending' | 'is_active' | 'deleted_at'>): boolean {
+  return admin.invitePending === true && admin.is_active && !admin.deleted_at;
+}
+
 export function tabCounts(admins: readonly AdminRow[]): Record<StatusTab, number> {
   const counts: Record<StatusTab, number> = { all: admins.length, active: 0, inactive: 0, deleted: 0 };
   for (const admin of admins) counts[statusOf(admin)] += 1;
@@ -278,10 +285,11 @@ export interface AdminCapabilities {
   reactivate: boolean;
   remove: boolean;
   resetMfa: boolean;
+  resendInvite: boolean;
 }
 
 const NO_CAPABILITIES: AdminCapabilities = {
-  edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: false,
+  edit: false, revoke: false, deactivate: false, reactivate: false, remove: false, resetMfa: false, resendInvite: false,
 };
 
 export function isSelf(admin: AdminRow, currentAdminId: string | null): boolean {
@@ -298,12 +306,13 @@ export function capabilitiesFor(admin: AdminRow, currentAdminId: string | null):
     reactivate: !admin.is_active,
     remove: !admin.is_active && !admin.is_super_admin,
     resetMfa: !self && admin.security?.mfaStatus === 'active',
+    resendInvite: isInvited(admin) && !self,
   };
 }
 
 export function hasRowActions(capabilities: AdminCapabilities): boolean {
   return capabilities.revoke || capabilities.deactivate || capabilities.reactivate || capabilities.remove
-    || capabilities.resetMfa;
+    || capabilities.resetMfa || capabilities.resendInvite;
 }
 
 export const ACTOR_TWO_STEP_FIRST = 'Set up two-step sign-in on your Profile first.';
@@ -458,11 +467,15 @@ export function superAdminPath(id: string): string {
   return `/api/admin-accounts/${encodeURIComponent(id)}/super-admin`;
 }
 
+export function invitePath(id: string): string {
+  return `/api/admin-accounts/${encodeURIComponent(id)}/invite`;
+}
+
 export type SuperAdminChange = 'make' | 'remove';
 
 export function superAdminChange(admin: AdminRow, currentAdminId: string | null): SuperAdminChange | null {
   if (admin.deleted_at) return null;
-  if (!admin.is_super_admin) return admin.is_active ? 'make' : null;
+  if (!admin.is_super_admin) return admin.is_active && !isInvited(admin) ? 'make' : null;
   return currentAdminId !== null && admin.id !== currentAdminId ? 'remove' : null;
 }
 
@@ -772,8 +785,6 @@ export interface EditorDraft {
   username: string;
   email: string;
   roleTitle: string;
-  password: string;
-  confirmPassword: string;
 }
 
 export interface EditableValues {
@@ -785,8 +796,6 @@ export const EMPTY_DRAFT: EditorDraft = {
   username: '',
   email: '',
   roleTitle: '',
-  password: '',
-  confirmPassword: '',
 };
 
 export function valuesOf(admin: AdminRow): EditableValues {
@@ -798,14 +807,12 @@ export function draftFor(admin: AdminRow | null): EditorDraft {
   return { ...EMPTY_DRAFT, username: admin.username, ...valuesOf(admin) };
 }
 
-export type EditorField = 'username' | 'email' | 'roleTitle' | 'password' | 'confirmPassword';
+export type EditorField = 'username' | 'email' | 'roleTitle';
 
 export const EDITOR_FIELD_ORDER: readonly EditorField[] = [
   'username',
   'email',
   'roleTitle',
-  'password',
-  'confirmPassword',
 ];
 
 export type EditorErrors = Partial<Record<EditorField, string>>;
@@ -825,13 +832,6 @@ export function validateDraft(mode: EditorMode, draft: EditorDraft): EditorError
   const title = draft.roleTitle.trim();
   if (!title) errors.roleTitle = 'Enter a title.';
   else if (checkRoleTitle(title)) errors.roleTitle = TITLE_LENGTH_MESSAGE;
-  if (mode === 'create' || draft.password !== '') {
-    const passwordProblem = checkPassword(draft.password);
-    if (passwordProblem) errors.password = passwordProblem;
-  }
-  if (draft.password !== '' && draft.confirmPassword !== draft.password) {
-    errors.confirmPassword = 'The passwords do not match.';
-  }
   return errors;
 }
 
@@ -840,7 +840,6 @@ export function firstError(errors: EditorErrors): EditorField | null {
 }
 
 export function isDraftDirty(mode: EditorMode, draft: EditorDraft, base: EditableValues): boolean {
-  if (draft.password !== '' || draft.confirmPassword !== '') return true;
   if (mode === 'create' && draft.username.trim() !== '') return true;
   return draft.email.trim() !== base.email.trim() || draft.roleTitle.trim() !== base.roleTitle.trim();
 }
@@ -879,53 +878,44 @@ export interface FieldChange {
 export interface EditProposal {
   email: FieldChange | null;
   roleTitle: FieldChange | null;
-  password: boolean;
   revokesSessions: boolean;
   expected: EditExpectation;
 }
 
-export function proposeEdit(live: AdminRow, values: EditableValues, password: string): EditProposal {
+export function proposeEdit(live: AdminRow, values: EditableValues): EditProposal {
   const email = values.email.trim();
   const roleTitle = values.roleTitle.trim();
   const emailChange = email !== (live.email ?? '').trim() ? { before: live.email, after: email } : null;
   const roleChange = roleTitle !== live.role_title.trim() ? { before: live.role_title || null, after: roleTitle } : null;
-  const passwordChange = password !== '';
   const expected: EditExpectation = {};
   if (emailChange) expected.email = live.email;
   if (roleChange) expected.role_title = live.role_title;
   return {
     email: emailChange,
     roleTitle: roleChange,
-    password: passwordChange,
-    revokesSessions: passwordChange || roleChange !== null,
+    revokesSessions: roleChange !== null,
     expected,
   };
 }
 
 export function isEmptyProposal(proposal: EditProposal): boolean {
-  return !proposal.email && !proposal.roleTitle && !proposal.password;
+  return !proposal.email && !proposal.roleTitle;
 }
 
-export function editRequestBody(
-  id: string,
-  proposal: EditProposal,
-  password: string,
-  reason: string,
-): Record<string, unknown> {
+export function editRequestBody(id: string, proposal: EditProposal, reason: string): Record<string, unknown> {
   const body: Record<string, unknown> = { id, reason };
   if (proposal.email) body.email = proposal.email.after;
   if (proposal.roleTitle) body.role_title = proposal.roleTitle.after;
-  if (proposal.password) body.password = password;
   if (Object.keys(proposal.expected).length) body.expected = proposal.expected;
   return body;
 }
 
-export function createRequestBody(draft: EditorDraft, reason: string): Record<string, unknown> {
+export function createRequestBody(draft: EditorDraft, roleId: string | null, reason: string): Record<string, unknown> {
   return {
     username: draft.username.trim(),
     email: draft.email.trim(),
-    password: draft.password,
     role_title: draft.roleTitle.trim(),
+    role_id: roleId,
     reason,
   };
 }
@@ -1128,14 +1118,6 @@ export function rebaseAccess(base: AccessExpected, local: AccessDraft, server: A
   };
 }
 
-export interface AccessHandoff {
-  adminId: string;
-  access: AccessDraft;
-  notice: string;
-}
-
-export const CREATED_WITHOUT_ACCESS = 'The account was created without access.';
-
 export const ACCESS_CHANGED_ELSEWHERE =
   'Another admin changed this account’s access while you were editing. It now shows their change with yours on top, so review it again.';
 
@@ -1155,6 +1137,38 @@ export function toMutationResult(body: ApiBody): MutationResult {
     sessionsRevoked: body.sessions_revoked === true,
     warning: text(body.warning),
   };
+}
+
+export type InviteDelivery = 'sent' | 'not_sent' | 'unknown';
+
+export interface InviteResult {
+  outcome: InviteDelivery;
+  expiresAt: string | null;
+}
+
+function isInviteDelivery(value: unknown): value is InviteDelivery {
+  return value === 'sent' || value === 'not_sent' || value === 'unknown';
+}
+
+export function toInviteResult(value: unknown): InviteResult | null {
+  if (!isRecord(value) || !isInviteDelivery(value.outcome)) return null;
+  return { outcome: value.outcome, expiresAt: text(value.expires_at) };
+}
+
+export interface CreatedAdmin {
+  admin: AdminRow | null;
+  invite: InviteResult;
+  warning: string | null;
+}
+
+export function toCreatedAdmin(body: ApiBody): CreatedAdmin | null {
+  const invite = toInviteResult(body.invite);
+  if (!invite) return null;
+  return { admin: toAdminRow(body.admin), invite, warning: text(body.warning) };
+}
+
+export function toResentInvite(body: ApiBody): InviteResult | null {
+  return toInviteResult(body.invite);
 }
 
 export type StepUpCode = 'REAUTH_REQUIRED' | 'MFA_REQUIRED';
@@ -1239,19 +1253,6 @@ export function accessStepOf(outcome: MutationOutcome<AccessResult> | null | und
       return { kind: 'stale', message: outcome.message };
     case 'refused':
       return { kind: 'refused', message: outcome.message };
-  }
-}
-
-export function createdNotice(stop: AccessStop): string {
-  switch (stop.kind) {
-    case 'cancelled':
-      return `${CREATED_WITHOUT_ACCESS} The access change was cancelled.`;
-    case 'expired':
-      return `${CREATED_WITHOUT_ACCESS} Your session ended before it was saved.`;
-    case 'unknown':
-      return `The account was created. ${stop.message}`;
-    default:
-      return `${CREATED_WITHOUT_ACCESS} ${stop.message}`;
   }
 }
 

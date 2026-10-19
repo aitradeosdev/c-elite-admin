@@ -28,6 +28,7 @@ const ROUTER = {
 };
 
 const PAGE_SOURCE = readFileSync(new URL('../app/login/page.tsx', import.meta.url), 'utf8');
+const PARTS_SOURCE = readFileSync(new URL('../app/login/AuthParts.tsx', import.meta.url), 'utf8');
 const NOW = Date.parse('2026-10-12T09:05:00.000Z');
 
 let model: ModelModule;
@@ -329,7 +330,7 @@ describe('the sign-in page', () => {
     const html = inApp(createElement(LoginPage));
     assert.equal(
       textOf(html),
-      'CE CardElite Admin console Email Username Password Sign in Admin access is granted by a super administrator. Every sign-in attempt is recorded.',
+      'CE CardElite Admin console Email Username Password Forgot your password? Sign in Admin access is granted by a super administrator. Every sign-in attempt is recorded.',
     );
     assert.equal(tagsOf(html, 'div').filter((attrs) => attrs.role === 'radiogroup').length, 1, 'the theme switch is still there');
     const inputs = tagsOf(html, 'input');
@@ -344,6 +345,30 @@ describe('the sign-in page', () => {
 
   test('renders the same with a ?next destination', () => {
     assert.equal(inApp(createElement(LoginPage), 'next=%2Fusers'), inApp(createElement(LoginPage)));
+  });
+
+  test('Forgot your password? sits under the password field and opens the reset page', () => {
+    const html = inApp(createElement(LoginPage));
+    assert.equal(model.FORGOT_LABEL, 'Forgot your password?');
+    assert.equal(model.FORGOT_PATH, '/forgot-password');
+    const links = tagsOf(html, 'a');
+    assert.deepEqual(links, [{ class: 'linkBtn', href: '/forgot-password' }]);
+    const link = html.indexOf('<p class="forgot"><a class="linkBtn" href="/forgot-password">Forgot your password?</a></p>');
+    assert.ok(link > html.indexOf('id="login-password"'), 'after the password input');
+    assert.ok(link < html.indexOf('type="submit"'), 'before Sign in');
+    assert.match(PAGE_SOURCE, /<Link href=\{FORGOT_PATH\} className=\{s\.linkBtn\}>\{FORGOT_LABEL\}<\/Link>/);
+  });
+
+  test('the shell, the form error and the button text come from AuthParts and render as before', () => {
+    const html = inApp(createElement(LoginPage));
+    assert.match(html, /^<main class="page"><div class="themeSlot"><div class="group" role="radiogroup"/);
+    assert.match(html, /<\/div><\/div><section class="panel" aria-labelledby="login-heading"><header class="head"><span class="mark" aria-hidden="true">CE<\/span><div class="headText"><h1 id="login-heading" class="wordmark">CardElite<\/h1><p class="kicker">Admin console<\/p><\/div><\/header><form noValidate="">/);
+    assert.match(html, /<\/form><p class="foot">Admin access is granted by a super administrator\. Every sign-in attempt is recorded\.<\/p><\/section><\/main>$/);
+    assert.match(PAGE_SOURCE, /^import \{ AuthShell, ButtonText, FormError \} from '\.\/AuthParts';$/m);
+    assert.match(PAGE_SOURCE, /<AuthShell headingId="login-heading" foot=\{FOOTNOTE\}>\s*\{body\}\s*<\/AuthShell>/);
+    assert.doesNotMatch(PAGE_SOURCE, /function (?:FormError|ButtonText)|ThemeSwitcher|AlertTriangle|Loader2/);
+    assert.ok(PARTS_SOURCE.startsWith("'use client';"));
+    assert.doesNotMatch(PARTS_SOURCE, /useToast|useConfirm|ToastProvider|ConfirmProvider|lib\/|next\/(?:navigation|headers|server)/);
   });
 
   test('the page needs no toast or confirm provider and never imports server code', () => {

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { Check, Circle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import {
   Badge, Button, Card, CardBody, CardFooter, CardHeader, DetailRow, FieldShell, Input, Notice, SkeletonLines,
   notifySessionExpired, useConfirm, useToast,
 } from '../../_ui';
+import { PasswordRules } from '../../_security/PasswordRules';
 import { apiRequest } from '../../lib/apiClient';
 import {
   CHANGED_MESSAGE,
@@ -20,7 +21,6 @@ import {
   passwordChecklist,
   toPasswordChangeResult,
   validatePasswordDraft,
-  type ChecklistItem,
   type NoticeTone,
   type PasswordChangeOutcome,
   type PasswordDraft,
@@ -30,6 +30,8 @@ import {
 } from './model';
 import { DEVICES_TITLE, TWO_STEP_TITLE } from './securityModel';
 import s from './page.module.css';
+
+export { PasswordRules };
 
 const HIDDEN: Readonly<Record<PasswordField, boolean>> = Object.freeze({ current: false, next: false, confirm: false });
 
@@ -119,27 +121,6 @@ export function ProfileSkeleton() {
         </CardBody>
       </Card>
     </div>
-  );
-}
-
-export interface PasswordRulesProps {
-  id: string;
-  items: readonly ChecklistItem[];
-}
-
-export function PasswordRules({ id, items }: PasswordRulesProps) {
-  return (
-    <ul id={id} className={s.rules} aria-label="Password requirements">
-      {items.map((item) => (
-        <li key={item.id} className={item.met ? s.ruleMet : s.rule}>
-          <span className={s.ruleIcon} aria-hidden>
-            {item.met ? <Check size={14} /> : <Circle size={14} />}
-          </span>
-          <span>{item.label}</span>
-          <span className={s.srOnly}>{item.met ? ', met' : ', not met yet'}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 

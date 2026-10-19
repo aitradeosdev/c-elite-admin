@@ -92,6 +92,10 @@ export const VARIABLE_INFO: Readonly<Record<string, VariableInfo>> = {
   alert_subject: { sample: 'Repeated failed admin logins from 102.89.34.12', hint: 'Alert headline' },
   detail_json: { sample: '{\n  "ip": "102.89.34.12",\n  "count": 12\n}', hint: 'Alert details as formatted JSON' },
   fired_at: { sample: '2026-04-17T09:42:15.000Z', hint: 'When the alert fired, in UTC' },
+  username: { sample: 'ada', hint: 'Admin username' },
+  inviter: { sample: '@owner', hint: 'Username of the super admin who sent the invitation' },
+  link: { sample: 'https://admin.example.com/set-password#sample', hint: 'Single-use link to choose a password' },
+  expires_at: { sample: '19/10/2026, 14:30 WAT', hint: 'When the link stops working' },
 };
 
 export function variableHint(name: string): string | null {

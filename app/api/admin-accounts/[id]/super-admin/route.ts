@@ -16,6 +16,7 @@ const OWN_STATUS = 'You cannot remove your own super admin status. Another super
 const ALREADY_SUPER = 'This admin is already a super admin.';
 const NOT_SUPER = 'This admin is not a super admin.';
 const INACTIVE = 'This admin is deactivated. Reactivate the account before making it a super admin.';
+const INVITE_PENDING = 'This admin has not accepted their invitation yet.';
 const LAST_SUPER_ADMIN = 'Cannot remove the last active super admin.';
 const SAVE_FAILED = 'The super admin change could not be confirmed. Reload the account and try again.';
 const UNREADABLE = 'The super admin change returned a result that could not be read.';
@@ -99,6 +100,8 @@ function refusal(reason: string, make: boolean): RpcFailure | null {
       return failure('STATE_CONFLICT', make ? ALREADY_SUPER : NOT_SUPER, { reason });
     case 'inactive':
       return failure('STATE_CONFLICT', INACTIVE, { reason });
+    case 'invite_pending':
+      return failure('STATE_CONFLICT', INVITE_PENDING, { reason });
     case 'last_super_admin':
       return failure('STATE_CONFLICT', LAST_SUPER_ADMIN, { reason });
     default:

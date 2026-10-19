@@ -304,6 +304,49 @@
   color: var(--fg-tertiary);
 }
 
+.rules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.rule,
+.ruleMet {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--fg-tertiary);
+}
+
+.ruleMet {
+  color: var(--tone-success-fg);
+}
+
+.ruleIcon {
+  flex: none;
+  display: inline-flex;
+  padding-top: 2px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (pointer: coarse), (max-width: 640px) {
   .appLink {
     display: inline-flex;
@@ -335,5 +378,11 @@
   .deviceAction {
     flex-basis: 100%;
     padding-left: calc(32px + var(--space-3));
+  }
+}
+
+@container (min-width: 560px) {
+  .rules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

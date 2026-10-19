@@ -59,10 +59,12 @@ export const OWN_PASSWORD_RULES: ReadonlyArray<{ id: OwnPasswordRule; label: str
   { id: 'personal', label: 'Does not contain your username or email name (before the @)' },
 ];
 
+export const DIFFERENT_PASSWORD_MESSAGE = 'Password must be different from your current password.';
+
 const OWN_PASSWORD_MESSAGES: Readonly<Record<OwnPasswordRule, string>> = {
   ...PASSWORD_MESSAGES,
   bytes: `Password must be ${PASSWORD_MAX_BYTES} bytes or fewer. Emoji and accented letters take more than one byte each.`,
-  different: 'Password must be different from your current password.',
+  different: DIFFERENT_PASSWORD_MESSAGE,
   personal: 'Password must not contain your username or the part of your email before the @.',
 };
 

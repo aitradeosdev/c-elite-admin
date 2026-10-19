@@ -589,6 +589,23 @@ describe('email preview document', () => {
     assert.equal(email.plainTextOf('<style>p{margin:0}</style><p>A &amp; B</p>\n<p>C</p>'), 'p{margin:0}A &amp; B C');
   });
 
+  test('the admin link emails keep the link whole in the plain-text part', { skip: !existsSync(SCHEMA_FILE) }, () => {
+    const schema = readFileSync(SCHEMA_FILE, 'utf8');
+    const link = `https://admin.example.com/set-password#${'A'.repeat(21)}-_${'z'.repeat(20)}`;
+    const vars = { username: 'ada', inviter: '@owner', link, expires_at: '19 Oct 2026, 14:30 WAT' };
+    for (const key of ['admin_invite', 'admin_password_reset']) {
+      const start = schema.indexOf(`('${key}',`);
+      assert.ok(start > 0, key);
+      const seed = schema.slice(start, schema.indexOf('ARRAY[', start));
+      const literals = [...seed.matchAll(/'((?:[^']|'')*)'/g)].map((match) => match[1].replace(/''/g, "'"));
+      const rendered = rules.renderTemplate(literals.slice(2, -1).join(''), vars, 'html');
+      assert.ok(rendered.includes(`<a href="${link}"`), key);
+      const text = email.plainTextOf(rendered);
+      assert.ok(text.includes(` ${link} `), `${key}: ${text}`);
+      assert.doesNotMatch(text, /\{\w+\}/, key);
+    }
+  });
+
   test('remote references are counted and samples are limited to template variables', () => {
     assert.equal(
       email.remoteReferenceCount('<img src="https://a/x.png"><td background=\'http://b/y.png\'><div style="background:url(https://c/z.png)">'),
