@@ -484,6 +484,12 @@ describe('cards catalog countries', () => {
     assert.equal(countries.flagOf('USA'), '');
   });
 
+  test('Europe is offered with the euro and the EU flag', () => {
+    assert.deepEqual(countries.isoCountry('eu'), { code: 'EU', name: 'Europe', symbol: '€', currency: 'EUR' });
+    assert.equal(countries.flagOf('EU'), '\u{1F1EA}\u{1F1FA}');
+    assert.equal(countries.countryOptions().find((option) => option.value === 'EU')?.description, 'EU · EUR · €');
+  });
+
   test('every listed country has a unique code, a symbol and a three-letter currency code', () => {
     const codes = countries.ISO_COUNTRIES.map((entry) => entry.code);
     assert.equal(new Set(codes).size, codes.length);

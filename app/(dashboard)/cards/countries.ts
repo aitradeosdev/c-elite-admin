@@ -76,6 +76,7 @@ const RAW_COUNTRIES: ReadonlyArray<IsoCountry> = [
   { code: 'EE', name: 'Estonia', symbol: '€', currency: 'EUR' },
   { code: 'SZ', name: 'Eswatini', symbol: 'E', currency: 'SZL' },
   { code: 'ET', name: 'Ethiopia', symbol: 'Br', currency: 'ETB' },
+  { code: 'EU', name: 'Europe', symbol: '€', currency: 'EUR' },
   { code: 'FJ', name: 'Fiji', symbol: 'FJ$', currency: 'FJD' },
   { code: 'FI', name: 'Finland', symbol: '€', currency: 'EUR' },
   { code: 'FR', name: 'France', symbol: '€', currency: 'EUR' },
