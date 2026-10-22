@@ -8,7 +8,7 @@ import {
   readId, readReorderIds, sameBrandName,
 } from '../../(dashboard)/cards/catalogRules';
 
-const CARD_COLUMNS = 'id, name, logo_url, is_active, sort_order, created_at';
+const CARD_COLUMNS = 'id, name, logo_url, info_text, is_active, sort_order, created_at';
 const COUNTRY_COLUMNS = 'id, card_id, country_code, country_name, currency_symbol, is_active';
 const PAGE_ROWS = 1000;
 const UNIQUE_VIOLATION = '23505';
@@ -23,6 +23,7 @@ interface CardRow {
   id: string;
   name: string | null;
   logo_url: string | null;
+  info_text: string | null;
   is_active: boolean | null;
   sort_order: number | null;
   created_at: string | null;

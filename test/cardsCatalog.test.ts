@@ -51,7 +51,7 @@ function country(id: string, code: string, name: string, active = true, symbol =
 }
 
 function brand(id: string, name: string, sortOrder: number, extra: Partial<CatalogCard> = {}): CatalogCard {
-  return { id, name, logo_url: null, is_active: true, sort_order: sortOrder, created_at: null, countries: [], ...extra };
+  return { id, name, logo_url: null, info_text: null, is_active: true, sort_order: sortOrder, created_at: null, countries: [], ...extra };
 }
 
 function failure(patch: Partial<ApiFailure>): ApiResult<never> {
@@ -80,7 +80,7 @@ function respond(status: number, body: unknown): void {
 describe('cards catalog rules: brand input', () => {
   test('a new brand is trimmed, active by default and placed at position 0 when no order is sent', () => {
     const checked = rules.checkCardCreate({ name: '  Amazon  ' });
-    assert.deepEqual(checked, { ok: true, value: { name: 'Amazon', logo_url: null, is_active: true, sort_order: 0 } });
+    assert.deepEqual(checked, { ok: true, value: { name: 'Amazon', logo_url: null, info_text: null, is_active: true, sort_order: 0 } });
   });
 
   test('a new brand keeps the mobile request shape, including a sort order and an inactive flag', () => {
@@ -89,7 +89,7 @@ describe('cards catalog rules: brand input', () => {
     });
     assert.deepEqual(checked, {
       ok: true,
-      value: { name: 'Steam', logo_url: 'https://cdn.example.com/steam.png', is_active: false, sort_order: 7 },
+      value: { name: 'Steam', logo_url: 'https://cdn.example.com/steam.png', info_text: null, is_active: false, sort_order: 7 },
     });
   });
 
@@ -104,6 +104,22 @@ describe('cards catalog rules: brand input', () => {
     assert.equal(rules.checkCardCreate({ name: 'A', logo_url: `https://${'a'.repeat(500)}` }).ok, false);
     const blank = rules.checkCardCreate({ name: 'A', logo_url: '   ' });
     assert.equal(blank.ok && blank.value.logo_url, null);
+  });
+
+  test('information text is trimmed, at most 300 characters, and a blank value means no text', () => {
+    assert.equal(rules.INFO_TEXT_MAX, 300);
+    const trimmed = rules.checkCardCreate({ name: 'A', info_text: '  Rates vary.  ' });
+    assert.equal(trimmed.ok && trimmed.value.info_text, 'Rates vary.');
+    for (const blank of ['', '   ', null, undefined]) {
+      const checked = rules.checkCardCreate({ name: 'A', info_text: blank });
+      assert.equal(checked.ok && checked.value.info_text, null);
+    }
+    assert.equal(rules.checkCardCreate({ name: 'A', info_text: 'x'.repeat(300) }).ok, true);
+    assert.equal(rules.checkCardCreate({ name: 'A', info_text: ` ${'x'.repeat(300)} ` }).ok, true);
+    assert.deepEqual(
+      rules.checkCardCreate({ name: 'A', info_text: 'x'.repeat(301) }),
+      { ok: false, message: 'Information text can be at most 300 characters.' },
+    );
   });
 
   test('sort orders are truncated and clamped to 0..10000', () => {
@@ -133,6 +149,16 @@ describe('cards catalog rules: brand input', () => {
     );
     assert.equal(rules.checkCardPatch({ name: '' }).ok, false);
     assert.equal(rules.checkCardPatch({ logo_url: 'ftp://x' }).ok, false);
+  });
+
+  test('a brand patch sets, clears or leaves the information text', () => {
+    assert.deepEqual(rules.checkCardPatch({ info_text: ' New text ' }), { ok: true, value: { info_text: 'New text' } });
+    assert.deepEqual(rules.checkCardPatch({ info_text: '' }), { ok: true, value: { info_text: null } });
+    assert.deepEqual(rules.checkCardPatch({ info_text: null }), { ok: true, value: { info_text: null } });
+    assert.deepEqual(rules.checkCardPatch({ info_text: 'x'.repeat(301) }), {
+      ok: false, message: 'Information text can be at most 300 characters.',
+    });
+    assert.deepEqual(rules.checkCardPatch({ name: 'Apple' }), { ok: true, value: { name: 'Apple' } });
   });
 });
 
@@ -185,6 +211,13 @@ describe('cards catalog rules: diffs, names and logos', () => {
     assert.deepEqual(rules.diffFields({ logo_url: null }, { logo_url: null }).fields, []);
   });
 
+  test('a diff records information text being removed, so the audit shows before and after', () => {
+    assert.deepEqual(rules.diffFields({ info_text: 'Old' }, { info_text: null }), {
+      fields: ['info_text'], before: { info_text: 'Old' }, after: { info_text: null },
+    });
+    assert.deepEqual(rules.diffFields({ info_text: null }, { info_text: null }).fields, []);
+  });
+
   test('brand names are compared without case or surrounding spaces', () => {
     const rows = [{ id: ID.amazon, name: 'Amazon' }, { id: ID.apple, name: null }];
     assert.equal(rules.sameBrandName(' amazon ', 'AMAZON'), true);
@@ -220,7 +253,7 @@ describe('cards catalog model: parsing and receipts', () => {
       success: true,
       cards: [
         {
-          id: ID.amazon, name: ' Amazon ', logo_url: '', is_active: true, sort_order: '3', created_at: '2026-01-01',
+          id: ID.amazon, name: ' Amazon ', logo_url: '', info_text: '  Rates vary.  ', is_active: true, sort_order: '3', created_at: '2026-01-01',
           countries: [
             { id: COUNTRY_ID.us, country_code: 'us', country_name: null, currency_symbol: null, is_active: true },
             { id: '', country_code: 'GB' },
@@ -237,11 +270,13 @@ describe('cards catalog model: parsing and receipts', () => {
     const [amazon, apple] = catalog.cards;
     assert.equal(amazon.name, 'Amazon');
     assert.equal(amazon.logo_url, null);
+    assert.equal(amazon.info_text, 'Rates vary.');
     assert.equal(amazon.sort_order, 3);
     assert.deepEqual(amazon.countries, [
       { id: COUNTRY_ID.us, country_code: 'US', country_name: 'US', currency_symbol: '', is_active: true },
     ]);
     assert.equal(apple.name, '');
+    assert.equal(apple.info_text, null);
     assert.equal(apple.is_active, false);
     assert.equal(model.brandLabel(apple), 'Unnamed brand');
   });
@@ -254,12 +289,14 @@ describe('cards catalog model: parsing and receipts', () => {
   test('receipts read the saved rows and any audit warning the route sends', () => {
     assert.equal(model.toCreatedCard({ success: true }), null);
     const created = model.toCreatedCard({
-      success: true, id: ID.steam, card: { id: ID.steam, name: 'Steam', is_active: false, sort_order: 4 },
+      success: true, id: ID.steam, card: { id: ID.steam, name: 'Steam', info_text: ' Rates vary. ', is_active: false, sort_order: 4 },
       warning: 'The change was saved, but it could not be written to the audit log.',
     });
     assert.equal(created?.card?.sort_order, 4);
+    assert.equal(created?.card?.info_text, 'Rates vary.');
     assert.match(created?.warning ?? '', /audit log/);
     assert.equal(model.toCardReceipt({ success: true }).card, null);
+    assert.equal(model.toCardReceipt({ card: { id: ID.steam, info_text: '   ' } }).card?.info_text, null);
     assert.equal(model.toCountryReceipt({ country: { id: COUNTRY_ID.gb, country_code: 'gb' } }).country?.country_code, 'GB');
     assert.equal(model.toUploadReceipt({ success: true }), null);
     assert.equal(model.toUploadReceipt({ url: 'https://cdn.example.com/x.png' })?.url, 'https://cdn.example.com/x.png');
@@ -353,16 +390,25 @@ describe('cards catalog model: ordering', () => {
 
   test('a created brand is appended once, after the others', () => {
     const list = [brand(ID.amazon, 'Amazon', 0), brand(ID.apple, 'Apple', 5)];
-    const saved = { id: ID.steam, name: 'Steam', logo_url: null, is_active: false, sort_order: null };
+    const saved = { id: ID.steam, name: 'Steam', logo_url: null, info_text: null, is_active: false, sort_order: null };
     const next = model.appendCard(list, saved);
     assert.deepEqual(next.map((card) => [card.name, card.sort_order]), [['Amazon', 0], ['Apple', 5], ['Steam', 6]]);
     assert.equal(model.appendCard(next, { ...saved, name: 'Steam Wallet' }).length, 3);
+  });
+
+  test('a saved brand replaces the listed information text, including its removal', () => {
+    const list = [brand(ID.amazon, 'Amazon', 0, { info_text: 'Old text' })];
+    const saved = { id: ID.amazon, name: 'Amazon', logo_url: null, info_text: 'New text', is_active: true, sort_order: 0 };
+    const changed = model.mergeSavedCard(list, saved);
+    assert.equal(changed[0].info_text, 'New text');
+    assert.equal(model.mergeSavedCard(changed, { ...saved, info_text: null })[0].info_text, null);
+    assert.equal(model.appendCard(list, { ...saved, id: ID.steam, name: 'Steam' })[1].info_text, 'New text');
   });
 });
 
 describe('cards catalog model: brand edits', () => {
   test('changes ignore surrounding spaces in the name', () => {
-    const base = { name: 'Amazon', logo_url: null, is_active: true };
+    const base = { name: 'Amazon', logo_url: null, info_text: '', is_active: true };
     assert.deepEqual(model.brandChanges(base, { ...base, name: ' Amazon ' }), []);
     assert.deepEqual(model.brandChanges(base, { ...base, is_active: false }), [
       { field: 'is_active', before: true, after: false },
@@ -370,11 +416,11 @@ describe('cards catalog model: brand edits', () => {
   });
 
   test('a rebase keeps another admin’s changes and flags fields both of you changed', () => {
-    const base = { name: 'Amazon', logo_url: null, is_active: true };
-    const mine = { name: 'Amazon US', logo_url: null, is_active: true };
-    const theirs = { name: 'Amazon', logo_url: 'https://x.example/a.png', is_active: false };
+    const base = { name: 'Amazon', logo_url: null, info_text: '', is_active: true };
+    const mine = { name: 'Amazon US', logo_url: null, info_text: '', is_active: true };
+    const theirs = { name: 'Amazon', logo_url: 'https://x.example/a.png', info_text: '', is_active: false };
     const merged = model.rebaseBrand(base, mine, theirs);
-    assert.deepEqual(merged.draft, { name: 'Amazon US', logo_url: 'https://x.example/a.png', is_active: false });
+    assert.deepEqual(merged.draft, { name: 'Amazon US', logo_url: 'https://x.example/a.png', info_text: '', is_active: false });
     assert.deepEqual(merged.pending, [{ field: 'name', before: 'Amazon', after: 'Amazon US' }]);
     assert.deepEqual(merged.conflicts, []);
 
@@ -391,7 +437,27 @@ describe('cards catalog model: brand edits', () => {
   });
 
   test('new brands start hidden from users', () => {
-    assert.deepEqual(model.NEW_BRAND, { name: '', logo_url: null, is_active: false });
+    assert.deepEqual(model.NEW_BRAND, { name: '', logo_url: null, info_text: '', is_active: false });
+  });
+
+  test('information text edits ignore surrounding spaces, and clearing the box removes the text', () => {
+    assert.equal(model.brandDraftOf(brand(ID.amazon, 'Amazon', 0)).info_text, '');
+    const base = model.brandDraftOf(brand(ID.amazon, 'Amazon', 0, { info_text: 'Rates vary.' }));
+    assert.equal(base.info_text, 'Rates vary.');
+    assert.deepEqual(model.brandChanges(base, { ...base, info_text: '  Rates vary.  ' }), []);
+    const cleared = model.brandChanges(base, { ...base, info_text: '   ' });
+    assert.deepEqual(cleared, [{ field: 'info_text', before: 'Rates vary.', after: '' }]);
+    assert.deepEqual(model.brandPatch(ID.amazon, cleared), { type: 'card', id: ID.amazon, info_text: '' });
+  });
+
+  test('a rebase keeps another admin’s information text and flags it when both of you changed it', () => {
+    const base = { name: 'Amazon', logo_url: null, info_text: 'Old', is_active: true };
+    const kept = model.rebaseBrand(base, { ...base, name: 'Amazon US' }, { ...base, info_text: 'Theirs' });
+    assert.equal(kept.draft.info_text, 'Theirs');
+    assert.deepEqual(kept.conflicts, []);
+    const clash = model.rebaseBrand(base, { ...base, info_text: ' Mine ' }, { ...base, info_text: 'Theirs' });
+    assert.deepEqual(clash.conflicts, ['info_text']);
+    assert.deepEqual(clash.pending, [{ field: 'info_text', before: 'Theirs', after: 'Mine' }]);
   });
 });
 
@@ -930,5 +996,27 @@ describe('cards route: reorder through admin_reorder_cards', () => {
       assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR'));
     }
     assert.deepEqual(route.calls, []);
+  });
+});
+
+const SCHEMA_FILE = fileURLToPath(new URL('../../schema.sql', import.meta.url));
+
+describe('information text: canonical SQL and the cards route', () => {
+  test('the column, its check and the app catalog use the console’s name and limit', { skip: !existsSync(SCHEMA_FILE) }, () => {
+    const sql = readFileSync(SCHEMA_FILE, 'utf8');
+    assert.ok(sql.includes('ALTER TABLE cards ADD COLUMN IF NOT EXISTS info_text text;'));
+    const check = sql.match(
+      /^ALTER TABLE cards ADD CONSTRAINT cards_info_text_check CHECK \(info_text IS NULL OR \(info_text = btrim\(info_text\) AND char_length\(info_text\) BETWEEN 1 AND (\d+)\)\);$/m,
+    );
+    assert.equal(Number(check?.[1]), rules.INFO_TEXT_MAX);
+    const start = sql.indexOf('CREATE OR REPLACE FUNCTION get_card_catalog(');
+    assert.ok(start >= 0);
+    const body = sql.slice(start, sql.indexOf('$$;', start));
+    assert.ok(body.includes('(SELECT name, logo_url, info_text FROM cards WHERE id = p_card_id AND is_active = true)'));
+  });
+
+  test('the route reads, writes and returns the information text with every brand', () => {
+    const source = readFileSync(resolve(APP_DIR, 'api', 'cards', 'route.ts'), 'utf8');
+    assert.match(source, /^const CARD_COLUMNS = 'id, name, logo_url, info_text, is_active, sort_order, created_at';$/m);
   });
 });

@@ -4,11 +4,11 @@ import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } 
 import { useRouter } from 'next/navigation';
 import { ImageUp, Trash2 } from 'lucide-react';
 import {
-  Button, FieldShell, Input, Modal, Notice, Toggle, useConfirm, useToast,
+  Button, FieldShell, Input, Modal, Notice, Textarea, Toggle, useConfirm, useToast,
   type ConfirmDetail,
 } from '../../_ui';
 import { apiRequest } from '../../lib/apiClient';
-import { CARD_NAME_MAX, LOGO_ACCEPT, LOGO_MAX_MB, cardNameProblem, logoFileProblem } from './catalogRules';
+import { CARD_NAME_MAX, INFO_TEXT_MAX, LOGO_ACCEPT, LOGO_MAX_MB, cardNameProblem, logoFileProblem, readInfoText } from './catalogRules';
 import { BrandMark, LogoValue, ValueDiff, useLeaveWarning } from './CatalogParts';
 import {
   NEW_BRAND, brandChangeConsequences, brandChanges, brandDraftOf, brandLabel, brandPatch, classifyMutation,
@@ -33,11 +33,13 @@ export interface BrandEditorProps {
 const FIELD_LABEL: Readonly<Record<BrandField, string>> = {
   name: 'Name',
   logo_url: 'Logo',
+  info_text: 'Information text',
   is_active: 'Status',
 };
 
 const CHECK_FAILED = 'The latest values could not be checked, so nothing was saved. Try again.';
 const LOGO_HELP = `PNG, JPG or WebP, up to ${LOGO_MAX_MB} MB.`;
+const INFO_TEXT_HELP = `Optional. Shown in the app above “Select Currency” when users sell this brand. Up to ${INFO_TEXT_MAX} characters.`;
 
 function changeValue(change: BrandChange, name: string, side: 'before' | 'after') {
   const value = change[side];
@@ -179,6 +181,7 @@ export function BrandEditor({ card, cards, reload, onCreated, onUpdated, onStale
           id: outcome.data.id,
           name,
           logo_url: draft.logo_url,
+          info_text: readInfoText(draft.info_text),
           is_active: draft.is_active,
           sort_order: sortOrder,
         };
@@ -215,7 +218,7 @@ export function BrandEditor({ card, cards, reload, onCreated, onUpdated, onStale
     const sortOrder = nextSortOrder(cards);
     const result = await apiRequest('/api/cards', {
       method: 'POST',
-      body: { type: 'card', name, is_active: draft.is_active, logo_url: draft.logo_url, sort_order: sortOrder },
+      body: { type: 'card', name, is_active: draft.is_active, logo_url: draft.logo_url, info_text: readInfoText(draft.info_text), sort_order: sortOrder },
       select: toCreatedCard,
     });
     reportCreate(classifyMutation(result), name, sortOrder);
@@ -275,7 +278,7 @@ export function BrandEditor({ card, cards, reload, onCreated, onUpdated, onStale
       onUpdated(null);
       return;
     }
-    const reviewed = rebase.conflicts.length > 0 || rebase.pending.some((change) => change.field !== 'logo_url');
+    const reviewed = rebase.conflicts.length > 0 || rebase.pending.some((change) => change.field !== 'logo_url' && change.field !== 'info_text');
     if (!reviewed) {
       setPhase('saving');
       reportUpdate(classifyMutation(await send(live.id, rebase.pending)), previousName, nextName);
@@ -422,6 +425,16 @@ export function BrandEditor({ card, cards, reload, onCreated, onUpdated, onStale
               onChange={(event) => void uploadLogo(event)}
             />
           </div>
+        </FieldShell>
+
+        <FieldShell label="Information text" help={INFO_TEXT_HELP}>
+          <Textarea
+            rows={3}
+            value={draft.info_text}
+            maxLength={INFO_TEXT_MAX}
+            readOnly={busy}
+            onChange={(event) => update({ info_text: event.target.value })}
+          />
         </FieldShell>
 
         <div className={s.toggleField}>

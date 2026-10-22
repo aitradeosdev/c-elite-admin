@@ -13,6 +13,7 @@ export interface CatalogCard {
   id: string;
   name: string;
   logo_url: string | null;
+  info_text: string | null;
   is_active: boolean;
   sort_order: number;
   created_at: string | null;
@@ -27,6 +28,7 @@ export interface SavedCard {
   id: string;
   name: string | null;
   logo_url: string | null;
+  info_text: string | null;
   is_active: boolean;
   sort_order: number | null;
 }
@@ -64,6 +66,7 @@ export type MoveTarget = 'up' | 'down' | 'top' | 'bottom';
 export interface BrandDraft {
   name: string;
   logo_url: string | null;
+  info_text: string;
   is_active: boolean;
 }
 
@@ -95,9 +98,9 @@ export interface CountrySummary {
   unavailable: number;
 }
 
-export const NEW_BRAND: Readonly<BrandDraft> = Object.freeze({ name: '', logo_url: null, is_active: false });
+export const NEW_BRAND: Readonly<BrandDraft> = Object.freeze({ name: '', logo_url: null, info_text: '', is_active: false });
 
-const BRAND_FIELDS: ReadonlyArray<BrandField> = ['name', 'logo_url', 'is_active'];
+const BRAND_FIELDS: ReadonlyArray<BrandField> = ['name', 'logo_url', 'info_text', 'is_active'];
 
 const REFUSED_STATUSES: ReadonlySet<number> = new Set([403, 404, 409]);
 
@@ -148,6 +151,7 @@ export function readCard(raw: unknown): CatalogCard | null {
     id,
     name: text(raw.name) ?? '',
     logo_url: text(raw.logo_url),
+    info_text: text(raw.info_text),
     is_active: raw.is_active === true,
     sort_order: sortValue(raw.sort_order),
     created_at: text(raw.created_at),
@@ -168,6 +172,7 @@ function readSavedCard(raw: unknown): SavedCard | null {
     id,
     name: typeof raw.name === 'string' ? raw.name.trim() : null,
     logo_url: text(raw.logo_url),
+    info_text: text(raw.info_text),
     is_active: raw.is_active === true,
     sort_order: raw.sort_order === undefined || raw.sort_order === null ? null : sortValue(raw.sort_order),
   };
@@ -330,12 +335,12 @@ export function countrySummary(countries: ReadonlyArray<CatalogCountry>, max = 3
   };
 }
 
-export function brandDraftOf(card: Pick<CatalogCard, 'name' | 'logo_url' | 'is_active'>): BrandDraft {
-  return { name: card.name, logo_url: card.logo_url, is_active: card.is_active };
+export function brandDraftOf(card: Pick<CatalogCard, 'name' | 'logo_url' | 'info_text' | 'is_active'>): BrandDraft {
+  return { name: card.name, logo_url: card.logo_url, info_text: card.info_text ?? '', is_active: card.is_active };
 }
 
 function fieldValue(draft: BrandDraft, field: BrandField): BrandDraft[BrandField] {
-  return field === 'name' ? draft.name.trim() : draft[field];
+  return field === 'name' || field === 'info_text' ? draft[field].trim() : draft[field];
 }
 
 export function brandChanges(base: BrandDraft, draft: BrandDraft): BrandChange[] {
@@ -351,6 +356,7 @@ export function rebaseBrand(base: BrandDraft, draft: BrandDraft, live: BrandDraf
   const merged: BrandDraft = {
     name: mine.has('name') ? draft.name.trim() : live.name,
     logo_url: mine.has('logo_url') ? draft.logo_url : live.logo_url,
+    info_text: mine.has('info_text') ? draft.info_text.trim() : live.info_text,
     is_active: mine.has('is_active') ? draft.is_active : live.is_active,
   };
   const conflicts = BRAND_FIELDS.filter(
@@ -380,6 +386,7 @@ export function mergeSavedCard(cards: ReadonlyArray<CatalogCard>, saved: SavedCa
           ...card,
           name: saved.name ?? card.name,
           logo_url: saved.logo_url,
+          info_text: saved.info_text,
           is_active: saved.is_active,
           sort_order: saved.sort_order ?? card.sort_order,
         }
@@ -395,6 +402,7 @@ export function appendCard(cards: ReadonlyArray<CatalogCard>, saved: SavedCard):
       id: saved.id,
       name: saved.name ?? '',
       logo_url: saved.logo_url,
+      info_text: saved.info_text,
       is_active: saved.is_active,
       sort_order: saved.sort_order ?? nextSortOrder(cards),
       created_at: null,

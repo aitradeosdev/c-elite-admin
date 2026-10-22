@@ -5,6 +5,7 @@ export const CARD_NAME_MAX = 80;
 export const COUNTRY_NAME_MAX = 80;
 export const CURRENCY_SYMBOL_MAX = 8;
 export const LOGO_URL_MAX = 500;
+export const INFO_TEXT_MAX = 300;
 export const SORT_ORDER_MAX = 10000;
 export const REORDER_MAX = 200;
 
@@ -23,6 +24,7 @@ type Body = Readonly<Record<string, unknown>>;
 export interface CardFields {
   name: string;
   logo_url: string | null;
+  info_text: string | null;
   is_active: boolean;
   sort_order: number;
 }
@@ -107,6 +109,17 @@ export function logoUrlProblem(url: string | null): string | null {
   return null;
 }
 
+export function readInfoText(value: unknown): string | null {
+  const text = cleanText(value);
+  return text === '' ? null : text;
+}
+
+export function infoTextProblem(text: string | null): string | null {
+  if (!text) return null;
+  if (text.length > INFO_TEXT_MAX) return `Information text can be at most ${INFO_TEXT_MAX} characters.`;
+  return null;
+}
+
 export function logoExtension(fileName: string): string {
   return (fileName.split('.').pop() || '').toLowerCase();
 }
@@ -159,6 +172,12 @@ function checkLogo(value: unknown): Checked<string | null> {
   return problem ? refuse(problem) : accept(url);
 }
 
+function checkInfoText(value: unknown): Checked<string | null> {
+  const text = readInfoText(value);
+  const problem = infoTextProblem(text);
+  return problem ? refuse(problem) : accept(text);
+}
+
 function checkCode(value: unknown): Checked<string> {
   const code = normalizeCountryCode(value);
   const problem = countryCodeProblem(code);
@@ -182,9 +201,12 @@ export function checkCardCreate(body: Body): Checked<CardFields> {
   if (!name.ok) return name;
   const logo = checkLogo(body.logo_url);
   if (!logo.ok) return logo;
+  const info = checkInfoText(body.info_text);
+  if (!info.ok) return info;
   return accept({
     name: name.value,
     logo_url: logo.value,
+    info_text: info.value,
     is_active: readFlag(body.is_active, true),
     sort_order: clampSortOrder(body.sort_order),
   });
@@ -201,6 +223,11 @@ export function checkCardPatch(body: Body): Checked<CardChanges> {
     const logo = checkLogo(body.logo_url);
     if (!logo.ok) return logo;
     changes.logo_url = logo.value;
+  }
+  if (body.info_text !== undefined) {
+    const info = checkInfoText(body.info_text);
+    if (!info.ok) return info;
+    changes.info_text = info.value;
   }
   if (body.is_active !== undefined) changes.is_active = readFlag(body.is_active, false);
   if (body.sort_order !== undefined) changes.sort_order = clampSortOrder(body.sort_order);
