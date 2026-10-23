@@ -77,7 +77,7 @@ export function reviewOptions({ rows, consequences, conflicts, money }: ReviewIn
   const notes = [...conflicts, ...consequences];
   return {
     tone: money ? 'financial' : 'danger',
-    title: count === 1 ? 'Apply 1 change to Admin Settings?' : `Apply ${count} changes to Admin Settings?`,
+    title: count === 1 ? 'Apply 1 change to Platform Settings?' : `Apply ${count} changes to Platform Settings?`,
     message: 'The new values take effect for every user as soon as you apply them, and the change is recorded in the audit log.',
     details: rows.map((row) => ({
       label: row.label,

@@ -396,7 +396,7 @@ export function liveIssue(snapshot: BalanceSnapshot, now: number): LiveIssue | n
     return {
       kind: 'no_gateway',
       title: 'No payout gateway is available',
-      message: 'The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed. Choose a primary gateway that is turned on in Admin Settings.',
+      message: 'The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed. Choose a primary gateway that is turned on in Platform Settings.',
     };
   }
   const provider = PROVIDER_LABELS[snapshot.gateway];

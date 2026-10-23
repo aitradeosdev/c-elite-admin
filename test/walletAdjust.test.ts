@@ -701,7 +701,7 @@ describe('the form checker and the kobo preview', () => {
     for (const limits of [{ per_adjustment: 0, daily: 2000000 }, { per_adjustment: 500000, daily: 0 }]) {
       assert.equal(
         adjust.checkAdjustForm(form({ amount: '1' }), contextOf({ limits })).errors.amount,
-        'Wallet adjustments are switched off: a limit is set to ₦0.00 in Limits & Fees.',
+        'Wallet adjustments are switched off: a limit is set to ₦0.00 in Platform Settings, under Limits & Fees.',
       );
     }
     assert.equal(adjust.checkAdjustForm(form({ amount: '0' }), context).errors.amount, adjust.FORM_MESSAGES.amountZero);

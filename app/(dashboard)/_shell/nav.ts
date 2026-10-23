@@ -22,12 +22,17 @@ export interface NavLeaf {
   icon: LucideIcon;
   detailLabel?: string;
   countKey?: NavCountKey;
+  sectionOf?: NavLeaf;
 }
 
 export interface NavGroup {
   label: string;
   items: NavLeaf[];
 }
+
+export const PLATFORM_SETTINGS: NavLeaf = { key: 'admin_settings', label: 'Platform Settings', href: '/admin-settings', icon: Settings };
+
+export const GENERAL_SECTION_LABEL = 'General';
 
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -78,17 +83,12 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Configuration',
     items: [
-      { key: 'platform_balance',       label: 'Balance',        href: '/platform-balance',       icon: Wallet },
-      { key: 'limits_fees',            label: 'Limits & Fees',  href: '/limits-fees',            icon: SlidersHorizontal },
-      { key: 'bill_settings',          label: 'Bill Settings',  href: '/bill-settings',          icon: Receipt },
-      { key: 'admin_settings',         label: 'Settings',       href: '/admin-settings',         icon: Settings },
-    ],
-  },
-  {
-    label: 'Security',
-    items: [
-      { key: 'anomaly_alerts',         label: 'Anomaly & Alerts', href: '/anomaly-alerts',       icon: ShieldAlert },
-      { key: 'security_limits',        label: 'Rate Limits & IPs', href: '/security-limits',     icon: Shield },
+      PLATFORM_SETTINGS,
+      { key: 'platform_balance',       label: 'Balance',           href: '/admin-settings/platform-balance', icon: Wallet, sectionOf: PLATFORM_SETTINGS },
+      { key: 'limits_fees',            label: 'Limits & Fees',     href: '/admin-settings/limits-fees',      icon: SlidersHorizontal, sectionOf: PLATFORM_SETTINGS },
+      { key: 'bill_settings',          label: 'Bill Settings',     href: '/admin-settings/bill-settings',    icon: Receipt, sectionOf: PLATFORM_SETTINGS },
+      { key: 'anomaly_alerts',         label: 'Anomaly & Alerts',  href: '/admin-settings/anomaly-alerts',   icon: ShieldAlert, sectionOf: PLATFORM_SETTINGS },
+      { key: 'security_limits',        label: 'Rate Limits & IPs', href: '/admin-settings/security-limits',  icon: Shield, sectionOf: PLATFORM_SETTINGS },
     ],
   },
 ];
@@ -113,6 +113,32 @@ export function findNavMatch(pathname: string, groups: readonly NavGroup[] = NAV
     }
   }
   return best;
+}
+
+export function navSections(parent: NavLeaf, groups: readonly NavGroup[]): NavLeaf[] {
+  return groups.flatMap((group) => group.items.filter((leaf) => leaf === parent || leaf.sectionOf === parent));
+}
+
+export interface SidebarItem {
+  leaf: NavLeaf;
+  href: string;
+}
+
+export interface SidebarGroup {
+  label: string;
+  items: SidebarItem[];
+}
+
+export function sidebarGroups(groups: readonly NavGroup[]): SidebarGroup[] {
+  return groups.map((group) => {
+    const items: SidebarItem[] = [];
+    for (const leaf of group.items) {
+      const shown = leaf.sectionOf ?? leaf;
+      if (items.some((item) => item.leaf === shown)) continue;
+      items.push({ leaf: shown, href: leaf.href });
+    }
+    return { label: group.label, items };
+  });
 }
 
 export const PROFILE_HREF = '/profile';
@@ -145,6 +171,8 @@ export interface Crumb {
 export function breadcrumbTrail(pathname: string): Crumb[] {
   const crumb = findBreadcrumb(pathname);
   if (!crumb) return [{ label: hrefMatches(pathname, PROFILE_HREF) ? PROFILE_LABEL : 'Admin', current: true }];
+  const page = findNavMatch(pathname)?.leaf.sectionOf;
+  if (page) return [{ label: crumb.group }, { label: page.label }, { label: crumb.item, current: true }];
   if (!crumb.detail) return [{ label: crumb.group }, { label: crumb.item, current: true }];
   return [
     { label: crumb.group },

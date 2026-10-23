@@ -934,7 +934,7 @@ describe('confirmation dialogs', () => {
       money: model.involvesMoney(edit),
     });
     assert.equal(options.tone, 'financial');
-    assert.equal(options.title, 'Apply 2 changes to Admin Settings?');
+    assert.equal(options.title, 'Apply 2 changes to Platform Settings?');
     assert.deepEqual(options.details?.map((detail) => detail.label), ['Card approval limit', 'Terms of Use URL']);
     assert.equal(options.consequences?.[0], 'Someone else changed Terms of Use URL.');
     assert.equal(options.reason?.required, undefined);
@@ -1356,6 +1356,26 @@ describe('two-step requirement confirms', () => {
     const section = source.indexOf('<SecurityPolicySection />');
     const form = source.indexOf('<form');
     assert.ok(emergency > 0 && emergency < section && section < form);
+  });
+
+  test('the page is the General section of Platform Settings: a section heading under the layout, with its own refusal text', () => {
+    const source = readFileSync(PAGE_FILE, 'utf8');
+    assert.doesNotMatch(source, /PageHeader/);
+    assert.match(source, /^import \{ GENERAL_SECTION_LABEL \} from '\.\.\/_shell\/nav';$/m);
+    assert.match(source, /^import \{ SectionHeading, guardedPath \} from '\.\.\/_config\/ConfigForm';$/m);
+    assert.match(source, /^const TITLE = GENERAL_SECTION_LABEL;$/m);
+    assert.match(
+      source,
+      /^const DENIED_MESSAGE = 'General settings can only be viewed and changed by a super administrator\. Ask one if something here needs to change\.';$/m,
+    );
+    const heading = "<SectionHeading id={headingId('general')} title={TITLE} hint={SUBTITLE} />";
+    assert.equal(source.split(heading).length - 1, 2);
+    assert.equal(source.split('<SectionHeading').length - 1, 2);
+    const loading = source.indexOf(heading);
+    const loaded = source.indexOf(heading, loading + heading.length);
+    assert.ok(loading > source.indexOf('if (!live) {'), 'the loading and error view');
+    assert.ok(loaded > loading && loaded < source.indexOf('<EmergencyCard'), 'the loaded page, above emergency mode');
+    assert.ok(readdirSync(OWNED_DIR).includes('layout.tsx'));
   });
 });
 

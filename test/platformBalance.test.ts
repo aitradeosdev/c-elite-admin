@@ -416,7 +416,7 @@ describe('live balance health', () => {
     assert.deepEqual(model.liveIssue(none, NOW), {
       kind: 'no_gateway',
       title: 'No payout gateway is available',
-      message: 'The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed. Choose a primary gateway that is turned on in Admin Settings.',
+      message: 'The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed. Choose a primary gateway that is turned on in Platform Settings.',
     });
     assert.equal(model.liveIssue(snapshotOf({ gateway_paystack_enabled: 'false' }), NOW)?.kind, 'no_gateway');
     assert.equal(model.sourceText(snapshotOf({ platform_balance_mode: 'live', gateway_paystack_enabled: 'false' })), 'Live balance from the payout gateway');
@@ -847,6 +847,23 @@ describe('cards', () => {
   test('times carry the business zone', () => {
     assert.match(parts.stamp(STAMP) ?? '', /WAT$/);
     assert.equal(parts.stamp(null), null);
+  });
+});
+
+describe('the Balance section of Platform Settings', () => {
+  test('BalanceSection shows its title and subtitle as a section heading with Refresh beside it, and no page header', () => {
+    const source = readFileSync(join(OWNED_DIR, 'BalanceSection.tsx'), 'utf8');
+    assert.doesNotMatch(source, /PageHeader/);
+    assert.match(source, /^import \{ SectionHeading, guardedPath \} from '\.\.\/_config\/ConfigForm';$/m);
+    assert.match(source, /^export default function PlatformBalanceSection\(\) \{$/m);
+    assert.match(source, /^const TITLE = 'Platform Balance';$/m);
+    assert.match(source, /^const SUBTITLE = 'The balance every user sees on the Marketplace screen of the app\. Times are WAT\.';$/m);
+    assert.match(
+      source,
+      /<SectionHeading\s+id=\{`\$\{baseId\}-title`\}\s+title=\{TITLE\}\s+hint=\{SUBTITLE\}\s+actions=\{\(\s*<Button\s+ref=\{refreshRef\}[^]*?onClick=\{\(\) => void refresh\(\)\}\s*>\s*Refresh\s*<\/Button>\s*\)\}\s*\/>/,
+    );
+    assert.equal(readdirSync(OWNED_DIR).includes('page.tsx'), false);
+    assert.ok(readdirSync(OWNED_DIR).includes('BalanceSection.tsx'));
   });
 });
 

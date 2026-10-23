@@ -1,6 +1,6 @@
 'use client';
 
-import { ConfigForm, validateIpv4List, type ConfigSection } from '../_config/ConfigForm';
+import { ConfigForm, validateIpv4List, type ConfigSection } from '../../_config/ConfigForm';
 
 const rejectsAll = (provider: string) => (next: string) => (
   next === '' ? `Every ${provider} webhook will be rejected (403) until an address is added.` : null

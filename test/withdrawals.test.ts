@@ -220,7 +220,7 @@ describe('payout provider wording', () => {
   test('a missing payout provider and a failed check are refused with their own texts', () => {
     assert.equal(
       NO_GATEWAY_APPROVAL,
-      'No payout provider is available, so this payout cannot be sent. Approvals are paused until a super administrator chooses a primary payout gateway that is turned on in Admin Settings.',
+      'No payout provider is available, so this payout cannot be sent. Approvals are paused until a super administrator chooses a primary payout gateway that is turned on in Platform Settings.',
     );
     assert.equal(
       GATEWAY_UNCHECKED_APPROVAL,
@@ -526,7 +526,7 @@ describe('emergency mode', () => {
   test('the refusal says approvals are paused, who can lift it and where', () => {
     assert.equal(
       EMERGENCY_APPROVAL,
-      'Emergency mode is on. Approvals are paused until a super administrator turns it off in Admin Settings.',
+      'Emergency mode is on. Approvals are paused until a super administrator turns it off in Platform Settings.',
     );
     assert.match(EMERGENCY_UNCHECKED, /^Emergency mode could not be checked\./);
   });
@@ -559,7 +559,7 @@ describe('emergency mode', () => {
     assert.equal(tagsOf(plain, 'div').filter((attrs) => attrs.role === 'status').length, 1);
     const linked = render(createElement(parts.EmergencyNotice, { settingsLink: true }));
     assert.deepEqual(tagsOf(linked, 'a').map((attrs) => attrs.href), ['/admin-settings']);
-    assert.match(textOf(linked), /Open Admin Settings$/);
+    assert.match(textOf(linked), /Open Platform Settings$/);
   });
 
   test('the drawer explains the pause only while the withdrawal can still be approved', () => {

@@ -1212,7 +1212,7 @@ describe('limits-fees specifics', () => {
   });
 
   test('the page offers both wallet adjustment limits as whole-naira fields checked against each other', () => {
-    const page = readFileSync(resolve(APP_DIR, '(dashboard)', 'limits-fees', 'page.tsx'), 'utf8');
+    const page = readFileSync(resolve(APP_DIR, '(dashboard)', 'admin-settings', 'limits-fees', 'page.tsx'), 'utf8');
     for (const key of WALLET_CAP_KEYS) {
       const start = page.indexOf(`key: '${key}'`);
       assert.ok(start >= 0, key);
@@ -1500,7 +1500,7 @@ describe('app-config: PATCH', () => {
 
   test('validation refusals touch nothing', async () => {
     const cases: ReadonlyArray<[unknown, string]> = [
-      [{ changes: { chatwoot_identity_key: 'x' } }, 'chatwoot_identity_key can only be changed in Admin Settings'],
+      [{ changes: { chatwoot_identity_key: 'x' } }, 'chatwoot_identity_key can only be changed in Platform Settings'],
       [{ changes: { mystery_key: '1' } }, 'Unknown app_config keys: mystery_key'],
       [{ changes: {} }, 'No changes provided'],
       [{ changes: { referral_max_per_day: '0' } }, 'Referrals per referrer in 24 hours: Allow at least 1 referral. To stop recording referrals, switch the programme off.'],

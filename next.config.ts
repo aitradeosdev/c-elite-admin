@@ -8,6 +8,8 @@ const securityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
 ];
 
+const PLATFORM_SETTINGS_SECTIONS = ['platform-balance', 'limits-fees', 'bill-settings', 'anomaly-alerts', 'security-limits'];
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -16,6 +18,13 @@ const nextConfig: NextConfig = {
         headers: securityHeaders,
       },
     ];
+  },
+  async redirects() {
+    return PLATFORM_SETTINGS_SECTIONS.map((section) => ({
+      source: `/${section}`,
+      destination: `/admin-settings/${section}`,
+      permanent: false,
+    }));
   },
 };
 

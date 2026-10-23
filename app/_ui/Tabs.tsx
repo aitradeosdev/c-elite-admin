@@ -3,6 +3,7 @@
 import {
   FocusEvent, HTMLAttributes, KeyboardEvent, ReactNode, forwardRef, useId, useRef, useState,
 } from 'react';
+import Link from 'next/link';
 import { moveRovingIndex, type RovingMove } from './overlayStack';
 import s from './Tabs.module.css';
 
@@ -162,6 +163,40 @@ export function Tabs<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+export interface TabLink {
+  href: string;
+  label: ReactNode;
+}
+
+export interface TabLinksProps {
+  items: ReadonlyArray<TabLink>;
+  current: string | null;
+  variant?: TabsVariant;
+  className?: string;
+  'aria-label': string;
+}
+
+export function TabLinks({ items, current, variant = 'segmented', className, 'aria-label': ariaLabel }: TabLinksProps) {
+  const cls = [variant === 'underline' ? s.underline : s.tabs, className].filter(Boolean).join(' ');
+  return (
+    <nav className={cls} aria-label={ariaLabel}>
+      {items.map((item) => {
+        const active = item.href === current;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={[s.tab, s.tabLink, active && s.active].filter(Boolean).join(' ')}
+            aria-current={active ? 'page' : undefined}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 

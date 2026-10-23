@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { createElement } from 'react';
 import ts from 'typescript';
+import { render, tagsOf } from './support/uiHarness.ts';
 import type * as ConfigFormModule from '../app/(dashboard)/_config/ConfigForm.tsx';
 
 type Mod = typeof ConfigFormModule;
@@ -701,6 +703,40 @@ describe('guardedPath', () => {
   });
 });
 
+describe('the section heading', () => {
+  test('a static render of the form shows its title in an h2 with the subtitle, and no h1', () => {
+    const html = render(createElement(cf.ConfigForm, {
+      title: 'Limits & Fees',
+      subtitle: 'Set withdrawal limits.',
+      endpoint: '/api/limits-fees',
+      sections: SECTIONS,
+    }));
+    assert.doesNotMatch(html, /<h1\b/);
+    const headings = tagsOf(html, 'h2');
+    assert.equal(headings.length, 1);
+    assert.match(headings[0].id ?? '', /-title$/);
+    assert.match(html, /<h2 id="[^"]+-title" class="sectionTitle">Limits &amp; Fees<\/h2><p class="sectionHint">Set withdrawal limits\.<\/p>/);
+  });
+
+  test('SectionHeading renders the h2 with its id, and the hint and the actions only when given', () => {
+    const full = render(createElement(cf.SectionHeading, {
+      id: 'balance-title',
+      title: 'Platform Balance',
+      hint: 'Times are WAT.',
+      actions: createElement('button', { type: 'button' }, 'Refresh'),
+    }));
+    assert.equal(
+      full,
+      '<div class="sectionHead"><div class="sectionTitles"><h2 id="balance-title" class="sectionTitle">Platform Balance</h2>'
+        + '<p class="sectionHint">Times are WAT.</p></div><div class="sectionActions"><button type="button">Refresh</button></div></div>',
+    );
+    assert.equal(
+      render(createElement(cf.SectionHeading, { title: 'General' })),
+      '<div class="sectionHead"><div class="sectionTitles"><h2 class="sectionTitle">General</h2></div></div>',
+    );
+  });
+});
+
 describe('the four configuration pages', () => {
   const pages = ['limits-fees', 'bill-settings', 'anomaly-alerts', 'security-limits'];
 
@@ -709,7 +745,7 @@ describe('the four configuration pages', () => {
   for (const page of pages) {
     test(`${page} declares exactly the keys its API accepts and posts to it`, () => {
       const route = read(`../app/api/${page}/route.ts`);
-      const source = read(`../app/(dashboard)/${page}/page.tsx`);
+      const source = read(`../app/(dashboard)/admin-settings/${page}/page.tsx`);
       const keysBlock = route.match(/const KEYS = \[([\s\S]*?)\];/);
       assert.ok(keysBlock, `${page} route has no KEYS list`);
       const apiKeys = [...keysBlock[1].matchAll(/'([a-z0-9_]+)'/g)].map((match) => match[1]).sort();

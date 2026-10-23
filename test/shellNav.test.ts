@@ -10,7 +10,9 @@ import { loadAppModule, loadUi, render, tagsOf, textOf } from './support/uiHarne
 import type { ShellProps } from '../app/(dashboard)/_shell/Shell.tsx';
 import type { ShellSecurity } from '../app/(dashboard)/profile/securityModel.ts';
 import {
+  GENERAL_SECTION_LABEL,
   NAV_GROUPS,
+  PLATFORM_SETTINGS,
   SIDEBAR_COLLAPSED_COOKIE,
   SIDEBAR_COOKIE_MAX_AGE,
   breadcrumbTrail,
@@ -21,8 +23,10 @@ import {
   hrefMatches,
   isNavPathDenied,
   navLeafPermission,
+  navSections,
   parseSidebarCollapsed,
   serializeSidebarCollapsed,
+  sidebarGroups,
   type NavGroup,
 } from '../app/(dashboard)/_shell/nav.ts';
 import {
@@ -62,13 +66,25 @@ const VISIBLE_BY_KEY: Readonly<Record<string, readonly string[]>> = {
   notifications_broadcast: ['/notifications-broadcast'],
   notification_templates: ['/notification-templates'],
   email_templates: ['/email-templates'],
-  platform_balance: ['/platform-balance'],
-  limits_fees: ['/limits-fees'],
-  bill_settings: ['/bill-settings'],
+  platform_balance: ['/admin-settings/platform-balance'],
+  limits_fees: ['/admin-settings/limits-fees'],
+  bill_settings: ['/admin-settings/bill-settings'],
   admin_settings: ['/admin-settings'],
-  anomaly_alerts: ['/anomaly-alerts'],
-  security_limits: ['/security-limits'],
+  anomaly_alerts: ['/admin-settings/anomaly-alerts'],
+  security_limits: ['/admin-settings/security-limits'],
 };
+
+const PLATFORM_SETTINGS_HREF = '/admin-settings';
+const SETTINGS_SECTIONS: ReadonlyArray<readonly [string, string]> = [
+  ['/admin-settings/platform-balance', 'Balance'],
+  ['/admin-settings/limits-fees', 'Limits & Fees'],
+  ['/admin-settings/bill-settings', 'Bill Settings'],
+  ['/admin-settings/anomaly-alerts', 'Anomaly & Alerts'],
+  ['/admin-settings/security-limits', 'Rate Limits & IPs'],
+];
+const OLD_SETTINGS_PATHS: readonly string[] = [
+  '/platform-balance', '/limits-fees', '/bill-settings', '/anomaly-alerts', '/security-limits',
+];
 
 function hrefsOf(groups: readonly NavGroup[]): string[] {
   return groups.flatMap((group) => group.items.map((item) => item.href));
@@ -438,6 +454,113 @@ describe('retired Flagged page', () => {
     assert.equal(findNavKey(RETIRED_FLAGGED), null);
     assert.deepEqual(breadcrumbTrail(RETIRED_FLAGGED), [{ label: 'Admin', current: true }]);
     assert.equal(isNavPathDenied(RETIRED_FLAGGED, ['withdrawals'], false), false);
+  });
+});
+
+describe('Platform Settings in the menu', () => {
+  const configuration = () => NAV_GROUPS.find((g) => g.label === 'Configuration');
+  const iconName = (icon: unknown) => (icon as { displayName?: string }).displayName;
+
+  const sidebarFor = (keys: readonly string[] | null) =>
+    sidebarGroups(keys === null ? filterNavByPermissions([], true) : visibleGroups(keys));
+
+  const configurationItems = (keys: readonly string[] | null) =>
+    sidebarFor(keys).find((g) => g.label === 'Configuration')?.items;
+
+  test('Configuration holds Platform Settings and its five sections at their new addresses, and the Security group is gone', () => {
+    assert.deepEqual(configuration()?.items.map((i) => [i.label, i.href]), [
+      ['Platform Settings', PLATFORM_SETTINGS_HREF],
+      ...SETTINGS_SECTIONS.map(([href, label]) => [label, href]),
+    ]);
+    assert.deepEqual(configuration()?.items.map((i) => i.key), [
+      'admin_settings', 'platform_balance', 'limits_fees', 'bill_settings', 'anomaly_alerts', 'security_limits',
+    ]);
+    assert.deepEqual(configuration()?.items.map((i) => iconName(i.icon)), [
+      'Settings', 'Wallet', 'SlidersHorizontal', 'Receipt', 'ShieldAlert', 'Shield',
+    ]);
+    assert.equal(configuration()?.items[0], PLATFORM_SETTINGS);
+    assert.equal(PLATFORM_SETTINGS.key, 'admin_settings');
+    assert.equal(PLATFORM_SETTINGS.sectionOf, undefined);
+    assert.ok(configuration()?.items.slice(1).every((i) => i.sectionOf === PLATFORM_SETTINGS));
+    assert.equal(leaves.filter((leaf) => leaf.sectionOf !== undefined).length, 5);
+    assert.deepEqual(NAV_GROUPS.map((g) => g.label), ['Operations', 'People', 'Catalog', 'Rewards', 'Communications', 'Configuration']);
+    assert.equal(GENERAL_SECTION_LABEL, 'General');
+  });
+
+  test('every section names a page in its own group that comes before it, is not a section itself and owns the section address', () => {
+    for (const group of NAV_GROUPS) {
+      group.items.forEach((leaf, index) => {
+        const parent = leaf.sectionOf;
+        if (!parent) return;
+        const at = group.items.indexOf(parent);
+        assert.ok(at >= 0 && at < index, leaf.href);
+        assert.equal(parent.sectionOf, undefined, leaf.href);
+        assert.ok(leaf.href.startsWith(`${parent.href}/`), leaf.href);
+      });
+    }
+  });
+
+  test('navSections lists the page and its sections in table order, from the groups it is given', () => {
+    assert.deepEqual(navSections(PLATFORM_SETTINGS, NAV_GROUPS).map((leaf) => leaf.href), [
+      PLATFORM_SETTINGS_HREF, ...SETTINGS_SECTIONS.map(([href]) => href),
+    ]);
+    assert.deepEqual(navSections(PLATFORM_SETTINGS, visibleGroups(['bill_settings', 'security.read'])).map((leaf) => leaf.href), [
+      '/admin-settings/bill-settings', '/admin-settings/security-limits',
+    ]);
+    assert.deepEqual(navSections(PLATFORM_SETTINGS, visibleGroups([])), []);
+  });
+
+  test('the sidebar folds the sections into one Platform Settings item that links to the first one the admin may open', () => {
+    assert.deepEqual(configurationItems(null), [{ leaf: PLATFORM_SETTINGS, href: PLATFORM_SETTINGS_HREF }]);
+    assert.deepEqual(configurationItems(['bill_settings']), [{ leaf: PLATFORM_SETTINGS, href: '/admin-settings/bill-settings' }]);
+    assert.deepEqual(
+      configurationItems(['anomaly.read', 'security.read']),
+      [{ leaf: PLATFORM_SETTINGS, href: '/admin-settings/anomaly-alerts' }],
+    );
+    assert.deepEqual(
+      configurationItems(['admin_settings', 'bill_settings']),
+      [{ leaf: PLATFORM_SETTINGS, href: PLATFORM_SETTINGS_HREF }],
+    );
+    assert.equal(configurationItems([]), undefined);
+  });
+
+  test('pages without sections keep one item each at their own address, so Bonuses and Levels stay two', () => {
+    const rewards = sidebarFor(['bonuses_rewards']).find((g) => g.label === 'Rewards');
+    assert.deepEqual(rewards?.items.map((item) => [item.leaf.label, item.href]), [
+      ['Bonuses', '/bonuses-rewards'],
+      ['Levels', '/bonuses-rewards/levels'],
+    ]);
+    const all = sidebarFor(null);
+    assert.deepEqual(all.map((g) => g.label), NAV_GROUPS.map((g) => g.label));
+    for (const group of all) {
+      const source = NAV_GROUPS.find((g) => g.label === group.label);
+      assert.deepEqual(group.items.map((item) => item.leaf), source?.items.filter((leaf) => leaf.sectionOf === undefined), group.label);
+      for (const item of group.items) assert.equal(item.href, item.leaf.href, item.leaf.label);
+    }
+  });
+
+  test('breadcrumbs read Configuration / Platform Settings, then the section, and the middle crumb is plain text', () => {
+    assert.deepEqual(breadcrumbTrail(PLATFORM_SETTINGS_HREF), [
+      { label: 'Configuration' },
+      { label: 'Platform Settings', current: true },
+    ]);
+    for (const [href, label] of SETTINGS_SECTIONS) {
+      assert.deepEqual(breadcrumbTrail(href), [
+        { label: 'Configuration' },
+        { label: 'Platform Settings' },
+        { label, current: true },
+      ], href);
+    }
+  });
+
+  test('the five old addresses are unknown to the menu, so they have no key, breadcrumb or permission gate', () => {
+    for (const path of OLD_SETTINGS_PATHS) {
+      assert.equal(findNavMatch(path), null, path);
+      assert.equal(findNavKey(path), null, path);
+      assert.deepEqual(breadcrumbTrail(path), [{ label: 'Admin', current: true }], path);
+      assert.equal(isNavPathDenied(path, ['withdrawals'], false), false, path);
+      assert.equal(deniedFor(path, []), false, path);
+    }
   });
 });
 
@@ -954,6 +1077,71 @@ describe('the shell lists and opens pages by their read permission', () => {
       /filterNavByPermissions\(allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION\),\s*\[allowedKeys, isSuperAdmin, permissions\],/,
     );
     assert.match(source, /const permissionDenied = isNavPathDenied\(pathname, allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION\);/);
+  });
+
+  const groupLinks = (html: string, label: string) => {
+    const start = html.indexOf(`>${label}</div>`);
+    assert.ok(start >= 0, label);
+    const list = html.slice(start, html.indexOf('</ul>', start));
+    return tagsOf(list, 'a').filter((anchor) => (anchor.class ?? '').split(/\s+/).includes('navItem'));
+  };
+
+  const linkText = (html: string, href: string) => {
+    const escaped = href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`<a\\b[^>]*class="navItem[^"]*"[^>]*href="${escaped}"[^>]*>([\\s\\S]*?)</a>|<a\\b[^>]*href="${escaped}"[^>]*class="navItem[^"]*"[^>]*>([\\s\\S]*?)</a>`).exec(html);
+    assert.ok(match, href);
+    return textOf(match[1] ?? match[2]);
+  };
+
+  const superAdmin = { isSuperAdmin: true, permissions: [...ALL_PERMISSIONS].sort() };
+
+  test('on a section a super admin sees one Platform Settings item, linked to the page and marked as the current section', () => {
+    const html = page('/admin-settings/limits-fees', superAdmin);
+    const links = groupLinks(html, 'Configuration');
+    assert.equal(links.length, 1);
+    assert.equal(links[0].href, PLATFORM_SETTINGS_HREF);
+    assert.equal(links[0]['aria-current'], 'true');
+    assert.ok((links[0].class ?? '').split(/\s+/).includes('active'));
+    assert.equal(linkText(html, PLATFORM_SETTINGS_HREF), 'Platform Settings');
+    assert.ok(navHrefs(html).every((href) => !href.startsWith(`${PLATFORM_SETTINGS_HREF}/`)), navHrefs(html).join(','));
+    assert.match(mainOf(html), /^<h1>Page title<\/h1>$/);
+  });
+
+  test('on the General section the Platform Settings item is the current page', () => {
+    const [link] = groupLinks(page(PLATFORM_SETTINGS_HREF, superAdmin), 'Configuration');
+    assert.equal(link['aria-current'], 'page');
+  });
+
+  test('an admin who holds only bill_settings gets the item linked to Bill Settings, and only that section opens', () => {
+    const html = page('/admin-settings/bill-settings', stored(['bill_settings']));
+    assert.deepEqual(navHrefs(html), [DASHBOARD, '/admin-settings/bill-settings']);
+    const [link] = groupLinks(html, 'Configuration');
+    assert.equal(link['aria-current'], 'page');
+    assert.equal(linkText(html, '/admin-settings/bill-settings'), 'Platform Settings');
+    assert.match(mainOf(html), /^<h1>Page title<\/h1>$/);
+    for (const path of ['/admin-settings/limits-fees', PLATFORM_SETTINGS_HREF]) {
+      const main = mainOf(page(path, stored(['bill_settings'])));
+      assert.match(textOf(main), /You do not have access to this page/, path);
+      assert.doesNotMatch(main, /Page title/, path);
+    }
+  });
+
+  test('on the collapsed rail the folded item is titled Platform Settings', () => {
+    const [link] = groupLinks(page('/admin-settings/security-limits', { ...superAdmin, initialCollapsed: true }), 'Configuration');
+    assert.equal(link.title, 'Platform Settings');
+    assert.equal(link['aria-label'], 'Platform Settings');
+  });
+
+  test('the sidebar folds sections through sidebarGroups, and the palette names their page', () => {
+    const source = appSource('(dashboard)/_shell/Shell.tsx');
+    assert.match(source, /const sidebar = useMemo\(\(\) => sidebarGroups\(navGroups\), \[navGroups\]\);/);
+    assert.match(source, /\{sidebar\.map\(\(group, groupIndex\) => \{/);
+    assert.match(source, /\{group\.items\.map\(\(\{ leaf: item, href \}\) => \{/);
+    assert.match(source, /const navPage = navMatch \? navMatch\.leaf\.sectionOf \?\? navMatch\.leaf : null;/);
+    assert.match(source, /const active = navPage === item;/);
+    assert.match(source, /aria-current=\{active \? \(pathname === href \? 'page' : 'true'\) : undefined\}/);
+    assert.match(source, /subtitle: item\.sectionOf \? item\.sectionOf\.label : group\.label,/);
+    assert.match(source, /keywords: item\.sectionOf \? \[group\.label, item\.sectionOf\.label\] : \[group\.label\],/);
   });
 });
 

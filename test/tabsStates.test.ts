@@ -6,13 +6,14 @@ import {
   classesOf, loadUi, render, tagsOf, textById, textOf, withClass, type Attrs,
 } from './support/uiHarness.ts';
 import type {
-  TabItem, TabPanelProps, TabsActivation, TabsKey, TabsKeyAction, TabsProps,
+  TabItem, TabLink, TabLinksProps, TabPanelProps, TabsActivation, TabsKey, TabsKeyAction, TabsProps,
 } from '../app/_ui/Tabs.tsx';
 import type { AccessDeniedProps, ErrorStateProps, RetryFocusPhase } from '../app/_ui/States.tsx';
 import type { FieldSize, InputProps, SelectProps } from '../app/_ui/Field.tsx';
 
 interface TabsModule {
   Tabs: ElementType;
+  TabLinks: ElementType;
   TabPanel: ElementType & { $$typeof: symbol };
   tabId: (base: string, value: string) => string;
   tabPanelId: (base: string, value: string) => string;
@@ -201,6 +202,54 @@ describe('Tabs', () => {
     for (const button of tabsOf(html)) assert.ok(panelIds.has(button['aria-controls']), button.id);
     for (const panel of panels) assert.ok(tabIds.has(panel['aria-labelledby']), panel.id);
     assert.equal(textOf(html), 'Transactions 12 Devices Logins 1,204 Devices body');
+  });
+});
+
+describe('TabLinks', () => {
+  let TabLinks: ElementType;
+
+  before(async () => {
+    ({ TabLinks } = await loadUi<TabsModule>('Tabs.tsx'));
+  });
+
+  const LINKS: ReadonlyArray<TabLink> = [
+    { href: '/admin-settings', label: 'General' },
+    { href: '/admin-settings/limits-fees', label: 'Limits & Fees' },
+    { href: '/admin-settings/bill-settings', label: 'Bill Settings' },
+  ];
+
+  const links = (props: Partial<TabLinksProps> = {}) => render(createElement(TabLinks, {
+    items: LINKS, current: '/admin-settings/limits-fees', 'aria-label': 'Platform Settings sections', ...props,
+  }));
+
+  test('renders a nav named by its aria-label, segmented by default and underlined on request', () => {
+    const [nav] = tagsOf(links(), 'nav');
+    assert.equal(nav['aria-label'], 'Platform Settings sections');
+    assert.deepEqual(classesOf(nav), ['tabs']);
+    assert.deepEqual(classesOf(tagsOf(links({ variant: 'underline', className: 'sections' }), 'nav')[0]), ['underline', 'sections']);
+    assert.equal(tagsOf(links(), 'div').length, 0);
+  });
+
+  test('renders one link per item, in order, with the tab classes and the given addresses', () => {
+    const html = links();
+    assert.deepEqual(tagsOf(html, 'a').map((anchor) => anchor.href), LINKS.map((item) => item.href));
+    assert.deepEqual(tagsOf(html, 'a').map(classesOf), [['tab', 'tabLink'], ['tab', 'tabLink', 'active'], ['tab', 'tabLink']]);
+    assert.equal(textOf(html), 'General Limits & Fees Bill Settings');
+  });
+
+  test('only the link whose address is current is marked as the current page', () => {
+    assert.deepEqual(tagsOf(links(), 'a').map((anchor) => anchor['aria-current']), [undefined, 'page', undefined]);
+    const none = tagsOf(links({ current: null }), 'a');
+    assert.equal(none.length, LINKS.length);
+    assert.ok(none.every((anchor) => anchor['aria-current'] === undefined && !classesOf(anchor).includes('active')));
+    const unknown = tagsOf(links({ current: '/admin-settings/unknown' }), 'a');
+    assert.ok(unknown.every((anchor) => anchor['aria-current'] === undefined && !classesOf(anchor).includes('active')));
+  });
+
+  test('the links are plain tab stops: no tab roles, no tablist and no roving tabindex', () => {
+    const html = links();
+    assert.doesNotMatch(html, /role=|tablist|tabindex|aria-selected|aria-controls/);
+    assert.equal(tagsOf(html, 'button').length, 0);
   });
 });
 
@@ -553,6 +602,13 @@ describe('states, tabs and field styles', () => {
 
   test('selected tabs stay distinguishable in forced colours', () => {
     assert.match(tabsCss, /@media \(forced-colors: active\) \{[\s\S]*\.tab\.active \{[^}]*text-decoration-line: underline;/);
+  });
+
+  test('tab links never take the global link underline, and the forced-colours underline still wins after them', () => {
+    assert.match(ruleBody(tabsCss, '.tabLink, .tabLink:hover'), /^\s*text-decoration: none;\s*$/);
+    const rule = tabsCss.indexOf('.tabLink, .tabLink:hover');
+    assert.ok(rule > tabsCss.indexOf('.tab.active {'), 'after the active tab rule');
+    assert.ok(rule < tabsCss.indexOf('@media (forced-colors: active)'), 'before the forced-colours block');
   });
 
   test('motion is reduced on request', () => {

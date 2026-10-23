@@ -115,7 +115,7 @@ const TODAY_METRICS: readonly MetricSpec[] = [
 ];
 
 const EXPOSURE_METRICS: readonly MetricSpec[] = [
-  { statKey: 'walletTotal', perm: 'wallets.read', label: 'Wallet liability', hint: 'Sum of all user wallets', href: '/platform-balance', format: 'money' },
+  { statKey: 'walletTotal', perm: 'wallets.read', label: 'Wallet liability', hint: 'Sum of all user wallets', href: '/admin-settings/platform-balance', format: 'money' },
   { statKey: 'bonusLiability', perm: 'rewards.read', label: 'Bonus liability', hint: 'Unspent bonus balances', href: '/bonuses-rewards', format: 'money' },
   { statKey: 'rewardPool', perm: 'rewards.read', label: 'Reward pool', hint: 'Bonuses and coupon rewards, all time', href: '/bonuses-rewards', format: 'money' },
 ];

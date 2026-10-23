@@ -61,7 +61,7 @@ export function EmergencyNotice({ settingsLink }: { settingsLink: boolean }) {
       actions={
         settingsLink ? (
           <LinkButton href="/admin-settings" variant="secondary" size="sm">
-            Open Admin Settings
+            Open Platform Settings
           </LinkButton>
         ) : undefined
       }

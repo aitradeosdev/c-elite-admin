@@ -215,7 +215,7 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
     ['UPDATE_EMAIL_TEMPLATE', 'Updated email template'],
   ]],
   ['Settings', [
-    ['UPDATE_ADMIN_SETTINGS', 'Updated admin settings'],
+    ['UPDATE_ADMIN_SETTINGS', 'Updated platform settings'],
     ['ENABLE_EMERGENCY_MODE', 'Turned on emergency mode'],
     ['DISABLE_EMERGENCY_MODE', 'Turned off emergency mode'],
     ['UPDATE_PLATFORM_BALANCE', 'Updated platform balance'],

@@ -1,6 +1,6 @@
 'use client';
 
-import { ConfigForm, validateTimeZone, type ConfigSection } from '../_config/ConfigForm';
+import { ConfigForm, validateTimeZone, type ConfigSection } from '../../_config/ConfigForm';
 
 const SECTIONS: ConfigSection[] = [
   {

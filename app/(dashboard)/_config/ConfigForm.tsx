@@ -6,7 +6,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  AccessDenied, Button, Card, CardBody, CardHeader, ErrorState, FieldShell, Input, PageHeader, Select,
+  AccessDenied, Button, Card, CardBody, CardHeader, ErrorState, FieldShell, Input, Select,
   Skeleton, SkeletonLines, Textarea, Toggle, useConfirm, useToast,
 } from '../../_ui';
 import type { ConfirmOptions } from '../../_ui';
@@ -687,6 +687,18 @@ function ConfigSkeleton({ sections }: { sections: ConfigSection[] }) {
   );
 }
 
+export function SectionHeading({ id, title, hint, actions }: { id?: string; title: string; hint?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className={s.sectionHead}>
+      <div className={s.sectionTitles}>
+        <h2 id={id} className={s.sectionTitle}>{title}</h2>
+        {hint ? <p className={s.sectionHint}>{hint}</p> : null}
+      </div>
+      {actions ? <div className={s.sectionActions}>{actions}</div> : null}
+    </div>
+  );
+}
+
 export function ConfigForm({ title, subtitle, endpoint, sections }: ConfigFormProps) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -1131,7 +1143,7 @@ export function ConfigForm({ title, subtitle, endpoint, sections }: ConfigFormPr
 
   return (
     <div className={s.root}>
-      <PageHeader title={<span id={titleId}>{title}</span>} subtitle={subtitle} />
+      <SectionHeading id={titleId} title={title} hint={subtitle} />
 
       {loadState.status === 'loading' ? (
         <ConfigSkeleton sections={sections} />

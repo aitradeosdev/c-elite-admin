@@ -1,6 +1,6 @@
 'use client';
 
-import { ConfigForm, notAbove, notBelow, type ConfigSection, type ConfigValidator } from '../_config/ConfigForm';
+import { ConfigForm, notAbove, notBelow, type ConfigSection, type ConfigValidator } from '../../_config/ConfigForm';
 
 const WHOLE_NAIRA = /^[1-9]\d*$/;
 

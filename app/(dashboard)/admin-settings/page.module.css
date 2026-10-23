@@ -1,3 +1,12 @@
+.frame {
+  max-width: 1040px;
+  min-width: 0;
+}
+
+.sections {
+  margin-bottom: var(--space-6);
+}
+
 .page {
   max-width: 880px;
   min-width: 0;

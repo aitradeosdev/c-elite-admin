@@ -1,6 +1,6 @@
 'use client';
 
-import { ConfigForm, validateNumberList, type ConfigSection } from '../_config/ConfigForm';
+import { ConfigForm, validateNumberList, type ConfigSection } from '../../_config/ConfigForm';
 
 const quickAmounts = (value: string) => validateNumberList(value, { min: 1, integer: true });
 

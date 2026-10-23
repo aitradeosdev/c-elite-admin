@@ -28,7 +28,7 @@ import { NO_SECURITY_PROMPT, type ShellSecurity } from '../profile/securityModel
 import { leaveConsole, useSignOutEverywhere } from '../profile/signOut';
 import {
   breadcrumbTrail, filterNavByPermissions, findNavMatch, hrefMatches, isNavPathDenied, navCountKeys, navItemLabel,
-  serializeSidebarCollapsed,
+  serializeSidebarCollapsed, sidebarGroups,
 } from './nav';
 import { NavCount, useNavCounts } from './NavCounts';
 import { SecurityBanner } from './SecurityBanner';
@@ -341,10 +341,12 @@ function ShellFrame({
     () => filterNavByPermissions(allowedKeys, isSuperAdmin, permissions, PAGE_READ_PERMISSION),
     [allowedKeys, isSuperAdmin, permissions],
   );
+  const sidebar = useMemo(() => sidebarGroups(navGroups), [navGroups]);
   const countKeys = useMemo(() => navCountKeys(navGroups), [navGroups]);
   const navCounts = useNavCounts(countKeys);
 
   const navMatch = findNavMatch(pathname);
+  const navPage = navMatch ? navMatch.leaf.sectionOf ?? navMatch.leaf : null;
   const currentHref = navMatch?.leaf.href ?? null;
   const currentHint = navMatch?.exact ? 'Current page' : 'Current section';
   const recordKinds = useMemo(
@@ -367,8 +369,8 @@ function ShellFrame({
       ...navGroups.flatMap((group) => group.items.map((item) => ({
         id: item.href,
         label: item.label,
-        subtitle: group.label,
-        keywords: [group.label],
+        subtitle: item.sectionOf ? item.sectionOf.label : group.label,
+        keywords: item.sectionOf ? [group.label, item.sectionOf.label] : [group.label],
         icon: item.icon,
         href: item.href,
         hint: item.href === currentHref ? currentHint : undefined,
@@ -506,22 +508,22 @@ function ShellFrame({
             className={s.navScroll}
             onScroll={(event) => railTip.follow(event.currentTarget)}
           >
-            {navGroups.map((group, groupIndex) => {
+            {sidebar.map((group, groupIndex) => {
               const labelId = `${baseId}-group-${groupIndex}`;
               return (
                 <div key={group.label} className={s.group}>
                   <div id={labelId} className={s.groupLabel}>{group.label}</div>
                   <ul role="list" aria-labelledby={labelId} className={s.navList}>
-                    {group.items.map((item) => {
+                    {group.items.map(({ leaf: item, href }) => {
                       const Icon = item.icon;
-                      const active = navMatch?.leaf.href === item.href;
+                      const active = navPage === item;
                       const count = item.countKey ? navCounts[item.countKey] ?? null : null;
                       return (
                         <li key={`${item.href}-${item.label}`}>
                           <Link
-                            href={item.href}
+                            href={href}
                             className={[s.navItem, active && s.active].filter(Boolean).join(' ')}
-                            aria-current={active ? (navMatch?.exact ? 'page' : 'true') : undefined}
+                            aria-current={active ? (pathname === href ? 'page' : 'true') : undefined}
                             aria-label={collapsed || count !== null ? navItemLabel(item.label, count) : undefined}
                             title={collapsed && railTip.activeId !== item.href ? item.label : undefined}
                             onClick={drawerOpen ? closeDrawer : undefined}

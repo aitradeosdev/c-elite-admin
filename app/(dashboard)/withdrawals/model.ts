@@ -87,7 +87,7 @@ export const PAYOUT_UNCHECKED =
   'The active payout provider could not be checked. The payout goes through whichever provider is active when you confirm. If none is active then, or the check fails again, the approval is refused and no payout is sent.';
 
 export const NO_GATEWAY_APPROVAL =
-  'No payout provider is available, so this payout cannot be sent. Approvals are paused until a super administrator chooses a primary payout gateway that is turned on in Admin Settings.';
+  'No payout provider is available, so this payout cannot be sent. Approvals are paused until a super administrator chooses a primary payout gateway that is turned on in Platform Settings.';
 
 export const GATEWAY_UNCHECKED_APPROVAL =
   'The active payout provider could not be checked, so the withdrawal was not approved. Try again.';
@@ -108,7 +108,7 @@ export const FROZEN_APPROVAL =
 export const EMERGENCY_TITLE = 'Emergency mode is on';
 
 export const EMERGENCY_PAUSED =
-  'Approvals are paused until a super administrator turns it off in Admin Settings.';
+  'Approvals are paused until a super administrator turns it off in Platform Settings.';
 
 export const EMERGENCY_APPROVAL = `${EMERGENCY_TITLE}. ${EMERGENCY_PAUSED}`;
 

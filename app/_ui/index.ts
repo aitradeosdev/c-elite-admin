@@ -16,8 +16,8 @@ export type { InputProps, TextareaProps, SelectProps, FieldSize } from './Field'
 export { Toggle } from './Toggle';
 export type { ToggleProps } from './Toggle';
 
-export { Tabs, TabPanel, tabId, tabPanelId } from './Tabs';
-export type { TabsProps, TabItem, TabPanelProps, TabsActivation, TabsVariant } from './Tabs';
+export { Tabs, TabPanel, TabLinks, tabId, tabPanelId } from './Tabs';
+export type { TabsProps, TabItem, TabPanelProps, TabsActivation, TabsVariant, TabLink, TabLinksProps } from './Tabs';
 
 export { Modal, SidePanel } from './Overlay';
 export type { ModalProps, SidePanelProps, ModalSize } from './Overlay';

@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  AccessDenied, Card, ErrorState, PageHeader, useConfirm, usePermissions, useResource, useToast,
+  AccessDenied, Card, ErrorState, useConfirm, usePermissions, useResource, useToast,
 } from '../../_ui';
 import { apiRequest } from '../../lib/apiClient';
-import { guardedPath } from '../_config/ConfigForm';
+import { SectionHeading, guardedPath } from '../_config/ConfigForm';
+import { GENERAL_SECTION_LABEL } from '../_shell/nav';
 import {
   BILL_PROVIDERS, BILL_PROVIDER_LABELS, GATEWAY_LABELS, IDENTITY_KEY, PAYMENT_GATEWAYS, PRIMARY_BILL_KEY,
   PRIMARY_GATEWAY_KEY, billFlagKey, gatewayFlagKey, joinLabels, settingLabel,
@@ -26,10 +27,10 @@ import {
 import { SecurityPolicySection } from './SecurityPolicyCard';
 import s from './page.module.css';
 
-const TITLE = 'Admin Settings';
+const TITLE = GENERAL_SECTION_LABEL;
 const SUBTITLE = 'Platform-wide configuration for payouts, bills, support, admin sign-in and the user app. Super admins only; every change is recorded in the audit log.';
 const DENIED_TITLE = 'Super administrators only';
-const DENIED_MESSAGE = 'Platform settings can only be viewed and changed by a super administrator. Ask one if something here needs to change.';
+const DENIED_MESSAGE = 'General settings can only be viewed and changed by a super administrator. Ask one if something here needs to change.';
 const AUDIT_WARNING = 'The change was saved, but it could not be written to the audit log.';
 const RELOAD_WARNING = 'Saved, but the latest values could not be reloaded. Refresh the page to confirm them.';
 const UNCONFIRMED = 'Could not reach the server, so the save could not be confirmed. Reload the page to check the live values before trying again.';
@@ -476,7 +477,7 @@ function AdminSettings() {
     }
     return (
       <div className={s.page}>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SectionHeading id={headingId('general')} title={TITLE} hint={SUBTITLE} />
         {failure ? (
           <Card>
             <ErrorState
@@ -504,7 +505,7 @@ function AdminSettings() {
 
   return (
     <div className={s.page}>
-      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <SectionHeading id={headingId('general')} title={TITLE} hint={SUBTITLE} />
 
       <EmergencyCard
         state={emergencyState(live)}

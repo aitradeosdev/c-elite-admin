@@ -691,7 +691,7 @@ function allowanceProblem(context: WalletContext | null, amountKobo: number): st
   const allowance = context ? allowanceOf(context) : null;
   if (!allowance) return null;
   if (allowance.perAdjustmentKobo === 0 || allowance.dailyKobo === 0) {
-    return 'Wallet adjustments are switched off: a limit is set to ₦0.00 in Limits & Fees.';
+    return 'Wallet adjustments are switched off: a limit is set to ₦0.00 in Platform Settings, under Limits & Fees.';
   }
   if (amountKobo > allowance.perAdjustmentKobo) {
     return `One adjustment can be at most ${formatKobo(allowance.perAdjustmentKobo)}.`;

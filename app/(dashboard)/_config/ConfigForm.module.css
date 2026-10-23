@@ -3,6 +3,44 @@
   min-width: 0;
 }
 
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.sectionTitles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  color: var(--fg-primary);
+}
+
+.sectionHint {
+  margin: 0;
+  max-width: 72ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--fg-secondary);
+}
+
+.sectionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .form {
   display: block;
   min-width: 0;

@@ -123,7 +123,7 @@ export function readConfigPatch(body: unknown, allowed: ReadonlySet<string>): Co
   const incoming = Object.keys(changes);
   const settingsOnly = incoming.filter((key) => SETTINGS_ONLY_CONFIG_KEYS.includes(key));
   if (settingsOnly.length > 0) {
-    return { ok: false, message: `${settingsOnly.join(', ')} can only be changed in Admin Settings` };
+    return { ok: false, message: `${settingsOnly.join(', ')} can only be changed in Platform Settings` };
   }
   const rejected = incoming.filter((key) => !allowed.has(key));
   if (rejected.length > 0) return { ok: false, message: `Unknown app_config keys: ${rejected.join(', ')}` };

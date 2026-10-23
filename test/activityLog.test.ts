@@ -981,6 +981,7 @@ describe('action labels', () => {
     assert.equal(rules.actionLabel('REVOKE_ADMIN_SESSIONS'), 'Signed admin out everywhere');
     assert.equal(rules.actionLabel('SET_CARD_TYPE_COUNTRY_ACTIVE'), 'Changed card type availability');
     assert.equal(rules.actionLabel('UPDATE_PLATFORM_BALANCE'), 'Updated platform balance');
+    assert.equal(rules.actionLabel('UPDATE_ADMIN_SETTINGS'), 'Updated platform settings');
     assert.equal(rules.actionLabel('CREATE_DENOMINATION'), 'Created rate range');
     assert.equal(rules.actionLabel('APPROVE_CARD_CORRECTED'), 'Approved card with corrections');
     assert.equal(rules.actionLabel('RESUME_WITHDRAWAL_FAILED'), 'Payout could not be sent');

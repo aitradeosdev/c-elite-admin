@@ -226,7 +226,7 @@ export function ApproveModal({
       {overLimit && limitKobo !== null ? (
         <Notice tone="danger" announce>
           This credit is above the {nairaText(limitKobo)} limit for a single approval, so the server will refuse it.
-          The limit is set in Admin settings.
+          The limit is set in Platform Settings.
         </Notice>
       ) : null}
 

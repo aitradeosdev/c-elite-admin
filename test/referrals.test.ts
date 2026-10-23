@@ -471,11 +471,11 @@ describe('/api/app-config planning', () => {
     assert.equal(config.readConfigKeys(many).ok, false);
   });
 
-  test('keeps D-16: settings-only keys are refused first, naming Admin Settings', () => {
+  test('keeps D-16: settings-only keys are refused first, naming Platform Settings', () => {
     const identity = config.readConfigPatch({ changes: { chatwoot_identity_key: 'x' } }, TEST_ALLOWED);
-    assert.deepEqual(identity, { ok: false, message: 'chatwoot_identity_key can only be changed in Admin Settings' });
+    assert.deepEqual(identity, { ok: false, message: 'chatwoot_identity_key can only be changed in Platform Settings' });
     const emergency = config.readConfigPatch({ changes: { emergency_mode: 'true', mystery_key: '1' } }, TEST_ALLOWED);
-    assert.deepEqual(emergency, { ok: false, message: 'emergency_mode can only be changed in Admin Settings' });
+    assert.deepEqual(emergency, { ok: false, message: 'emergency_mode can only be changed in Platform Settings' });
   });
 
   test('refuses empty, unknown, bad URL and bad referral values', () => {

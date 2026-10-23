@@ -4,12 +4,12 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { RotateCw } from 'lucide-react';
 import {
-  AccessDenied, Button, ErrorState, Notice, PageHeader, formatNaira, useCan, useConfirm, useResource, useToast,
+  AccessDenied, Button, ErrorState, Notice, formatNaira, useCan, useConfirm, useResource, useToast,
 } from '../../_ui';
 import { apiRequest } from '../../lib/apiClient';
 import { BUSINESS_TZ_LABEL, formatBusinessTime } from '../../lib/time';
 import { permissionLabel } from '../../lib/permissions';
-import { guardedPath } from '../_config/ConfigForm';
+import { SectionHeading, guardedPath } from '../_config/ConfigForm';
 import {
   AUDIT_WARNING, MODE_KEY, MODE_LABELS, PLATFORM_BALANCE_ENDPOINT, STATIC_KEY,
   alreadyStored, applySaved, changePayload, checkStaticAmount, classifySave, editedElsewhere, isDraftDirty,
@@ -59,7 +59,7 @@ function useClock(intervalMs: number): number {
   return now;
 }
 
-export default function PlatformBalancePage() {
+export default function PlatformBalanceSection() {
   const toast = useToast();
   const confirm = useConfirm();
   const router = useRouter();
@@ -348,9 +348,10 @@ export default function PlatformBalancePage() {
   };
 
   const header = (
-    <PageHeader
+    <SectionHeading
+      id={`${baseId}-title`}
       title={TITLE}
-      subtitle={SUBTITLE}
+      hint={SUBTITLE}
       actions={(
         <Button
           ref={refreshRef}
