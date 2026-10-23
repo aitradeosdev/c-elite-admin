@@ -649,6 +649,7 @@ export interface ReferralStats {
   completed: number;
   unclaimed: number;
   paid_to_referrers: number;
+  paid_to_referees: number;
   pending_payout_partial: boolean;
 }
 
@@ -664,7 +665,8 @@ export function buildStats(rpc: unknown, owed: OwedTotals): ReferralStats | null
   const total = wholeCount(record.total);
   const completed = wholeCount(record.completed);
   const paid = toAmount(record.total_paid);
-  if (total === null || completed === null || paid === null) return null;
+  const refereePaid = toAmount(record.referee_paid);
+  if (total === null || completed === null || paid === null || refereePaid === null) return null;
   return {
     total_referrals: total,
     pending_payout: roundMoney(owed.sum),
@@ -673,6 +675,7 @@ export function buildStats(rpc: unknown, owed: OwedTotals): ReferralStats | null
     completed,
     unclaimed: owed.count,
     paid_to_referrers: roundMoney(paid),
+    paid_to_referees: roundMoney(refereePaid),
     pending_payout_partial: owed.partial,
   };
 }

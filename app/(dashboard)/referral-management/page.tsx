@@ -453,6 +453,15 @@ function Referrals() {
       loadingWidth: '7em',
       unavailable: totalsMissing,
     },
+    {
+      label: 'Paid to referred users',
+      value: totals ? formatNaira(totals.paidToReferees) : '—',
+      mono: true,
+      hint: 'Claimed by referred users so far',
+      loading: totalsLoading,
+      loadingWidth: '7em',
+      unavailable: totalsMissing,
+    },
   ];
 
   let programme: ReactNode;

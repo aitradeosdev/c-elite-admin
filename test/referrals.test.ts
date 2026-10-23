@@ -1,6 +1,6 @@
 import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement, type ElementType } from 'react';
@@ -41,6 +41,7 @@ const STAMP = '2026-10-01T09:00:00.000Z';
 const OWNED_DIR = fileURLToPath(new URL('../app/(dashboard)/referral-management/', import.meta.url));
 const REFERRALS_ROUTE = fileURLToPath(new URL('../app/api/referrals/route.ts', import.meta.url));
 const APP_CONFIG_ROUTE = fileURLToPath(new URL('../app/api/app-config/route.ts', import.meta.url));
+const ADMIN_SQL = fileURLToPath(new URL('../../schema_admin_app.sql', import.meta.url));
 
 const PREVIOUS_ALLOWED_KEYS = [
   'bill_vtpass_enabled', 'bill_novac_enabled', 'active_bill_provider',
@@ -428,7 +429,7 @@ describe('legacy response shape', () => {
 
   test('builds real totals and refuses a malformed summary', () => {
     const stats = rules.buildStats(
-      [{ total: 12, completed: 7, credited: 3, total_paid: 1500 }],
+      [{ total: 12, completed: 7, credited: 3, total_paid: 1500, referee_paid: 600 }],
       { count: 2, sum: 800.004, partial: false },
     );
     assert.deepEqual(stats, {
@@ -439,10 +440,22 @@ describe('legacy response shape', () => {
       completed: 7,
       unclaimed: 2,
       paid_to_referrers: 1500,
+      paid_to_referees: 600,
       pending_payout_partial: false,
     });
     assert.equal(rules.buildStats(null, { count: 0, sum: 0, partial: false }), null);
     assert.equal(rules.buildStats({ total: 'many' }, { count: 0, sum: 0, partial: false }), null);
+  });
+
+  test('totals what referred users claimed and refuses a summary without it instead of showing ₦0', () => {
+    const owed = { count: 0, sum: 0, partial: false };
+    const row = { total: 2, completed: 1, credited: 1, total_paid: 500 };
+    assert.equal(rules.buildStats([{ ...row, referee_paid: '300.004' }], owed)?.paid_to_referees, 300);
+    assert.equal(rules.buildStats([{ ...row, referee_paid: 0 }], owed)?.paid_to_referees, 0);
+    for (const referee of [undefined, null, '', 'lots']) {
+      assert.equal(rules.buildStats([{ ...row, referee_paid: referee }], owed), null, String(referee));
+    }
+    assert.equal(rules.buildStats([row], owed), null);
   });
 
   test('presents the five programme settings and marks missing rows', () => {
@@ -711,14 +724,31 @@ describe('page model', () => {
       settings: settings(),
       stats: {
         total_referrals: 4, awaiting_trade: 1, unclaimed: 2, pending_payout: 800, paid_to_referrers: 1000,
-        total_paid_out: 1000, pending_payout_partial: false,
+        paid_to_referees: 300, total_paid_out: 1000, pending_payout_partial: false,
       },
     };
     const summary = model.toSummary(body);
     assert.ok(summary);
-    assert.deepEqual(summary?.totals, { total: 4, awaiting: 1, unclaimed: 2, owed: 800, owedPartial: false, paidToReferrers: 1000 });
+    assert.deepEqual(summary?.totals, {
+      total: 4, awaiting: 1, unclaimed: 2, owed: 800, owedPartial: false, paidToReferrers: 1000, paidToReferees: 300,
+    });
     assert.equal(model.toSummary({ settings: { ...settings(), referral_active: { value: 1, exists: true } } }), null);
     assert.equal(model.toSummary({ settings: settings(), stats: null })?.totals, null);
+  });
+
+  test('a missing or unreadable referred users total leaves the totals unavailable, never ₦0', () => {
+    const stats = {
+      total_referrals: 4, awaiting_trade: 1, unclaimed: 2, pending_payout: 800, paid_to_referrers: 1000,
+      total_paid_out: 1000, pending_payout_partial: false,
+    };
+    assert.equal(model.toTotals(stats), null);
+    for (const referee of [null, '', 'lots', true]) {
+      assert.equal(model.toTotals({ ...stats, paid_to_referees: referee }), null, String(referee));
+    }
+    assert.equal(model.toTotals({ ...stats, paid_to_referees: '0' })?.paidToReferees, 0);
+    const both = model.toTotals({ ...stats, paid_to_referees: 250.5 });
+    assert.equal(both?.paidToReferrers, 1000);
+    assert.equal(both?.paidToReferees, 250.5);
   });
 
   test('reads the referral log and recomputes each status', () => {
@@ -948,6 +978,22 @@ describe('referral page parts', () => {
     const locked = model.toReferralRow({ id: REFERRAL, first_trade_completed: false, referrer_bonus_amount: 500, referee_bonus_amount: 0 });
     assert.match(textOf(render(createElement(parts.BonusCell, { row: locked }))), /Locked.*No bonus/);
   });
+
+  test('the totals strip shows what each side has claimed, the referred users right after the referrers', () => {
+    const page = readFileSync(join(OWNED_DIR, 'page.tsx'), 'utf8');
+    const start = page.indexOf('const statItems: StatItem[] = [');
+    assert.ok(start > 0);
+    const strip = page.slice(start, page.indexOf('\n  ];', start));
+    assert.deepEqual(
+      [...strip.matchAll(/label: '([^']+)'/g)].map((match) => match[1]),
+      ['Referrals', 'Awaiting first trade', 'Unclaimed bonuses', 'Paid to referrers', 'Paid to referred users'],
+    );
+    const referred = strip.slice(strip.indexOf("label: 'Paid to referred users'"));
+    assert.match(referred, /value: totals \? formatNaira\(totals\.paidToReferees\) : '—',/);
+    assert.match(referred, /hint: 'Claimed by referred users so far',/);
+    assert.match(referred, /loading: totalsLoading,/);
+    assert.match(referred, /unavailable: totalsMissing,/);
+  });
 });
 
 describe('route contracts', () => {
@@ -957,6 +1003,29 @@ describe('route contracts', () => {
   test('/api/referrals reads with referrals.read through the guard', () => {
     assert.match(referrals, /requireAdmin\('referrals\.read'\)/);
     assert.doesNotMatch(referrals, /referral_management|verifyAdminFromRequest|NextResponse\.json|status: 401/);
+  });
+
+  test('admin_referrals_stats returns each side’s claimed total under the names buildStats reads', { skip: !existsSync(ADMIN_SQL) }, () => {
+    const sql = readFileSync(ADMIN_SQL, 'utf8').replace(/\r\n/g, '\n');
+    const head = 'CREATE OR REPLACE FUNCTION admin_referrals_stats()\n';
+    const start = sql.indexOf(head);
+    assert.ok(start > 0, 'admin_referrals_stats is not in schema_admin_app.sql');
+    assert.equal(sql.indexOf(head, start + 1), -1, 'admin_referrals_stats is defined twice');
+    assert.ok(sql.slice(0, start).endsWith('\nDROP FUNCTION IF EXISTS admin_referrals_stats();\n'), 'the changed result needs the drop first');
+    const grant = 'GRANT EXECUTE ON FUNCTION admin_referrals_stats() TO service_role;';
+    const block = sql.slice(start, sql.indexOf(grant, start) + grant.length);
+    const result = block.match(/^RETURNS TABLE\(([^)]*)\)$/m);
+    assert.ok(result, 'the result columns were not found');
+    const columns = result[1].split(',').map((column) => column.trim().split(' ')[0]);
+    assert.deepEqual(columns, ['total', 'completed', 'credited', 'total_paid', 'referee_paid']);
+    const sums = block.slice(block.indexOf('    COALESCE('), block.indexOf('  FROM referrals;\n'));
+    assert.deepEqual(sums.split('\n').map((line) => line.trim()).filter((line) => line !== ''), [
+      'COALESCE(sum(referrer_bonus_amount) FILTER (WHERE referrer_credited), 0),',
+      'COALESCE(sum(referee_bonus_amount) FILTER (WHERE referee_credited), 0)',
+    ]);
+    assert.match(block, /\n\$\$;\nREVOKE ALL ON FUNCTION admin_referrals_stats\(\) FROM public, anon, authenticated;\nGRANT EXECUTE/);
+    const row = Object.fromEntries(columns.map((column, index) => [column, index + 1]));
+    assert.equal(rules.buildStats([row], { count: 0, sum: 0, partial: false })?.paid_to_referees, 5);
   });
 
   test('/api/app-config stays super-admin only for GET and PATCH', () => {

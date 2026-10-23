@@ -35,6 +35,7 @@ export interface ReferralTotals {
   owed: number;
   owedPartial: boolean;
   paidToReferrers: number;
+  paidToReferees: number;
 }
 
 export function toTotals(raw: unknown): ReferralTotals | null {
@@ -44,8 +45,17 @@ export function toTotals(raw: unknown): ReferralTotals | null {
   const unclaimed = wholeCount(raw.unclaimed);
   const owed = toAmount(raw.pending_payout);
   const paid = toAmount(raw.paid_to_referrers ?? raw.total_paid_out);
-  if (total === null || awaiting === null || unclaimed === null || owed === null || paid === null) return null;
-  return { total, awaiting, unclaimed, owed, owedPartial: raw.pending_payout_partial === true, paidToReferrers: paid };
+  const refereePaid = toAmount(raw.paid_to_referees);
+  if (total === null || awaiting === null || unclaimed === null || owed === null || paid === null || refereePaid === null) return null;
+  return {
+    total,
+    awaiting,
+    unclaimed,
+    owed,
+    owedPartial: raw.pending_payout_partial === true,
+    paidToReferrers: paid,
+    paidToReferees: refereePaid,
+  };
 }
 
 export interface ReferralSummary {
