@@ -17,6 +17,10 @@
   min-width: 0;
 }
 
+:where(.stack) > * {
+  max-width: 52rem;
+}
+
 .lead {
   margin: 0;
   font-size: var(--text-md);

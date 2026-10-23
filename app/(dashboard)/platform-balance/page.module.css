@@ -1,7 +1,6 @@
 .page {
   container: platform-balance / inline-size;
   min-width: 0;
-  max-width: 1040px;
 }
 
 .heading {

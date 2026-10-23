@@ -1,5 +1,4 @@
 .root {
-  max-width: 880px;
   min-width: 0;
 }
 
@@ -13,6 +12,7 @@
 .detailRows {
   display: flex;
   flex-direction: column;
+  max-width: 52rem;
 }
 
 .roleValue {
@@ -33,6 +33,10 @@
   flex-direction: column;
   gap: var(--space-5);
   container-type: inline-size;
+}
+
+:where(.body) > * {
+  max-width: 52rem;
 }
 
 .fields {

@@ -1,5 +1,4 @@
 .frame {
-  max-width: 1040px;
   min-width: 0;
 }
 
@@ -8,7 +7,6 @@
 }
 
 .page {
-  max-width: 880px;
   min-width: 0;
 }
 
@@ -50,6 +48,7 @@
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5) var(--space-6);
   align-items: start;
+  max-width: 52rem;
 }
 
 @container (min-width: 560px) {
@@ -198,6 +197,7 @@
   flex-direction: column;
   gap: var(--space-5);
   min-width: 0;
+  max-width: 52rem;
 }
 
 .switches {
