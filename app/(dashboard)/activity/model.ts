@@ -7,8 +7,8 @@ import type { ApiBody } from '../../lib/apiClient';
 import { FILTERS_RANGE_LABEL } from '../../lib/printExport';
 import { formatAge } from '../../lib/time';
 import {
-  PAGE_SIZE, RESULT_FILTERS, SEARCH_MAX, actionLabel, entityLabel, formatStamp, isActionKey, isEntityKey,
-  resultFilterLabel, resultLabel,
+  PAGE_SIZE, RESULT_FILTERS, SEARCH_MAX, SYSTEM_ACTOR, actionLabel, entityLabel, formatStamp, isActionKey, isEntityKey,
+  isSystemEvent, resultFilterLabel, resultLabel,
   type ActivityEvent, type AdminInfo, type PrintableEvent,
 } from './rules';
 
@@ -196,6 +196,10 @@ export function adminHandle(username: string | null | undefined): string {
   return username ? `@${username}` : 'Unknown admin';
 }
 
+export function actorName(event: Pick<ActivityEvent, 'admin_id' | 'admin_username' | 'action'>): string {
+  return isSystemEvent(event) ? SYSTEM_ACTOR : adminHandle(event.admin_username);
+}
+
 export function adminOptionLabel(admin: AdminInfo): string {
   const name = adminHandle(admin.username);
   if (admin.deleted_at) return `${name} (deleted admin)`;
@@ -262,7 +266,7 @@ export const PRINT_COLUMNS = [
 
 export function printCells(row: PrintableEvent): string[] {
   const target = targetSummary(row);
-  const admin = adminHandle(row.admin_username);
+  const admin = actorName(row);
   return [
     formatStamp(row.created_at),
     row.admin_deleted ? `${admin} (deleted admin)` : admin,

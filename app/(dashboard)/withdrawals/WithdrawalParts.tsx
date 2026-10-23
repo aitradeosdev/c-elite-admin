@@ -146,11 +146,13 @@ export function DetailBody({
   withdrawal,
   partial,
   payoutGateway,
+  payoutMissing = false,
   emergencyMode = null,
 }: {
   withdrawal: Withdrawal;
   partial: DetailPartial;
   payoutGateway: string | null;
+  payoutMissing?: boolean;
   emergencyMode?: boolean | null;
 }) {
   const user = withdrawal.user;
@@ -209,7 +211,7 @@ export function DetailBody({
             <DetailRow label="Requested via" value={providerLabel(withdrawal.gateway)} />
             <DetailRow
               label="Payout provider"
-              value={payoutGateway ? providerLabel(payoutGateway) : 'Could not be checked'}
+              value={payoutGateway ? providerLabel(payoutGateway) : payoutMissing ? 'None available' : 'Could not be checked'}
             />
           </>
         ) : (

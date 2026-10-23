@@ -4,19 +4,21 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { Badge, DetailRow, JsonViewer, Notice, Ref, SectionLabel, Skeleton, StatusDot } from '../../_ui';
 import {
-  JSON_MASK_KEYS, actionLabel, entityLabel, formatStamp, resultKind, resultLabel, resultTone, sensitivityLabel,
+  JSON_MASK_KEYS, actionDescription, actionLabel, entityLabel, formatStamp, isSystemEvent, resultKind, resultLabel,
+  resultTone, sensitivityLabel,
   type ActivityEvent,
 } from './rules';
-import { adminHandle, ageText, hasRecordedValue } from './model';
+import { actorName, ageText, hasRecordedValue } from './model';
 import s from './page.module.css';
 
-type AdminFields = Pick<ActivityEvent, 'admin_username' | 'admin_is_super' | 'admin_deleted'>;
+type AdminFields = Pick<ActivityEvent, 'admin_id' | 'admin_username' | 'admin_is_super' | 'admin_deleted' | 'action'>;
 
 export function AdminName({ event }: { event: AdminFields }) {
+  const named = Boolean(event.admin_username) || isSystemEvent(event);
   return (
     <span className={s.adminName}>
-      <span className={event.admin_username ? s.lead : [s.lead, s.muted].join(' ')}>
-        {adminHandle(event.admin_username)}
+      <span className={named ? s.lead : [s.lead, s.muted].join(' ')}>
+        {actorName(event)}
       </span>
       {event.admin_is_super ? <Badge tone="neutral">Super</Badge> : null}
       {event.admin_deleted ? <Badge tone="neutral">Deleted</Badge> : null}
@@ -68,6 +70,7 @@ export function EventDetail({ event, userHref }: { event: ActivityEvent; userHre
   const recorded = hasRecordedValue(event.before_value) || hasRecordedValue(event.after_value);
   const entity = entityLabel(event.entity);
   const tracked = event.result !== null;
+  const description = actionDescription(event);
 
   return (
     <div className={s.detail}>
@@ -85,6 +88,7 @@ export function EventDetail({ event, userHref }: { event: ActivityEvent; userHre
             </span>
           }
         />
+        {description ? <DetailRow label="Summary" wrap value={description} /> : null}
         <DetailRow label="Result" value={<ResultDot value={event.result} />} />
         <DetailRow label="Sensitivity" value={sensitivity ?? 'Not recorded'} />
         <DetailRow

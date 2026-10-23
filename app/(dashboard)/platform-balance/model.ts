@@ -38,6 +38,8 @@ export const PROVIDER_LABELS: Readonly<Record<PayoutGateway, string>> = {
   novac: 'Novac',
 };
 
+export const NO_GATEWAY_LABEL = 'No payout gateway';
+
 export const STATIC_MAX = 1_000_000_000_000;
 export const REFRESH_INTERVAL_MINUTES = 30;
 export const STALE_AFTER_MS = 65 * 60 * 1000;
@@ -108,13 +110,13 @@ export type PatchPlanResult =
 export type BalancePayload = {
   config: Record<string, string | null>;
   config_updated_at: Record<string, string | null>;
-  live_gateway: PayoutGateway;
+  live_gateway: PayoutGateway | null;
 };
 
 export interface BalanceSnapshot {
   raw: Readonly<Record<string, string | null>>;
   updatedAt: Readonly<Record<string, string | null>>;
-  gateway: PayoutGateway;
+  gateway: PayoutGateway | null;
   mode: BalanceMode;
   staticText: string | null;
   staticAmount: number;
@@ -126,7 +128,7 @@ export interface BalanceSnapshot {
   shownAmount: number;
 }
 
-export type LiveIssueKind = 'failed' | 'never' | 'invalid' | 'stale';
+export type LiveIssueKind = 'no_gateway' | 'failed' | 'never' | 'invalid' | 'stale';
 
 export interface LiveIssue {
   kind: LiveIssueKind;
@@ -198,6 +200,18 @@ function storedOrNull(value: StoredValue): string | null {
 
 export function isProvider(value: unknown): value is PayoutGateway {
   return typeof value === 'string' && (PROVIDERS as readonly string[]).includes(value);
+}
+
+export function providerLabel(gateway: PayoutGateway | null): string {
+  return gateway === null ? NO_GATEWAY_LABEL : PROVIDER_LABELS[gateway];
+}
+
+export function providerName(gateway: PayoutGateway | null): string {
+  return gateway === null ? 'the payout gateway' : PROVIDER_LABELS[gateway];
+}
+
+export function providerWord(gateway: PayoutGateway | null): string {
+  return gateway === null ? 'payout gateway' : PROVIDER_LABELS[gateway];
 }
 
 export function effectiveMode(raw: StoredValue): BalanceMode {
@@ -338,7 +352,7 @@ export function presentBalance(rows: readonly unknown[]): BalancePayload {
 export function buildSnapshot(
   raw: Readonly<Record<string, string | null>>,
   updatedAt: Readonly<Record<string, string | null>>,
-  gateway: PayoutGateway,
+  gateway: PayoutGateway | null,
 ): BalanceSnapshot {
   const values = { ...raw };
   return {
@@ -369,10 +383,7 @@ export function toSnapshot(body: ApiBody): BalanceSnapshot | null {
   if (isRecord(body.config_updated_at)) {
     for (const [key, value] of Object.entries(body.config_updated_at)) updatedAt[key] = instant(value);
   }
-  const gateway = isProvider(body.live_gateway)
-    ? body.live_gateway
-    : resolvePayoutGateway({ [GATEWAY_KEY]: raw[GATEWAY_KEY] ?? null });
-  return buildSnapshot(raw, updatedAt, gateway);
+  return buildSnapshot(raw, updatedAt, isProvider(body.live_gateway) ? body.live_gateway : null);
 }
 
 export function ageText(at: string, now: number): string {
@@ -381,6 +392,13 @@ export function ageText(at: string, now: number): string {
 }
 
 export function liveIssue(snapshot: BalanceSnapshot, now: number): LiveIssue | null {
+  if (snapshot.gateway === null) {
+    return {
+      kind: 'no_gateway',
+      title: 'No payout gateway is available',
+      message: 'The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed. Choose a primary gateway that is turned on in Admin Settings.',
+    };
+  }
   const provider = PROVIDER_LABELS[snapshot.gateway];
   if (snapshot.liveError) {
     return {
@@ -431,8 +449,10 @@ export function magnitudeOf(from: number, to: number): Magnitude {
 }
 
 function issueConsequence(issue: LiveIssue, fresh: BalanceSnapshot, now: number): string {
-  const provider = PROVIDER_LABELS[fresh.gateway];
+  const provider = providerName(fresh.gateway);
   switch (issue.kind) {
+    case 'no_gateway':
+      return `No payout gateway is available, so the live balance cannot be refreshed and users will see ${formatNaira(fresh.liveAmount)} until one is available.`;
     case 'failed':
       return fresh.liveAt
         ? `The last refresh failed (“${fresh.liveError}”), so users will see the balance fetched ${ageText(fresh.liveAt, now)} until a refresh succeeds.`
@@ -447,7 +467,7 @@ function issueConsequence(issue: LiveIssue, fresh: BalanceSnapshot, now: number)
 }
 
 export function modeConsequences(fresh: BalanceSnapshot, target: BalanceMode, now: number): string[] {
-  const provider = PROVIDER_LABELS[fresh.gateway];
+  const provider = providerName(fresh.gateway);
   if (target === 'static') {
     const lines = [
       `The figure stops following ${provider} and stays at ${formatNaira(fresh.staticAmount)} until an admin changes the static amount.`,
@@ -457,7 +477,9 @@ export function modeConsequences(fresh: BalanceSnapshot, target: BalanceMode, no
     return lines;
   }
   const lines = [
-    `The figure follows ${provider} from now on. It is refreshed every ${REFRESH_INTERVAL_MINUTES} minutes, so users will see it change.`,
+    fresh.gateway === null
+      ? 'The figure follows the payout gateway once one is available.'
+      : `The figure follows ${provider} from now on. It is refreshed every ${REFRESH_INTERVAL_MINUTES} minutes, so users will see it change.`,
   ];
   const issue = liveIssue(fresh, now);
   if (issue) lines.push(issueConsequence(issue, fresh, now));
@@ -468,7 +490,7 @@ export function staticConsequences(fresh: BalanceSnapshot, amount: number, chang
   const lines: string[] = [];
   if (fresh.mode === 'live') {
     lines.push(
-      `The source is Live, so users keep seeing the ${PROVIDER_LABELS[fresh.gateway]} balance. This amount is shown only after you switch to Static.`,
+      `The source is Live, so users keep seeing the ${providerWord(fresh.gateway)} balance. This amount is shown only after you switch to Static.`,
     );
   }
   if (changedElsewhere) {
@@ -548,7 +570,7 @@ export function alreadyStored(fresh: BalanceSnapshot, value: string, amount: num
 }
 
 export function sourceText(snapshot: BalanceSnapshot): string {
-  return snapshot.mode === 'live' ? `Live balance from ${PROVIDER_LABELS[snapshot.gateway]}` : 'Static amount';
+  return snapshot.mode === 'live' ? `Live balance from ${providerName(snapshot.gateway)}` : 'Static amount';
 }
 
 export function workingStatus(working: Working | null): string {

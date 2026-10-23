@@ -7,11 +7,13 @@ import { isSecretConfigKey } from '../../lib/configSecrets';
 import { RACE_CONFLICT_MESSAGE, compareAndSet, inOrder, pick, type ConfigCasConflict } from '../../lib/configCas';
 import {
   configLabel,
+  configReadKeys,
   conflictMessage,
   planConfigWrite,
   readConfigKeys,
   readConfigPatch,
   sensitivityFor,
+  signupBonusProblem,
   type ConfigConflict,
 } from '../../(dashboard)/referral-management/appConfigRules';
 
@@ -125,7 +127,7 @@ export async function PATCH(req: NextRequest) {
   const { data: rows, error: readError } = await supabaseAdmin
     .from('app_config')
     .select('key, value')
-    .in('key', requested);
+    .in('key', configReadKeys(requested));
   if (readError) {
     console.error('app config current read:', readError.message);
     return fail('INTERNAL_ERROR', 'The current values could not be read, so nothing was saved.');
@@ -134,6 +136,8 @@ export async function PATCH(req: NextRequest) {
   for (const row of (rows ?? []) as ConfigRow[]) {
     if (typeof row.key === 'string') current[row.key] = typeof row.value === 'string' ? row.value : null;
   }
+  const signupProblem = signupBonusProblem(patch.changes, current);
+  if (signupProblem) return fail('VALIDATION_ERROR', signupProblem);
 
   const plan = planConfigWrite(patch, current);
   const attempted = Object.keys(plan.changes).filter((key) => current[key] !== plan.changes[key]);

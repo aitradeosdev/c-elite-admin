@@ -11,9 +11,9 @@ import { BUSINESS_TZ_LABEL, formatBusinessTime } from '../../lib/time';
 import { permissionLabel } from '../../lib/permissions';
 import { guardedPath } from '../_config/ConfigForm';
 import {
-  AUDIT_WARNING, MODE_KEY, MODE_LABELS, PLATFORM_BALANCE_ENDPOINT, PROVIDER_LABELS, STATIC_KEY,
+  AUDIT_WARNING, MODE_KEY, MODE_LABELS, PLATFORM_BALANCE_ENDPOINT, STATIC_KEY,
   alreadyStored, applySaved, changePayload, checkStaticAmount, classifySave, editedElsewhere, isDraftDirty,
-  toSaveReceipt, toSnapshot,
+  providerWord, toSaveReceipt, toSnapshot,
   type BalanceMode, type BalanceSnapshot, type SaveOutcome, type SavePayload, type SaveReceipt, type StaticDraft,
   type Working,
 } from './model';
@@ -192,7 +192,7 @@ export default function PlatformBalancePage() {
         return;
       }
       const payload = changePayload(fresh, MODE_KEY, target);
-      const provider = PROVIDER_LABELS[fresh.gateway];
+      const provider = providerWord(fresh.gateway);
       setWorking({ kind: 'mode', target, phase: 'confirming' });
       const decision = await confirm<SaveOutcome>({
         ...modeOptions(fresh, target, Date.now()),

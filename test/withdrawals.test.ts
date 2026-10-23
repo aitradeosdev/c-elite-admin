@@ -11,7 +11,8 @@ import { classesOf, loadAppModule, render, tagsOf, textOf, withClass } from './s
 import { ERROR_MESSAGE } from '../app/lib/http.ts';
 import {
   DEFAULT_TAB, EMERGENCY_APPROVAL, EMERGENCY_PAUSED, EMERGENCY_REJECT_NOTE, EMERGENCY_TITLE, EMERGENCY_UNCHECKED,
-  FROZEN_APPROVAL, PAYOUT_UNCHECKED, TABS, approvalRefusal, classifyDecision, formatTab, isActionable, isHeld, parseTab,
+  FROZEN_APPROVAL, GATEWAY_UNCHECKED_APPROVAL, NO_GATEWAY_APPROVAL, PAYOUT_UNCHECKED, TABS, approvalRefusal,
+  classifyDecision, formatTab, isActionable, isHeld, parseTab,
   payoutDiffers, payoutProviderNote, sameTabFilter, tabFilter, tabSpec, toActionResult, toDetail, toListResult,
   type ActionResult, type DetailPartial, type Tab, type Withdrawal,
 } from '../app/(dashboard)/withdrawals/model.ts';
@@ -81,8 +82,9 @@ function detailHtml(
   payoutGateway: string | null,
   partial: DetailPartial = NO_PARTIAL,
   emergencyMode?: boolean | null,
+  payoutMissing?: boolean,
 ): string {
-  return render(createElement(parts.DetailBody, { withdrawal, partial, payoutGateway, emergencyMode }));
+  return render(createElement(parts.DetailBody, { withdrawal, partial, payoutGateway, emergencyMode, payoutMissing }));
 }
 
 function rowValue(html: string, label: string): string | undefined {
@@ -178,6 +180,13 @@ describe('classifyDecision', () => {
     respond(() => failed('INTERNAL_ERROR', 'Could not read the withdrawal.', 500));
     assert.deepEqual(classifyDecision(await approve()), { kind: 'retry', message: 'Could not read the withdrawal.' });
   });
+
+  test('a missing payout provider is a refusal to show, and a payout provider that could not be checked can be retried', async () => {
+    respond(() => failed('STATE_CONFLICT', NO_GATEWAY_APPROVAL, 409, { reason: 'no_payout_gateway' }));
+    assert.deepEqual(classifyDecision(await approve()), { kind: 'refused', message: NO_GATEWAY_APPROVAL, status: 409 });
+    respond(() => failed('INTERNAL_ERROR', GATEWAY_UNCHECKED_APPROVAL, 500));
+    assert.deepEqual(classifyDecision(await approve()), { kind: 'retry', message: GATEWAY_UNCHECKED_APPROVAL });
+  });
 });
 
 describe('payout provider wording', () => {
@@ -199,9 +208,27 @@ describe('payout provider wording', () => {
     assert.equal(payoutDiffers('paystack', 'monnify'), true);
   });
 
-  test('warns when the active provider could not be checked', () => {
+  test('warns when the active provider could not be checked, and says a missing one refuses the approval', () => {
     assert.equal(payoutProviderNote('paystack', null), PAYOUT_UNCHECKED);
     assert.equal(payoutDiffers('paystack', null), true);
+    assert.equal(
+      PAYOUT_UNCHECKED,
+      'The active payout provider could not be checked. The payout goes through whichever provider is active when you confirm. If none is active then, or the check fails again, the approval is refused and no payout is sent.',
+    );
+  });
+
+  test('a missing payout provider and a failed check are refused with their own texts', () => {
+    assert.equal(
+      NO_GATEWAY_APPROVAL,
+      'No payout provider is available, so this payout cannot be sent. Approvals are paused until a super administrator chooses a primary payout gateway that is turned on in Admin Settings.',
+    );
+    assert.equal(
+      GATEWAY_UNCHECKED_APPROVAL,
+      'The active payout provider could not be checked, so the withdrawal was not approved. Try again.',
+    );
+    for (const text of [PAYOUT_UNCHECKED, NO_GATEWAY_APPROVAL, GATEWAY_UNCHECKED_APPROVAL]) {
+      assert.doesNotMatch(text, /Paystack|Monnify|Novac|fall back/);
+    }
   });
 
   test('has nothing to contrast when the request recorded no provider', () => {
@@ -239,18 +266,32 @@ describe('response mappers', () => {
         withdrawal: WITHDRAWAL,
         partial: { user: 'The account holder could not be loaded.', flag: null },
         payout_gateway: 'monnify',
+        payout_gateway_missing: false,
         emergency_mode: false,
       }),
       {
         withdrawal: WITHDRAWAL,
         partial: { user: 'The account holder could not be loaded.', flag: null },
         payoutGateway: 'monnify',
+        payoutMissing: false,
         emergencyMode: false,
       },
     );
     assert.deepEqual(toDetail({ withdrawal: WITHDRAWAL }), {
-      withdrawal: WITHDRAWAL, partial: NO_PARTIAL, payoutGateway: null, emergencyMode: null,
+      withdrawal: WITHDRAWAL, partial: NO_PARTIAL, payoutGateway: null, payoutMissing: false, emergencyMode: null,
     });
+  });
+
+  test('toDetail tells a missing payout provider apart from one that could not be checked', () => {
+    const missing = toDetail({ withdrawal: WITHDRAWAL, payout_gateway: null, payout_gateway_missing: true });
+    assert.equal(missing?.payoutGateway, null);
+    assert.equal(missing?.payoutMissing, true);
+    const unchecked = toDetail({ withdrawal: WITHDRAWAL, payout_gateway: null, payout_gateway_missing: false });
+    assert.equal(unchecked?.payoutGateway, null);
+    assert.equal(unchecked?.payoutMissing, false);
+    for (const flag of ['true', 1, null, undefined]) {
+      assert.equal(toDetail({ withdrawal: WITHDRAWAL, payout_gateway_missing: flag })?.payoutMissing, false, String(flag));
+    }
   });
 
   test('a detail response without a withdrawal is an unreadable response, not data', async () => {
@@ -415,6 +456,18 @@ describe('withdrawal detail drawer', () => {
   test('says the payout provider could not be checked rather than guessing', () => {
     const html = detailHtml(WITHDRAWAL, null);
     assert.equal(rowValue(html, 'Payout provider')?.startsWith('Could not be checked'), true);
+    assert.ok(!textOf(html).includes('None available'));
+  });
+
+  test('says no payout provider is available when none is valid, and names no other provider', () => {
+    const html = detailHtml(WITHDRAWAL, null, NO_PARTIAL, false, true);
+    assert.equal(rowValue(html, 'Requested via')?.startsWith('Paystack'), true);
+    assert.equal(rowValue(html, 'Payout provider')?.startsWith('None available'), true);
+    assert.ok(!textOf(html).includes('Could not be checked'));
+    assert.doesNotMatch(textOf(html), /Monnify|Novac/);
+    const settled = detailHtml({ ...WITHDRAWAL, status: 'processing', gateway_reference: 'TRF_1' }, null, NO_PARTIAL, false, true);
+    assert.equal(rowValue(settled, 'Provider')?.startsWith('Paystack'), true);
+    assert.ok(!textOf(settled).includes('None available'));
   });
 
   test('keeps the recorded provider for a withdrawal that is no longer awaiting a decision', () => {
@@ -478,13 +531,16 @@ describe('emergency mode', () => {
     assert.match(EMERGENCY_UNCHECKED, /^Emergency mode could not be checked\./);
   });
 
-  test('a frozen account is refused first, then emergency mode, and an unchecked flag refuses nothing', () => {
+  test('a frozen account is refused first, then emergency mode, then a missing payout provider, and an unchecked flag refuses nothing', () => {
     const frozen: Withdrawal = { ...WITHDRAWAL, user: { ...WITHDRAWAL.user, is_frozen: true } };
-    assert.equal(approvalRefusal({ withdrawal: frozen, emergencyMode: true }), FROZEN_APPROVAL);
-    assert.equal(approvalRefusal({ withdrawal: frozen, emergencyMode: false }), FROZEN_APPROVAL);
-    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: true }), EMERGENCY_APPROVAL);
-    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: false }), null);
-    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: null }), null);
+    assert.equal(approvalRefusal({ withdrawal: frozen, emergencyMode: true, payoutMissing: true }), FROZEN_APPROVAL);
+    assert.equal(approvalRefusal({ withdrawal: frozen, emergencyMode: false, payoutMissing: false }), FROZEN_APPROVAL);
+    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: true, payoutMissing: true }), EMERGENCY_APPROVAL);
+    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: true, payoutMissing: false }), EMERGENCY_APPROVAL);
+    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: false, payoutMissing: true }), NO_GATEWAY_APPROVAL);
+    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: null, payoutMissing: true }), NO_GATEWAY_APPROVAL);
+    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: false, payoutMissing: false }), null);
+    assert.equal(approvalRefusal({ withdrawal: WITHDRAWAL, emergencyMode: null, payoutMissing: false }), null);
   });
 
   test('only a real boolean is read as the emergency flag', () => {
@@ -528,7 +584,10 @@ describe('emergency mode', () => {
 describe('route contract and hard rules', () => {
   test('the approve route maps the database refusal like a frozen account, before any payout is sent', () => {
     const source = readFileSync(APPROVE_ROUTE, 'utf8');
-    assert.match(source, /import \{ EMERGENCY_APPROVAL, FROZEN_APPROVAL \} from '[./]+\(dashboard\)\/withdrawals\/model';/);
+    assert.match(
+      source,
+      /import \{\s*EMERGENCY_APPROVAL, FROZEN_APPROVAL, GATEWAY_UNCHECKED_APPROVAL, NO_GATEWAY_APPROVAL,\s*\} from '[./]+\(dashboard\)\/withdrawals\/model';/,
+    );
     const rpc = source.indexOf("rpc('admin_approve_withdrawal'");
     const frozen = source.indexOf("rpcErr.message.includes('Account is frozen')");
     const emergency = source.indexOf("rpcErr.message.includes('Emergency mode is on')");
@@ -540,6 +599,22 @@ describe('route contract and hard rules', () => {
     assert.doesNotMatch(source, /This account is frozen\.|Approvals are paused/);
   });
 
+  test('the approve route checks the payout gateway once, before the approval, and refuses when none is valid or it cannot be checked', () => {
+    const source = readFileSync(APPROVE_ROUTE, 'utf8');
+    const token = source.indexOf('await sessionTokenFromRequest()');
+    const call = 'await readPayoutGateway(supabaseAdmin)';
+    const lookup = source.indexOf(call);
+    const rpc = source.indexOf("rpc('admin_approve_withdrawal'");
+    assert.ok(token > 0 && lookup > token && rpc > lookup, 'the gateway is checked after the session token and before the approval');
+    assert.equal(source.indexOf('readPayoutGateway(', lookup + call.length), -1, 'the gateway is looked up once');
+    assert.match(source, /if \(payout\.kind === 'unknown'\) return fail\('INTERNAL_ERROR', GATEWAY_UNCHECKED_APPROVAL\);/);
+    assert.match(
+      source,
+      /if \(payout\.kind === 'none'\) \{\s*return fail\('STATE_CONFLICT', NO_GATEWAY_APPROVAL, \{ details: \{ reason: 'no_payout_gateway' \} \}\);/,
+    );
+    assert.doesNotMatch(source, /No payout provider is available|so the withdrawal was not approved/);
+  });
+
   test('list and detail responses add emergency_mode, read as the exact flag text, and keep every mobile key', () => {
     const source = readFileSync(LIST_ROUTE, 'utf8');
     assert.match(source, /const EMERGENCY_KEY = 'emergency_mode';/);
@@ -549,6 +624,8 @@ describe('route contract and hard rules', () => {
     for (const key of ['withdrawals,', 'total,', 'search_capped:', 'withdrawal: {', 'payout_gateway:', 'partial:']) {
       assert.ok(source.includes(key), key);
     }
+    assert.match(source, /payout_gateway: payoutLookup\?\.kind === 'gateway' \? payoutLookup\.gateway : null,/);
+    assert.match(source, /payout_gateway_missing: payoutLookup\?\.kind === 'none',/);
   });
 
   test('the page refuses approval up front from a fresh read and keeps reject available', () => {
@@ -615,6 +692,8 @@ interface ApproveState {
   rpcs: Array<{ name: string; args: Record<string, unknown> }>;
   queries: RouteQuery[];
   authState: (args: Record<string, unknown>, call: number) => RouteReply;
+  gatewayConfig: RouteReply;
+  detailStatus: string;
   db: {
     from(table: string): object;
     rpc(name: string, args: Record<string, unknown>): Promise<RouteReply>;
@@ -630,12 +709,26 @@ interface ApproveRoute {
   POST: (req: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
 }
 
+interface ListRoute {
+  GET: (req: Request) => Promise<Response>;
+}
+
+const LIVE_GATEWAY: RouteReply = {
+  data: [
+    { key: 'active_payment_gateway', value: 'novac' },
+    { key: 'gateway_paystack_enabled', value: 'false' },
+    { key: 'gateway_novac_enabled', value: 'true' },
+  ],
+};
+
 const approveState: ApproveState = {
   headers: new Headers(),
   cookies: new Map(),
   rpcs: [],
   queries: [],
   authState: liveSession,
+  gatewayConfig: LIVE_GATEWAY,
+  detailStatus: 'pending_review',
   db: {
     from: (table) => routeChain(table),
     rpc: (name, args) => routeRpc(name, args),
@@ -686,7 +779,12 @@ function routeAnswer(query: RouteQuery): RouteReply {
     return { data: { status: 'pending_review', amount: 50000, fee: 100, user_id: WITHDRAWAL.user_id, gateway: 'paystack' } };
   }
   if (query.table === 'withdrawals' && query.columns === 'status') return { data: { status: 'processing' } };
-  if (query.table === 'app_config' && query.op === 'select') return { data: [] };
+  if (query.table === 'withdrawals' && query.columns === '*') {
+    return { data: { id: WITHDRAWAL.id, user_id: WITHDRAWAL.user_id, status: approveState.detailStatus } };
+  }
+  if ((query.table === 'users' || query.table === 'flagged_transactions') && query.op === 'select') return { data: null };
+  if (query.table === 'app_config' && query.columns === 'value') return { data: { value: 'false' } };
+  if (query.table === 'app_config' && query.op === 'select') return approveState.gatewayConfig;
   if (query.table === 'audit_log' && query.op === 'insert') return { error: null };
   throw new Error(`unexpected query ${JSON.stringify(query)}`);
 }
@@ -712,6 +810,8 @@ function routeChain(table: string): object {
     },
     eq: filter('eq'),
     in: filter('in'),
+    order: () => builder,
+    limit: () => builder,
     maybeSingle: () => builder,
     then: (onFulfilled: (value: unknown) => unknown, onRejected: (reason: unknown) => unknown) =>
       Promise.resolve()
@@ -820,6 +920,7 @@ describe('approving forwards exactly the session the guard checked', () => {
     approveState.rpcs = [];
     approveState.queries = [];
     approveState.authState = liveSession;
+    approveState.gatewayConfig = LIVE_GATEWAY;
     forwarded = [];
     Reflect.set(process.env, 'ADMIN_JWT_SECRET', ROUTE_JWT_SECRET);
     Reflect.set(process.env, 'SUPABASE_URL', ROUTE_SUPABASE_URL);
@@ -943,6 +1044,68 @@ describe('approving forwards exactly the session the guard checked', () => {
     assert.deepEqual(forwarded, []);
   });
 
+  function tablesRead(): string[] {
+    return approveState.queries.map((query) => `${query.table}:${query.op}`);
+  }
+
+  test('with no valid payout gateway the approval is refused before anything moves, so the payout stays in review', async () => {
+    const cookie = await sessionToken(WEB_SID);
+    const cases: RouteReply[] = [
+      { data: [] },
+      { data: [{ key: 'active_payment_gateway', value: 'novac' }, { key: 'gateway_novac_enabled', value: 'false' }] },
+      { data: [{ key: 'active_payment_gateway', value: 'flutterwave' }, { key: 'gateway_flutterwave_enabled', value: 'true' }] },
+      { data: [{ key: 'gateway_paystack_enabled', value: 'true' }, { key: 'gateway_novac_enabled', value: 'true' }] },
+    ];
+    for (const gatewayConfig of cases) {
+      const label = JSON.stringify(gatewayConfig);
+      approveState.rpcs = [];
+      approveState.queries = [];
+      approveState.gatewayConfig = gatewayConfig;
+      const res = await approveWith({}, cookie);
+      assert.equal(res.status, 409, label);
+      assert.deepEqual(await res.json(), {
+        success: false,
+        error: NO_GATEWAY_APPROVAL,
+        code: 'STATE_CONFLICT',
+        message: NO_GATEWAY_APPROVAL,
+        details: { reason: 'no_payout_gateway' },
+        request_id: ROUTE_REQUEST_ID,
+      }, label);
+      assert.deepEqual(rpcNames(), ['admin_auth_state'], label);
+      assert.deepEqual(tablesRead(), ['withdrawals:select', 'app_config:select'], label);
+    }
+    assert.deepEqual(forwarded, []);
+  });
+
+  test('when the payout gateway cannot be checked the approval is refused as retryable, and nothing moves', async () => {
+    const cookie = await sessionToken(WEB_SID);
+    approveState.gatewayConfig = { error: { message: 'connection terminated' } };
+    const res = await approveWith({}, cookie);
+    assert.equal(res.status, 500);
+    assert.deepEqual(await res.json(), {
+      success: false,
+      error: GATEWAY_UNCHECKED_APPROVAL,
+      code: 'INTERNAL_ERROR',
+      message: GATEWAY_UNCHECKED_APPROVAL,
+      request_id: ROUTE_REQUEST_ID,
+    });
+    assert.deepEqual(rpcNames(), ['admin_auth_state']);
+    assert.deepEqual(tablesRead(), ['withdrawals:select', 'app_config:select']);
+    assert.deepEqual(forwarded, []);
+  });
+
+  test('a valid payout gateway is checked before the approval and recorded in the audit', async () => {
+    const cookie = await sessionToken(WEB_SID);
+    const res = await approveWith({}, cookie);
+    assert.equal(res.status, 200);
+    assert.deepEqual(rpcNames(), ['admin_auth_state', 'admin_approve_withdrawal']);
+    assert.deepEqual(tablesRead(), ['withdrawals:select', 'app_config:select', 'withdrawals:select', 'audit_log:insert']);
+    assert.deepEqual(forwarded, [{ url: RESUME_URL, authorization: `Bearer ${cookie}` }]);
+    const audit = approveState.queries.find((query) => query.table === 'audit_log');
+    const row = audit?.payload as { after_value?: Record<string, unknown> } | undefined;
+    assert.equal(row?.after_value?.payout_gateway, 'novac');
+  });
+
   test('the route takes the token by the same rule as the guard and never checks it a second time', () => {
     const source = readFileSync(APPROVE_ROUTE, 'utf8');
     assert.match(source, /^import \{ sessionTokenFromRequest \} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/jwt';$/m);
@@ -951,5 +1114,94 @@ describe('approving forwards exactly the session the guard checked', () => {
       /const \{ token: adminToken \} = await sessionTokenFromRequest\(\);\n {2}if \(!adminToken\) return fail\('AUTH_REQUIRED', 'Your session has expired\. Sign in again\.'\);/,
     );
     assert.doesNotMatch(source, /verifyAdminJWT|verifyAdminSession|from 'next\/headers'|'admin_token'|get\('authorization'\)/);
+  });
+});
+
+describe('the withdrawal detail reports a missing payout gateway only while the payout awaits a decision', () => {
+  let route: ListRoute;
+
+  const AWAITING = ['pending_review', 'held'];
+
+  before(async () => {
+    route = (await import(await bundleRoute(LIST_ROUTE))) as ListRoute;
+  });
+
+  beforeEach(() => {
+    approveState.rpcs = [];
+    approveState.queries = [];
+    approveState.authState = liveSession;
+    approveState.gatewayConfig = LIVE_GATEWAY;
+    approveState.detailStatus = 'pending_review';
+    Reflect.set(process.env, 'ADMIN_JWT_SECRET', ROUTE_JWT_SECRET);
+    mock.method(console, 'error', () => {});
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  async function detailFor(status: string, gatewayConfig: RouteReply): Promise<Record<string, unknown>> {
+    approveState.rpcs = [];
+    approveState.queries = [];
+    approveState.detailStatus = status;
+    approveState.gatewayConfig = gatewayConfig;
+    approveState.headers = new Headers({ 'user-agent': 'withdrawal detail test', 'x-request-id': ROUTE_REQUEST_ID });
+    approveState.cookies = new Map([['admin_token', await sessionToken(WEB_SID)]]);
+    const res = await route.GET(new Request(`http://localhost/api/withdrawals?id=${WITHDRAWAL.id}`, { headers: approveState.headers }));
+    const body = (await res.json()) as Record<string, unknown>;
+    return {
+      status: res.status,
+      payout_gateway: body.payout_gateway,
+      payout_gateway_missing: body.payout_gateway_missing,
+      emergency_mode: body.emergency_mode,
+    };
+  }
+
+  function configReads(): Array<string | null> {
+    return approveState.queries.filter((query) => query.table === 'app_config').map((query) => query.columns).sort();
+  }
+
+  test('with no valid payout gateway, a payout awaiting a decision names none and is reported as missing one', async () => {
+    const cases: RouteReply[] = [
+      { data: [] },
+      { data: [{ key: 'active_payment_gateway', value: 'novac' }, { key: 'gateway_novac_enabled', value: 'false' }] },
+      { data: [{ key: 'active_payment_gateway', value: 'flutterwave' }, { key: 'gateway_flutterwave_enabled', value: 'true' }] },
+    ];
+    for (const status of AWAITING) {
+      for (const gatewayConfig of cases) {
+        const label = `${status} ${JSON.stringify(gatewayConfig)}`;
+        assert.deepEqual(await detailFor(status, gatewayConfig), {
+          status: 200, payout_gateway: null, payout_gateway_missing: true, emergency_mode: false,
+        }, label);
+        assert.deepEqual(configReads(), ['key, value', 'value'], label);
+      }
+    }
+  });
+
+  test('when the payout gateway cannot be checked, the detail names none and does not call it missing', async () => {
+    for (const status of AWAITING) {
+      assert.deepEqual(await detailFor(status, { error: { message: 'connection terminated' } }), {
+        status: 200, payout_gateway: null, payout_gateway_missing: false, emergency_mode: false,
+      }, status);
+      assert.deepEqual(configReads(), ['key, value', 'value'], status);
+    }
+  });
+
+  test('a valid payout gateway is named and not reported missing', async () => {
+    for (const status of AWAITING) {
+      assert.deepEqual(await detailFor(status, LIVE_GATEWAY), {
+        status: 200, payout_gateway: 'novac', payout_gateway_missing: false, emergency_mode: false,
+      }, status);
+      assert.deepEqual(configReads(), ['key, value', 'value'], status);
+    }
+  });
+
+  test('a withdrawal that is not awaiting a decision never reads the payout gateway settings', async () => {
+    for (const status of ['initiated', 'processing', 'success', 'failed', 'resume_failed']) {
+      assert.deepEqual(await detailFor(status, { data: [] }), {
+        status: 200, payout_gateway: null, payout_gateway_missing: false, emergency_mode: false,
+      }, status);
+      assert.deepEqual(configReads(), ['value'], status);
+    }
   });
 });

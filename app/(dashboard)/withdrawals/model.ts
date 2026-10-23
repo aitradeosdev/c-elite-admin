@@ -84,7 +84,13 @@ const PROVIDERS: Record<string, string> = {
 };
 
 export const PAYOUT_UNCHECKED =
-  'The active payout provider could not be checked. The payout goes through whichever provider is active when you confirm.';
+  'The active payout provider could not be checked. The payout goes through whichever provider is active when you confirm. If none is active then, or the check fails again, the approval is refused and no payout is sent.';
+
+export const NO_GATEWAY_APPROVAL =
+  'No payout provider is available, so this payout cannot be sent. Approvals are paused until a super administrator chooses a primary payout gateway that is turned on in Admin Settings.';
+
+export const GATEWAY_UNCHECKED_APPROVAL =
+  'The active payout provider could not be checked, so the withdrawal was not approved. Try again.';
 
 export interface WithdrawalUser {
   id?: string | null;
@@ -184,6 +190,7 @@ export interface DetailResult {
   withdrawal: Withdrawal;
   partial: DetailPartial;
   payoutGateway: string | null;
+  payoutMissing: boolean;
   emergencyMode: boolean | null;
 }
 
@@ -274,9 +281,10 @@ export function isOpenFlag(flag: WithdrawalFlag | null | undefined): boolean {
   return Boolean(flag && OPEN_FLAG.has(String(flag.status || '')));
 }
 
-export function approvalRefusal(detail: Pick<DetailResult, 'withdrawal' | 'emergencyMode'>): string | null {
+export function approvalRefusal(detail: Pick<DetailResult, 'withdrawal' | 'emergencyMode' | 'payoutMissing'>): string | null {
   if (isFrozen(detail.withdrawal.user)) return FROZEN_APPROVAL;
   if (detail.emergencyMode === true) return EMERGENCY_APPROVAL;
+  if (detail.payoutMissing) return NO_GATEWAY_APPROVAL;
   return null;
 }
 
@@ -356,6 +364,7 @@ export function toDetail(body: ApiBody): DetailResult | null {
     withdrawal: withdrawal as unknown as Withdrawal,
     partial: { user: text(partial?.user), flag: text(partial?.flag) },
     payoutGateway: text(body.payout_gateway),
+    payoutMissing: body.payout_gateway_missing === true,
     emergencyMode: booleanOf(body.emergency_mode),
   };
 }

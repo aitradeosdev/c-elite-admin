@@ -54,7 +54,9 @@ function rowsOf(config: Record<string, string | null | undefined>): ConfigRow[] 
 }
 
 const EDGE_GATEWAY = new URL('../../supabase/functions/_shared/gateway.ts', import.meta.url);
-const EDGE_PRESENT = existsSync(EDGE_GATEWAY);
+const EDGE_RESUME = new URL('../../supabase/functions/resume-withdrawal/index.ts', import.meta.url);
+const EDGE_PROCESS = new URL('../../supabase/functions/process-withdrawal/index.ts', import.meta.url);
+const EDGE_PRESENT = [EDGE_GATEWAY, EDGE_RESUME, EDGE_PROCESS].every((file) => existsSync(file));
 
 function extractFunction(source: string, signature: string): string | null {
   const start = source.indexOf(signature);
@@ -85,26 +87,28 @@ async function edgeResolver(): Promise<EdgeResolver> {
 }
 
 describe('resolvePayoutGateway', () => {
-  test('falls back to paystack when nothing is configured', () => {
-    assert.equal(resolvePayoutGateway({}), 'paystack');
+  test('resolves no gateway when nothing is configured', () => {
+    assert.equal(resolvePayoutGateway({}), null);
   });
 
-  test('falls back to paystack when the active gateway is missing, null or empty', () => {
+  test('resolves no gateway when the active gateway is missing, null or empty, whatever the flags say', () => {
     for (const active of [undefined, null, '']) {
       const config: PayoutGatewayConfig = {
         active_payment_gateway: active,
+        gateway_paystack_enabled: 'true',
         gateway_monnify_enabled: 'true',
         gateway_novac_enabled: 'true',
       };
-      assert.equal(resolvePayoutGateway(config), 'paystack', String(active));
+      assert.equal(resolvePayoutGateway(config), null, String(active));
     }
   });
 
-  test('uses paystack when it is active, whatever gateway_paystack_enabled says', () => {
-    for (const enabled of [undefined, null, 'true', 'false', '']) {
+  test('uses paystack only when it is active and gateway_paystack_enabled is exactly "true"', () => {
+    assert.equal(resolvePayoutGateway({ active_payment_gateway: 'paystack', gateway_paystack_enabled: 'true' }), 'paystack');
+    for (const enabled of [undefined, null, '', 'false', 'TRUE', ' true', '1']) {
       assert.equal(
         resolvePayoutGateway({ active_payment_gateway: 'paystack', gateway_paystack_enabled: enabled }),
-        'paystack',
+        null,
         String(enabled),
       );
     }
@@ -115,7 +119,7 @@ describe('resolvePayoutGateway', () => {
     for (const enabled of [undefined, null, '', 'false', 'TRUE', 'True', ' true', 'true ', '1', 'yes']) {
       assert.equal(
         resolvePayoutGateway({ active_payment_gateway: 'monnify', gateway_monnify_enabled: enabled }),
-        'paystack',
+        null,
         String(enabled),
       );
     }
@@ -126,7 +130,7 @@ describe('resolvePayoutGateway', () => {
     for (const enabled of [undefined, null, '', 'false', 'TRUE', ' true', '1']) {
       assert.equal(
         resolvePayoutGateway({ active_payment_gateway: 'novac', gateway_novac_enabled: enabled }),
-        'paystack',
+        null,
         String(enabled),
       );
     }
@@ -135,27 +139,41 @@ describe('resolvePayoutGateway', () => {
   test('lower-cases the active gateway name but does not trim it', () => {
     assert.equal(resolvePayoutGateway({ active_payment_gateway: 'MONNIFY', gateway_monnify_enabled: 'true' }), 'monnify');
     assert.equal(resolvePayoutGateway({ active_payment_gateway: 'Novac', gateway_novac_enabled: 'true' }), 'novac');
-    assert.equal(resolvePayoutGateway({ active_payment_gateway: ' monnify', gateway_monnify_enabled: 'true' }), 'paystack');
-    assert.equal(resolvePayoutGateway({ active_payment_gateway: 'novac ', gateway_novac_enabled: 'true' }), 'paystack');
+    assert.equal(resolvePayoutGateway({ active_payment_gateway: ' monnify', gateway_monnify_enabled: 'true' }), null);
+    assert.equal(resolvePayoutGateway({ active_payment_gateway: 'novac ', gateway_novac_enabled: 'true' }), null);
   });
 
-  test('ignores the enabled flag of a gateway that is not the active one', () => {
+  test('never moves payouts to a gateway that is not the active one', () => {
     assert.equal(
-      resolvePayoutGateway({ active_payment_gateway: 'monnify', gateway_monnify_enabled: 'false', gateway_novac_enabled: 'true' }),
-      'paystack',
+      resolvePayoutGateway({
+        active_payment_gateway: 'monnify',
+        gateway_monnify_enabled: 'false',
+        gateway_novac_enabled: 'true',
+        gateway_paystack_enabled: 'true',
+      }),
+      null,
     );
     assert.equal(
       resolvePayoutGateway({ active_payment_gateway: 'novac', gateway_novac_enabled: 'false', gateway_monnify_enabled: 'true' }),
-      'paystack',
+      null,
     );
     assert.equal(
       resolvePayoutGateway({ active_payment_gateway: 'paystack', gateway_monnify_enabled: 'true', gateway_novac_enabled: 'true' }),
+      null,
+    );
+    assert.equal(
+      resolvePayoutGateway({
+        active_payment_gateway: 'paystack',
+        gateway_paystack_enabled: 'true',
+        gateway_monnify_enabled: 'true',
+        gateway_novac_enabled: 'true',
+      }),
       'paystack',
     );
   });
 
-  test('falls back to paystack for a provider it does not know', () => {
-    assert.equal(resolvePayoutGateway({ active_payment_gateway: 'flutterwave', gateway_flutterwave_enabled: 'true' }), 'paystack');
+  test('resolves no gateway for a provider it does not know', () => {
+    assert.equal(resolvePayoutGateway({ active_payment_gateway: 'flutterwave', gateway_flutterwave_enabled: 'true' }), null);
   });
 });
 
@@ -197,7 +215,7 @@ describe('readPayoutGateway', () => {
     const { client, calls } = fakeClient({
       data: rowsOf({ active_payment_gateway: 'Monnify', gateway_monnify_enabled: 'true', gateway_paystack_enabled: 'true' }),
     });
-    assert.equal(await readPayoutGateway(client), 'monnify');
+    assert.deepEqual(await readPayoutGateway(client), { kind: 'gateway', gateway: 'monnify' });
     assert.deepEqual(calls, [{
       table: 'app_config',
       columns: 'key, value',
@@ -207,15 +225,19 @@ describe('readPayoutGateway', () => {
     assert.deepEqual([...PAYOUT_GATEWAY_KEYS], calls[0].values);
   });
 
-  test('resolves to paystack when the lookup succeeds with no rows, as the edge function does', async () => {
-    assert.equal(await readPayoutGateway(fakeClient({ data: [] }).client), 'paystack');
-    assert.equal(await readPayoutGateway(fakeClient({ data: null }).client), 'paystack');
+  test('reports no gateway when the lookup succeeds with no rows, as the edge function refuses', async () => {
+    assert.deepEqual(await readPayoutGateway(fakeClient({ data: [] }).client), { kind: 'none' });
+    assert.deepEqual(await readPayoutGateway(fakeClient({ data: null }).client), { kind: 'none' });
+    assert.deepEqual(
+      await readPayoutGateway(fakeClient({ data: rowsOf({ active_payment_gateway: 'monnify', gateway_monnify_enabled: 'false' }) }).client),
+      { kind: 'none' },
+    );
   });
 
-  test('reports an unknown provider instead of guessing when the lookup fails', async (t) => {
+  test('reports an unknown provider instead of guessing when the lookup fails, and tells it apart from no gateway', async (t) => {
     const logged = t.mock.method(console, 'error', () => {});
-    assert.equal(await readPayoutGateway(fakeClient({ error: { message: 'permission denied' } }).client), null);
-    assert.equal(await readPayoutGateway(fakeClient({ throws: new Error('socket hang up') }).client), null);
+    assert.deepEqual(await readPayoutGateway(fakeClient({ error: { message: 'permission denied' } }).client), { kind: 'unknown' });
+    assert.deepEqual(await readPayoutGateway(fakeClient({ throws: new Error('socket hang up') }).client), { kind: 'unknown' });
     assert.equal(logged.mock.callCount(), 2);
   });
 });
@@ -223,15 +245,27 @@ describe('readPayoutGateway', () => {
 describe('parity with resume-withdrawal (supabase/functions/_shared/gateway.ts)', { skip: !EDGE_PRESENT }, () => {
   const ACTIVE = [undefined, null, '', 'paystack', 'PAYSTACK', 'monnify', 'Monnify', 'MONNIFY', ' monnify', 'novac', 'NOVAC', 'novac ', 'flutterwave'];
   const FLAGS = [undefined, null, '', 'true', 'TRUE', 'false', ' true'];
-  const PAYSTACK_FLAGS = [undefined, 'true', 'false'];
 
-  test('resolves the same provider as getActiveGatewayName for every combination', async () => {
+  const REFUSAL = /^(?:The payout gateway settings could not be read \(.*\)|No payout gateway is set|The payout gateway is set to ".*", which is not supported|(?:Paystack|Monnify|Novac) is the payout gateway but is turned off)$/;
+
+  async function edgeOutcome(edge: EdgeResolver, client: ConfigClient): Promise<PayoutGateway | null> {
+    try {
+      return await edge(client);
+    } catch (error) {
+      assert.ok(error instanceof Error, 'the edge resolver refuses with an Error');
+      assert.match(error.message, REFUSAL, 'the edge resolver refuses with one of its own reasons, not a crash');
+      return null;
+    }
+  }
+
+  test('resolves the same provider as getActiveGatewayName for every combination, and refuses where it refuses', async () => {
     const edge = await edgeResolver();
     let checked = 0;
+    let refused = 0;
     for (const active of ACTIVE) {
       for (const monnify of FLAGS) {
         for (const novac of FLAGS) {
-          for (const paystack of PAYSTACK_FLAGS) {
+          for (const paystack of FLAGS) {
             const config = {
               active_payment_gateway: active,
               gateway_monnify_enabled: monnify,
@@ -240,24 +274,70 @@ describe('parity with resume-withdrawal (supabase/functions/_shared/gateway.ts)'
             };
             const rows = rowsOf(config);
             const label = JSON.stringify(config);
-            const expected = await edge(fakeClient({ data: rows }).client);
+            const expected = await edgeOutcome(edge, fakeClient({ data: rows }).client);
             assert.equal(resolvePayoutGateway(config), expected, label);
             assert.equal(resolvePayoutGateway(payoutGatewayConfig(rows)), expected, label);
-            assert.equal(await readPayoutGateway(fakeClient({ data: rows }).client), expected, label);
+            assert.deepEqual(
+              await readPayoutGateway(fakeClient({ data: rows }).client),
+              expected === null ? { kind: 'none' } : { kind: 'gateway', gateway: expected },
+              label,
+            );
+            if (expected === null) refused += 1;
             checked += 1;
           }
         }
       }
     }
-    assert.equal(checked, ACTIVE.length * FLAGS.length * FLAGS.length * PAYSTACK_FLAGS.length);
+    assert.equal(checked, ACTIVE.length * FLAGS.length ** 3);
+    assert.ok(refused > 0 && refused < checked, `${refused} of ${checked} combinations refused`);
+  });
+
+  test('the edge refuses a failed lookup instead of choosing a gateway', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const edge = await edgeResolver();
+    await assert.rejects(edge(fakeClient({ error: { message: 'permission denied' } }).client), /could not be read \(permission denied\)/);
+    await assert.rejects(edge(fakeClient({ data: [] }).client), /^Error: No payout gateway is set$/);
+    assert.deepEqual(await readPayoutGateway(fakeClient({ error: { message: 'permission denied' } }).client), { kind: 'unknown' });
+  });
+
+  test('the refusal check rejects a crash, so a broken resolver cannot pass for a refusal', async () => {
+    const crashing: EdgeResolver = async () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'toLowerCase')");
+    };
+    await assert.rejects(edgeOutcome(crashing, fakeClient({ data: [] }).client), assert.AssertionError);
+    for (const reason of [
+      'The payout gateway settings could not be read (permission denied)',
+      'No payout gateway is set',
+      'The payout gateway is set to "flutterwave", which is not supported',
+      'Monnify is the payout gateway but is turned off',
+    ]) {
+      const refusing: EdgeResolver = async () => {
+        throw new Error(reason);
+      };
+      assert.equal(await edgeOutcome(refusing, fakeClient({ data: [] }).client), null, reason);
+    }
   });
 
   test('queries the same app_config keys as getActiveGatewayName', async () => {
     const edge = await edgeResolver();
     const edgeLookup = fakeClient({ data: [] });
     const ownLookup = fakeClient({ data: [] });
-    await edge(edgeLookup.client);
+    await edgeOutcome(edge, edgeLookup.client);
     await readPayoutGateway(ownLookup.client);
     assert.deepEqual(ownLookup.calls, edgeLookup.calls);
+  });
+
+  test('resume-withdrawal and process-withdrawal look the gateway up before they claim or debit, and refuse with 503', () => {
+    const resume = readFileSync(EDGE_RESUME, 'utf8');
+    const lookup = resume.indexOf('await getActiveGateway(admin)');
+    const claim = resume.indexOf(".update({ status: 'processing' })");
+    assert.ok(lookup > 0 && claim > lookup, 'resume-withdrawal resolves the gateway before its claim');
+    assert.match(resume.slice(lookup, claim), /\b503\b/);
+    assert.equal(resume.indexOf('await getActiveGateway(admin)', lookup + 1), -1, 'resume-withdrawal resolves the gateway once');
+    const process = readFileSync(EDGE_PROCESS, 'utf8');
+    const resolved = process.indexOf('await getActiveGateway(admin)');
+    const debit = process.indexOf("rpc('process_withdrawal_debit'");
+    assert.ok(resolved > 0 && debit > resolved, 'process-withdrawal resolves the gateway before the debit');
+    assert.match(process.slice(resolved, debit), /\b503\b/);
   });
 });

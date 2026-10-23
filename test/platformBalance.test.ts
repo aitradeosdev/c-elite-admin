@@ -196,12 +196,15 @@ describe('GET payload (mobile contract)', () => {
     assert.deepEqual(payload.config, { platform_balance_mode: 'live', platform_balance_live_error: null });
   });
 
-  test('the live provider is resolved the way the refresh job resolves it', () => {
+  test('the live provider is resolved the way the refresh job resolves it, with no gateway when it would refuse', () => {
     const disabled = model.presentBalance(rows({ ...STORED, active_payment_gateway: 'monnify' }));
-    assert.equal(disabled.live_gateway, 'paystack');
+    assert.equal(disabled.live_gateway, null);
     assert.equal(disabled.config.active_payment_gateway, 'monnify');
     const enabled = model.presentBalance(rows({ ...STORED, active_payment_gateway: 'monnify', gateway_monnify_enabled: 'true' }));
     assert.equal(enabled.live_gateway, 'monnify');
+    assert.equal(model.presentBalance(rows({ ...STORED, gateway_paystack_enabled: 'false' })).live_gateway, null);
+    assert.equal(model.presentBalance(rows({ ...STORED, active_payment_gateway: null })).live_gateway, null);
+    assert.equal(model.presentBalance(rows({ ...STORED, active_payment_gateway: 'flutterwave' })).live_gateway, null);
   });
 
   test('every key read is a config key or a gateway flag', () => {
@@ -364,13 +367,15 @@ describe('snapshot', () => {
     assert.equal(snapshotOf({ platform_balance_mode: 'live' }).shownAmount, 12345.67);
   });
 
-  test('refuses a body without config and falls back to the configured provider', () => {
+  test('refuses a body without config and names no provider the server did not report', () => {
     assert.equal(model.toSnapshot({ success: true }), null);
     assert.equal(model.toSnapshot({ config: [] }), null);
-    const fallback = model.toSnapshot({ config: { active_payment_gateway: 'novac', platform_balance_live_at: 'not a date' } });
-    assert.ok(fallback);
-    assert.equal(fallback.gateway, 'paystack');
-    assert.equal(fallback.liveAt, null);
+    const unreported = model.toSnapshot({ config: { active_payment_gateway: 'novac', platform_balance_live_at: 'not a date' } });
+    assert.ok(unreported);
+    assert.equal(unreported.gateway, null);
+    assert.equal(unreported.liveAt, null);
+    assert.equal(model.toSnapshot({ config: {}, live_gateway: null })?.gateway, null);
+    assert.equal(model.toSnapshot({ config: {}, live_gateway: 'flutterwave' })?.gateway, null);
     const reported = model.toSnapshot({ config: {}, live_gateway: 'novac' });
     assert.equal(reported?.gateway, 'novac');
   });
@@ -403,6 +408,26 @@ describe('live balance health', () => {
     assert.equal(model.liveIssue(snapshotOf({ platform_balance_live: 'abc' }), NOW)?.kind, 'invalid');
     assert.equal(model.liveIssue(snapshotOf({ platform_balance_live_at: '2026-10-02T07:50:00.000Z' }), NOW)?.kind, 'stale');
     assert.equal(model.liveIssue(snapshotOf({ platform_balance_live_at: '2026-10-02T08:00:00.000Z' }), NOW), null);
+  });
+
+  test('without a valid payout gateway the screen says so first and names no provider', () => {
+    const none = snapshotOf({ active_payment_gateway: 'monnify', platform_balance_live_error: 'Monnify is the payout gateway but is turned off' });
+    assert.equal(none.gateway, null);
+    assert.deepEqual(model.liveIssue(none, NOW), {
+      kind: 'no_gateway',
+      title: 'No payout gateway is available',
+      message: 'The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed. Choose a primary gateway that is turned on in Admin Settings.',
+    });
+    assert.equal(model.liveIssue(snapshotOf({ gateway_paystack_enabled: 'false' }), NOW)?.kind, 'no_gateway');
+    assert.equal(model.sourceText(snapshotOf({ platform_balance_mode: 'live', gateway_paystack_enabled: 'false' })), 'Live balance from the payout gateway');
+    assert.equal(model.sourceText(snapshotOf({ platform_balance_mode: 'live' })), 'Live balance from Paystack');
+    assert.equal(model.providerLabel(null), 'No payout gateway');
+    assert.equal(model.providerName(null), 'the payout gateway');
+    assert.equal(model.providerWord(null), 'payout gateway');
+    for (const gateway of ['paystack', 'monnify', 'novac'] as const) {
+      const label = model.PROVIDER_LABELS[gateway];
+      assert.deepEqual([model.providerLabel(gateway), model.providerName(gateway), model.providerWord(gateway)], [label, label, label]);
+    }
   });
 
   test('a failed refresh says which provider failed and what users still see', () => {
@@ -497,6 +522,41 @@ describe('confirmation dialogs', () => {
     assert.match(never.consequences?.join(' ') ?? '', /users will see ₦0\.00 until the first refresh succeeds/);
     const failed = parts.modeOptions(snapshotOf({ platform_balance_live_error: 'timeout' }), 'live', NOW);
     assert.match(failed.consequences?.join(' ') ?? '', /The last refresh failed/);
+  });
+
+  test('a switch to live without a valid payout gateway says it cannot be refreshed', () => {
+    const none = snapshotOf({ gateway_paystack_enabled: 'false' });
+    const options = parts.modeOptions(none, 'live', NOW);
+    const live = options.details?.find((detail) => detail.label === 'Live balance');
+    assert.equal(textOfNode(live?.value), `Last fetched ${parts.stamp(none.liveAt)}; no payout gateway is available now`);
+    assert.match(textOfNode(live?.value), /^Last fetched .+ WAT; no payout gateway is available now$/);
+    assert.deepEqual(options.consequences, [
+      'The figure follows the payout gateway once one is available.',
+      'No payout gateway is available, so the live balance cannot be refreshed and users will see ₦12,345.67 until one is available.',
+    ]);
+    for (const line of options.consequences ?? []) assert.doesNotMatch(line, /refreshed every|will see it change/);
+    const never = parts.modeOptions(snapshotOf({ gateway_paystack_enabled: 'false', platform_balance_live_at: '' }), 'live', NOW);
+    assert.equal(
+      textOfNode(never.details?.find((detail) => detail.label === 'Live balance')?.value),
+      'Never fetched; no payout gateway is available now',
+    );
+    const withGateway = parts.modeOptions(snapshotOf({}), 'live', NOW);
+    assert.equal(
+      textOfNode(withGateway.details?.find((detail) => detail.label === 'Live balance')?.value),
+      `Paystack, refreshed ${parts.stamp(snapshotOf({}).liveAt)}`,
+    );
+    assert.equal(
+      withGateway.consequences?.[0],
+      'The figure follows Paystack from now on. It is refreshed every 30 minutes, so users will see it change.',
+    );
+    assert.deepEqual(model.modeConsequences(none, 'static', NOW), [
+      'The figure stops following the payout gateway and stays at ₦48,350,000.00 until an admin changes the static amount.',
+    ]);
+    const liveNone = snapshotOf({ platform_balance_mode: 'live', gateway_paystack_enabled: 'false' });
+    assert.match(
+      model.staticConsequences(liveNone, 1000, false)[0],
+      /^The source is Live, so users keep seeing the payout gateway balance\. This amount is shown only after you switch to Static\.$/,
+    );
   });
 
   test('a switch back to static names the amount users will see', () => {
@@ -721,6 +781,7 @@ describe('cards', () => {
     const fresh = render(createElement(parts.LiveCard, { snapshot: snapshotOf(), now: NOW, headingId: 'h-live' }));
     assert.match(textOf(fresh), /₦12,345\.67/);
     assert.match(textOf(fresh), /Paystack/);
+    assert.match(textOf(fresh), /Read from Paystack every 30 minutes by a scheduled job\./);
     assert.match(textOf(fresh), /WAT/);
     assert.match(textOf(fresh), /30m ago/);
     assert.match(textOf(fresh), /Not in use/);
@@ -731,6 +792,28 @@ describe('cards', () => {
     }));
     assert.match(textOf(never), /Never/);
     assert.match(textOf(never), /The last live refresh failed/);
+  });
+
+  test('without a valid payout gateway both cards name none and flag it', () => {
+    const none = snapshotOf({ gateway_paystack_enabled: 'false' });
+    const card = textOf(render(createElement(parts.LiveCard, { snapshot: none, now: NOW, headingId: 'h-live' })));
+    assert.match(card, /Read every 30 minutes by a scheduled job once a payout gateway is available\./);
+    assert.match(card, /No payout gateway/);
+    assert.match(card, /No payout gateway is available/);
+    assert.doesNotMatch(card, /Paystack|Monnify|Novac|undefined/);
+    const shown = textOf(render(createElement(parts.ShownCard, shownProps(snapshotOf({ platform_balance_mode: 'live', gateway_paystack_enabled: 'false' }), true))));
+    assert.match(shown, /Live balance from the payout gateway/);
+    assert.match(shown, /Users see the last payout gateway balance fetched: ₦12,345\.67 as of .+ WAT\./);
+    assert.doesNotMatch(shown, /refreshed every 30 minutes/);
+    assert.match(shown, /No payout gateway is available/);
+    assert.match(shown, /The primary payout gateway is not set, not recognised or turned off, so the live balance cannot be refreshed\./);
+    assert.doesNotMatch(shown, /Paystack|Monnify|Novac|undefined/);
+    const neverShown = textOf(render(createElement(parts.ShownCard, shownProps(
+      snapshotOf({ platform_balance_mode: 'live', gateway_paystack_enabled: 'false', platform_balance_live_at: '' }),
+      true,
+    ))));
+    assert.match(neverShown, /Users see the payout gateway balance once one is available\. None has been fetched yet\./);
+    assert.doesNotMatch(neverShown, /refreshed every 30 minutes/);
   });
 
   test('the skeleton announces loading once', () => {

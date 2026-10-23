@@ -1,12 +1,25 @@
 import { SETTINGS_ONLY_CONFIG_KEYS } from '../../lib/configSecrets';
 import { validateConfigUrl } from '../../lib/configUrls';
-import { SETTING_LABELS, checkSetting, isSettingKey, sameSettingValue } from './referralRules';
+import { SETTING_LABELS as SIGNUP_LABELS, SIGNUP_CONDITIONS, isSignupCondition } from '../bonuses-rewards/model';
+import { SIGNUP_BONUS_MAX, amountTextProblem, parseAmountText, type AmountRule } from '../bonuses-rewards/rewardRules';
+import { SETTING_LABELS, checkSetting, isSettingKey, sameSettingValue, type SettingCheck } from './referralRules';
 
 export const MAX_CONFIG_KEYS = 200;
 export const NO_CHANGES_MESSAGE = 'No changes provided';
 
 const KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 const EXPECTED_SHAPE = 'expected must map each changed key to the value you last saw.';
+
+type SignupKey = 'signup_bonus_active' | 'signup_bonus_amount' | 'signup_bonus_condition';
+
+const SIGNUP_KEYS: readonly SignupKey[] = ['signup_bonus_active', 'signup_bonus_amount', 'signup_bonus_condition'];
+const SIGNUP_PAIR: readonly SignupKey[] = ['signup_bonus_active', 'signup_bonus_amount'];
+const SIGNUP_AMOUNT: AmountRule = { noun: 'the bonus amount', max: SIGNUP_BONUS_MAX };
+const PAYABLE_AMOUNT = /^\d+(?:\.\d+)?$/;
+const SIGNUP_SWITCH = `${SIGNUP_LABELS.signup_bonus_active}: Switch the signup bonus on or off (true or false).`;
+const SIGNUP_CONDITION = `${SIGNUP_LABELS.signup_bonus_condition}: Choose ${SIGNUP_CONDITIONS.map((option) => `“${option.label}”`).join(' or ')}.`;
+const SIGNUP_ZERO = 'A signup bonus that is on needs an amount above ₦0. Switch the bonus off instead.';
+const SIGNUP_UNREADABLE = `${SIGNUP_LABELS.signup_bonus_amount}: Enter a number, like 1500 or 1500.50.`;
 
 export type ConfigSensitivity = 'normal' | 'financial' | 'security';
 
@@ -43,8 +56,33 @@ function scalarText(value: unknown): string | null {
   return null;
 }
 
+function isSignupKey(key: string): key is SignupKey {
+  return (SIGNUP_KEYS as readonly string[]).includes(key);
+}
+
+function checkSignupSetting(key: SignupKey, raw: unknown): SettingCheck {
+  const text = scalarText(raw)?.trim() ?? '';
+  if (key === 'signup_bonus_active') {
+    const flag = text.toLowerCase();
+    return flag === 'true' || flag === 'false' ? { ok: true, value: flag } : { ok: false, message: SIGNUP_SWITCH };
+  }
+  if (key === 'signup_bonus_condition') {
+    return isSignupCondition(text) ? { ok: true, value: text } : { ok: false, message: SIGNUP_CONDITION };
+  }
+  const problem = amountTextProblem(text, SIGNUP_AMOUNT);
+  const amount = problem === null ? parseAmountText(text) : null;
+  return amount === null
+    ? { ok: false, message: `${SIGNUP_LABELS.signup_bonus_amount}: ${problem}` }
+    : { ok: true, value: String(amount) };
+}
+
 export function configLabel(key: string): string {
-  return isSettingKey(key) ? SETTING_LABELS[key] : key;
+  if (isSettingKey(key)) return SETTING_LABELS[key];
+  return isSignupKey(key) ? SIGNUP_LABELS[key] : key;
+}
+
+export function configReadKeys(keys: readonly string[]): string[] {
+  return keys.some(isSignupKey) ? Array.from(new Set([...keys, ...SIGNUP_KEYS])) : [...keys];
 }
 
 export type ConfigKeysCheck = { ok: true; keys: string[] | null } | { ok: false; message: string };
@@ -101,6 +139,12 @@ export function readConfigPatch(body: unknown, allowed: ReadonlySet<string>): Co
       accepted[key] = checked.value;
       continue;
     }
+    if (isSignupKey(key)) {
+      const checked = checkSignupSetting(key, raw);
+      if (!checked.ok) return checked;
+      accepted[key] = checked.value;
+      continue;
+    }
     const value = scalarText(raw);
     if (value === null) return { ok: false, message: `${key} must be text, a number or true/false.` };
     accepted[key] = value;
@@ -127,6 +171,22 @@ export type CurrentConfig = Readonly<Record<string, string | null>>;
 
 function currentOf(current: CurrentConfig, key: string): string | null | undefined {
   return owns(current, key) ? current[key] : undefined;
+}
+
+function signupAmountProblem(amount: string): string | null {
+  const problem = amountTextProblem(amount, { ...SIGNUP_AMOUNT, positive: true });
+  if (problem) return parseAmountText(amount) === 0 ? SIGNUP_ZERO : `${SIGNUP_LABELS.signup_bonus_amount}: ${problem}`;
+  return PAYABLE_AMOUNT.test(amount) ? null : SIGNUP_UNREADABLE;
+}
+
+export function signupBonusProblem(changes: Readonly<Record<string, string>>, current: CurrentConfig): string | null {
+  const switching = owns(changes, 'signup_bonus_active');
+  if (!switching && !owns(changes, 'signup_bonus_amount')) return null;
+  const effective = (key: SignupKey) => (owns(changes, key) ? changes[key] : currentOf(current, key) ?? null);
+  if (effective('signup_bonus_active') !== 'true') return null;
+  const amountProblem = signupAmountProblem(effective('signup_bonus_amount') ?? '');
+  if (amountProblem) return amountProblem;
+  return switching && !isSignupCondition(effective('signup_bonus_condition')) ? SIGNUP_CONDITION : null;
 }
 
 function joinLabels(labels: readonly string[]): string {
@@ -158,6 +218,9 @@ export function planConfigWrite(patch: ConfigPatch, current: CurrentConfig): Con
     }
     changes[key] = next;
     if (patch.expected && owns(patch.expected, key)) expected[key] = patch.expected[key];
+  }
+  if (SIGNUP_PAIR.some((key) => owns(changes, key))) {
+    for (const key of SIGNUP_PAIR) if (!owns(changes, key)) expected[key] = currentOf(current, key) ?? '';
   }
   return { changes, expected: Object.keys(expected).length > 0 ? expected : null, unchanged };
 }

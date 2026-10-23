@@ -15,12 +15,14 @@ type Rules = typeof import('../app/(dashboard)/referral-management/referralRules
 type ConfigRules = typeof import('../app/(dashboard)/referral-management/appConfigRules.ts');
 type Model = typeof import('../app/(dashboard)/referral-management/model.ts');
 type Options = typeof import('../app/(dashboard)/referral-management/confirmOptions.tsx');
+type BonusModel = typeof import('../app/(dashboard)/bonuses-rewards/model.ts');
 
 let rules: Rules;
 let config: ConfigRules;
 let model: Model;
 let options: Options;
 let parts: Record<string, ElementType>;
+let bonuses: BonusModel;
 
 before(async () => {
   rules = await loadAppModule<Rules>('(dashboard)/referral-management/referralRules.ts');
@@ -28,6 +30,7 @@ before(async () => {
   model = await loadAppModule<Model>('(dashboard)/referral-management/model.ts');
   options = await loadAppModule<Options>('(dashboard)/referral-management/confirmOptions.tsx');
   parts = await loadAppModule<Record<string, ElementType>>('(dashboard)/referral-management/ReferralParts.tsx');
+  bonuses = await loadAppModule<BonusModel>('(dashboard)/bonuses-rewards/model.ts');
 });
 
 const REFERRER = '0a000000-0000-4000-8000-000000000001';
@@ -583,6 +586,122 @@ describe('/api/app-config planning', () => {
     assert.equal(config.sensitivityFor(['terms_url']), 'normal');
     assert.equal(config.sensitivityFor(['referral_active']), 'financial');
     assert.equal(config.sensitivityFor(['paystack_webhook_ips', 'withdraw_fee']), 'security');
+  });
+
+  test('signup bonus keys accept only what the claim reads, stored in the form it reads', () => {
+    const checked = config.readConfigPatch({
+      changes: { signup_bonus_active: ' TRUE ', signup_bonus_amount: '₦2,500.50', signup_bonus_condition: ' click_activate ' },
+    }, TEST_ALLOWED);
+    assert.ok(checked.ok);
+    if (!checked.ok) return;
+    assert.deepEqual(checked.patch.changes, {
+      signup_bonus_active: 'true',
+      signup_bonus_amount: '2500.5',
+      signup_bonus_condition: 'click_activate',
+    });
+    const refused: ReadonlyArray<[Record<string, unknown>, string]> = [
+      [{ signup_bonus_active: 'on' }, 'Signup bonus: Switch the signup bonus on or off (true or false).'],
+      [{ signup_bonus_condition: 'first_withdrawal' }, 'When users can claim the signup bonus: Choose “After their first approved trade” or “Straight away”.'],
+      [{ signup_bonus_amount: '' }, 'Signup bonus amount: Enter the bonus amount.'],
+      [{ signup_bonus_amount: '1000000.5' }, 'Signup bonus amount: Use 1,000,000 or less.'],
+    ];
+    for (const [changes, message] of refused) {
+      assert.deepEqual(config.readConfigPatch({ changes }, TEST_ALLOWED), { ok: false, message }, JSON.stringify(changes));
+    }
+  });
+
+  test('a signup bonus left on needs a payable amount, and switching it on needs a condition the claim enforces', () => {
+    const zero = 'A signup bonus that is on needs an amount above ₦0. Switch the bonus off instead.';
+    const condition = 'When users can claim the signup bonus: Choose “After their first approved trade” or “Straight away”.';
+    const on = { signup_bonus_active: 'true', signup_bonus_amount: '2000', signup_bonus_condition: 'first_trade' };
+    const off = { ...on, signup_bonus_active: 'false' };
+    assert.equal(config.signupBonusProblem({ signup_bonus_amount: '0' }, on), zero);
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, { ...off, signup_bonus_amount: '0' }), zero);
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, { ...off, signup_bonus_amount: '2,000' }),
+      'Signup bonus amount: Enter a number, like 1500 or 1500.50.');
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, { ...off, signup_bonus_amount: '5000000' }),
+      'Signup bonus amount: Use 1,000,000 or less.');
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, { signup_bonus_active: 'false', signup_bonus_amount: '2000' }), condition);
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, { ...off, signup_bonus_condition: 'first_withdrawal' }), condition);
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, off), null);
+    assert.equal(config.signupBonusProblem({ signup_bonus_amount: '0' }, off), null);
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'false' }, { ...on, signup_bonus_amount: null }), null);
+    assert.equal(config.signupBonusProblem({ signup_bonus_amount: '300' }, { ...on, signup_bonus_condition: null }), null);
+    assert.equal(config.signupBonusProblem({ signup_bonus_condition: 'click_activate' }, { ...on, signup_bonus_amount: '0' }), null);
+    assert.equal(config.signupBonusProblem({ withdraw_fee: '10' }, {}), null);
+  });
+
+  test('what the bonuses page sends passes unchanged, and an on bonus at ₦0 gets the page\'s own message', () => {
+    const live = bonuses.toSettingsSnapshot({
+      config: { signup_bonus_active: 'false', signup_bonus_amount: '0', signup_bonus_condition: 'first_trade' },
+    });
+    assert.ok(live);
+    if (!live) return;
+    let draft = bonuses.editSetting(bonuses.EMPTY_SETTINGS_DRAFT, live, 'signup_bonus_active', 'true');
+    draft = bonuses.editSetting(draft, live, 'signup_bonus_amount', '₦2,500.50');
+    draft = bonuses.editSetting(draft, live, 'signup_bonus_condition', 'click_activate');
+    const payload = bonuses.settingsPayload(bonuses.settingsChanges(draft));
+    const checked = config.readConfigPatch(payload, TEST_ALLOWED);
+    assert.ok(checked.ok);
+    if (!checked.ok) return;
+    assert.deepEqual(checked.patch.changes, payload.changes);
+    assert.equal(config.signupBonusProblem(checked.patch.changes, live.values), null);
+    const switched = bonuses.editSetting(bonuses.EMPTY_SETTINGS_DRAFT, live, 'signup_bonus_active', 'true');
+    const message = bonuses.settingsErrors(live, switched).signup_bonus_amount;
+    assert.equal(message, 'A signup bonus that is on needs an amount above ₦0. Switch the bonus off instead.');
+    assert.equal(config.signupBonusProblem({ signup_bonus_active: 'true' }, live.values), message);
+  });
+
+  test('a change to the signup switch or amount pins the other at the value read; nothing else is pinned', () => {
+    const on = { signup_bonus_active: 'true', signup_bonus_amount: '2000', signup_bonus_condition: 'first_trade' };
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { signup_bonus_amount: '300' }, expected: { signup_bonus_amount: '2000' } }, on),
+      { changes: { signup_bonus_amount: '300' }, expected: { signup_bonus_amount: '2000', signup_bonus_active: 'true' }, unchanged: [] },
+    );
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { signup_bonus_active: 'false' }, expected: null }, { signup_bonus_amount: null }),
+      { changes: { signup_bonus_active: 'false' }, expected: { signup_bonus_amount: '' }, unchanged: [] },
+    );
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { signup_bonus_active: 'true' }, expected: null }, {}),
+      { changes: { signup_bonus_active: 'true' }, expected: { signup_bonus_amount: '' }, unchanged: [] },
+    );
+    const both = { signup_bonus_active: 'true', signup_bonus_amount: '300', signup_bonus_condition: 'click_activate' };
+    assert.deepEqual(config.planConfigWrite({ changes: both, expected: null }, on), { changes: both, expected: null, unchanged: [] });
+    assert.deepEqual(
+      config.planConfigWrite({ changes: { signup_bonus_condition: 'click_activate', levels_active: 'false' }, expected: null }, on),
+      { changes: { signup_bonus_condition: 'click_activate', levels_active: 'false' }, expected: null, unchanged: [] },
+    );
+  });
+
+  test('a signup bonus change reads all three signup settings', () => {
+    assert.deepEqual(config.configReadKeys(['withdraw_fee', 'levels_active']), ['withdraw_fee', 'levels_active']);
+    assert.deepEqual(
+      config.configReadKeys(['signup_bonus_amount', 'levels_active']),
+      ['signup_bonus_amount', 'levels_active', 'signup_bonus_active', 'signup_bonus_condition'],
+    );
+    assert.deepEqual(
+      config.configReadKeys(['signup_bonus_condition', 'signup_bonus_active', 'signup_bonus_amount']),
+      ['signup_bonus_condition', 'signup_bonus_active', 'signup_bonus_amount'],
+    );
+  });
+
+  test('signup bonus keys are named by the labels the bonuses page uses', () => {
+    for (const key of ['signup_bonus_active', 'signup_bonus_amount', 'signup_bonus_condition'] as const) {
+      assert.equal(config.configLabel(key), bonuses.SETTING_LABELS[key]);
+    }
+    assert.equal(config.configLabel('levels_active'), 'levels_active');
+    assert.equal(
+      config.conflictMessage(['signup_bonus_active', 'signup_bonus_amount']),
+      'Another admin changed Signup bonus and Signup bonus amount after you loaded them, so nothing was saved. Reload to see the current values.',
+    );
+    const refused = config.readConfigPatch({ changes: { signup_bonus_condition: 'first_withdrawal' } }, TEST_ALLOWED);
+    assert.equal(refused.ok, false);
+    const message = refused.ok ? '' : refused.message;
+    for (const option of bonuses.SIGNUP_CONDITIONS) {
+      assert.ok(message.includes(`“${option.label}”`), option.label);
+      assert.ok(!message.includes(option.value), option.value);
+    }
   });
 });
 

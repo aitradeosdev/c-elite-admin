@@ -138,6 +138,10 @@ const SETTINGS_UNCONFIRMED = 'The save could not be confirmed. Reload the settin
 const SECRET_WRITE_FAILED = 'The database refused the write.';
 const BALANCE_NOT_SAVED = 'The platform balance could not be saved. Nothing was changed.';
 const BALANCE_UNCONFIRMED = 'The save could not be confirmed. Reload the platform balance to check it before trying again.';
+const SIGNUP_SWITCH = 'Signup bonus: Switch the signup bonus on or off (true or false).';
+const SIGNUP_CONDITION = 'When users can claim the signup bonus: Choose “After their first approved trade” or “Straight away”.';
+const SIGNUP_ZERO = 'A signup bonus that is on needs an amount above ₦0. Switch the bonus off instead.';
+const SIGNUP_UNREADABLE = 'Signup bonus amount: Enter a number, like 1500 or 1500.50.';
 
 const SEED: Readonly<Record<string, string>> = {
   min_withdrawal_amount: '1000',
@@ -725,6 +729,13 @@ function seenSettings(): Record<string, string> {
   const seen: Record<string, string> = {};
   for (const key of settingsRules.SETTINGS_KEYS) seen[key] = harness.db.config.get(key) ?? '';
   return seen;
+}
+
+function storeConfig(values: Readonly<Record<string, string | null | undefined>>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) harness.db.config.delete(key);
+    else harness.db.config.set(key, value);
+  }
 }
 
 describe('access rules', () => {
@@ -1501,6 +1512,221 @@ describe('app-config: PATCH', () => {
       assert.deepEqual(res.body, failureBody(message, 'VALIDATION_ERROR'));
       assert.deepEqual(harness.db.operations, []);
     }
+  });
+
+  test('signup bonus values the claim cannot use are refused before the database is called', async () => {
+    const cases: ReadonlyArray<[Record<string, unknown>, string]> = [
+      [{ signup_bonus_active: 'yes' }, SIGNUP_SWITCH],
+      [{ signup_bonus_active: '' }, SIGNUP_SWITCH],
+      [{ signup_bonus_active: 1 }, SIGNUP_SWITCH],
+      [{ signup_bonus_active: null }, SIGNUP_SWITCH],
+      [{ signup_bonus_condition: 'first_withdrawal' }, SIGNUP_CONDITION],
+      [{ signup_bonus_condition: 'First_Trade' }, SIGNUP_CONDITION],
+      [{ signup_bonus_condition: '' }, SIGNUP_CONDITION],
+      [{ signup_bonus_condition: ['first_trade'] }, SIGNUP_CONDITION],
+      [{ levels_active: 'false', signup_bonus_condition: 'first_withdrawal' }, SIGNUP_CONDITION],
+      [{ signup_bonus_amount: '' }, 'Signup bonus amount: Enter the bonus amount.'],
+      [{ signup_bonus_amount: null }, 'Signup bonus amount: Enter the bonus amount.'],
+      [{ signup_bonus_amount: '-500' }, 'Signup bonus amount: Bonus amount cannot be negative.'],
+      [{ signup_bonus_amount: -500 }, 'Signup bonus amount: Bonus amount cannot be negative.'],
+      [{ signup_bonus_amount: 'abc' }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_amount: '1e3' }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_amount: true }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_amount: '1,50' }, 'Signup bonus amount: Use a full stop for decimals and commas only between thousands, like 1,500.50.'],
+      [{ signup_bonus_amount: '2000.555' }, 'Signup bonus amount: Use at most 2 decimal places.'],
+      [{ signup_bonus_amount: '1000000.01' }, 'Signup bonus amount: Use 1,000,000 or less.'],
+    ];
+    for (const [changes, message] of cases) {
+      reset();
+      const res = await patchRoute(APP_CONFIG, { changes });
+      const label = JSON.stringify(changes);
+      assert.equal(res.status, 400, label);
+      assert.deepEqual(res.body, failureBody(message, 'VALIDATION_ERROR'), label);
+      assert.deepEqual(harness.db.operations, [], label);
+    }
+  });
+
+  test('signup bonus values are stored the way the claim reads them', async () => {
+    const cases: ReadonlyArray<[Record<string, unknown>, Record<string, string>]> = [
+      [{ signup_bonus_active: ' TRUE ' }, { signup_bonus_active: 'true' }],
+      [{ signup_bonus_active: true }, { signup_bonus_active: 'true' }],
+      [{ signup_bonus_condition: ' click_activate ' }, { signup_bonus_condition: 'click_activate' }],
+      [{ signup_bonus_amount: '₦2,500.50' }, { signup_bonus_amount: '2500.5' }],
+      [{ signup_bonus_amount: 300 }, { signup_bonus_amount: '300' }],
+      [{ signup_bonus_amount: '0.00' }, { signup_bonus_amount: '0' }],
+    ];
+    for (const [changes, stored] of cases) {
+      reset();
+      const res = await patchRoute(APP_CONFIG, { changes });
+      const label = JSON.stringify(changes);
+      assert.equal(res.status, 200, label);
+      assert.deepEqual(casArgs().p_changes, stored, label);
+      for (const [key, value] of Object.entries(stored)) assert.equal(harness.db.config.get(key), value, label);
+    }
+  });
+
+  test('a signup bonus left on must be payable from the stored values too, and a refusal writes nothing', async () => {
+    const cases: ReadonlyArray<[Record<string, string | null | undefined>, Record<string, string>, string]> = [
+      [{ signup_bonus_amount: '0' }, { signup_bonus_active: 'true' }, SIGNUP_ZERO],
+      [{ signup_bonus_amount: '0.00' }, { signup_bonus_active: 'true' }, SIGNUP_ZERO],
+      [{ signup_bonus_active: 'true' }, { signup_bonus_amount: '0' }, SIGNUP_ZERO],
+      [{}, { signup_bonus_active: 'true', signup_bonus_amount: '0' }, SIGNUP_ZERO],
+      [{ signup_bonus_amount: undefined }, { signup_bonus_active: 'true' }, 'Signup bonus amount: Enter the bonus amount.'],
+      [{ signup_bonus_amount: null }, { signup_bonus_active: 'true' }, 'Signup bonus amount: Enter the bonus amount.'],
+      [{ signup_bonus_amount: '-200' }, { signup_bonus_active: 'true' }, 'Signup bonus amount: Bonus amount cannot be negative.'],
+      [{ signup_bonus_amount: 'abc' }, { signup_bonus_active: 'true' }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_amount: '5000000' }, { signup_bonus_active: 'true' }, 'Signup bonus amount: Use 1,000,000 or less.'],
+      [{ signup_bonus_amount: '2000.555' }, { signup_bonus_active: 'true' }, 'Signup bonus amount: Use at most 2 decimal places.'],
+      [{ signup_bonus_amount: '2,000' }, { signup_bonus_active: 'true' }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_amount: '₦2000' }, { signup_bonus_active: 'true' }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_amount: ' 2000' }, { signup_bonus_active: 'true' }, SIGNUP_UNREADABLE],
+      [{ signup_bonus_condition: 'first_withdrawal' }, { signup_bonus_active: 'true' }, SIGNUP_CONDITION],
+      [{ signup_bonus_condition: undefined }, { signup_bonus_active: 'true' }, SIGNUP_CONDITION],
+      [{ signup_bonus_condition: null }, { signup_bonus_active: 'true' }, SIGNUP_CONDITION],
+      [{ signup_bonus_active: 'true', signup_bonus_condition: 'first_withdrawal' }, { signup_bonus_active: 'true' }, SIGNUP_CONDITION],
+    ];
+    for (const [stored, changes, message] of cases) {
+      reset();
+      storeConfig(stored);
+      const before = new Map(harness.db.config);
+      const res = await patchRoute(APP_CONFIG, { changes });
+      const label = JSON.stringify([Object.entries(stored), changes]);
+      assert.equal(res.status, 400, label);
+      assert.deepEqual(res.body, failureBody(message, 'VALIDATION_ERROR'), label);
+      assert.deepEqual(kinds(), ['select:app_config'], label);
+      assert.deepEqual(harness.db.config, before, label);
+      assert.deepEqual(harness.db.audits, [], label);
+    }
+  });
+
+  test('a signup bonus change reads all three signup settings; other changes read only their own keys', async () => {
+    await patchRoute(APP_CONFIG, { changes: { signup_bonus_active: 'true', withdraw_fee: '60' } });
+    assert.deepEqual(harness.db.operations[0].filter, {
+      column: 'key',
+      values: ['signup_bonus_active', 'withdraw_fee', 'signup_bonus_amount', 'signup_bonus_condition'],
+    });
+    reset();
+    await patchRoute(APP_CONFIG, { changes: { signup_bonus_condition: 'click_activate' } });
+    assert.deepEqual(harness.db.operations[0].filter, {
+      column: 'key',
+      values: ['signup_bonus_condition', 'signup_bonus_active', 'signup_bonus_amount'],
+    });
+    reset();
+    await patchRoute(APP_CONFIG, { changes: { withdraw_fee: '60', levels_active: 'false' } });
+    assert.deepEqual(harness.db.operations[0].filter, { column: 'key', values: ['withdraw_fee', 'levels_active'] });
+  });
+
+  test('the bonus can always be switched off, and changes that leave it payable are saved', async () => {
+    const cases: ReadonlyArray<[Record<string, string | null | undefined>, Record<string, string>]> = [
+      [{}, { signup_bonus_amount: '0' }],
+      [{ signup_bonus_active: 'true', signup_bonus_amount: '0' }, { signup_bonus_active: 'false' }],
+      [
+        { signup_bonus_active: 'true', signup_bonus_amount: 'abc', signup_bonus_condition: 'first_withdrawal' },
+        { signup_bonus_active: 'false', signup_bonus_amount: '0' },
+      ],
+      [{ signup_bonus_amount: '0' }, { signup_bonus_active: 'true', signup_bonus_amount: '1500' }],
+      [{ signup_bonus_amount: '2000.00' }, { signup_bonus_active: 'true' }],
+      [{ signup_bonus_condition: 'first_withdrawal' }, { signup_bonus_active: 'true', signup_bonus_condition: 'click_activate' }],
+      [{ signup_bonus_active: 'true', signup_bonus_condition: 'first_withdrawal' }, { signup_bonus_amount: '300' }],
+      [{ signup_bonus_active: 'true', signup_bonus_amount: '0' }, { signup_bonus_condition: 'click_activate' }],
+    ];
+    for (const [stored, changes] of cases) {
+      reset();
+      storeConfig(stored);
+      const res = await patchRoute(APP_CONFIG, { changes });
+      const label = JSON.stringify([Object.entries(stored), changes]);
+      assert.equal(res.status, 200, label);
+      assert.deepEqual(res.body.changed, Object.keys(changes), label);
+      for (const [key, value] of Object.entries(changes)) assert.equal(harness.db.config.get(key), value, label);
+    }
+  });
+
+  test('a change to the signup switch or amount pins the other at the value it was checked against', async () => {
+    const amount = await patchRoute(APP_CONFIG, {
+      changes: { signup_bonus_amount: '300' },
+      expected: { signup_bonus_amount: '200' },
+    });
+    assert.equal(amount.status, 200);
+    assert.deepEqual(casArgs(), {
+      p_changes: { signup_bonus_amount: '300' },
+      p_expected: { signup_bonus_amount: '200', signup_bonus_active: 'false' },
+      p_private_keys: null,
+    });
+    assert.deepEqual(amount.body.changed, ['signup_bonus_amount']);
+    assert.deepEqual(amount.body.unchanged, []);
+    assert.deepEqual(harness.db.audits[0].before_value, { signup_bonus_amount: '200' });
+    assert.deepEqual(harness.db.audits[0].after_value, { signup_bonus_amount: '300' });
+    reset();
+    const toggle = await patchRoute(APP_CONFIG, { changes: { signup_bonus_active: 'true' } });
+    assert.equal(toggle.status, 200);
+    assert.deepEqual(casArgs().p_expected, { signup_bonus_amount: '200' });
+    assert.deepEqual(harness.db.audits[0].after_value, { signup_bonus_active: 'true' });
+    reset();
+    harness.db.config.delete('signup_bonus_active');
+    const missing = await patchRoute(APP_CONFIG, { changes: { signup_bonus_amount: '300' } });
+    assert.equal(missing.status, 200);
+    assert.deepEqual(casArgs().p_expected, { signup_bonus_active: '' });
+    assert.equal(harness.db.config.has('signup_bonus_active'), false);
+    const unpinned: ReadonlyArray<Record<string, string>> = [
+      { signup_bonus_active: 'true', signup_bonus_amount: '400' },
+      { signup_bonus_condition: 'click_activate' },
+      { levels_active: 'false' },
+    ];
+    for (const changes of unpinned) {
+      reset();
+      const res = await patchRoute(APP_CONFIG, { changes });
+      assert.equal(res.status, 200, JSON.stringify(changes));
+      assert.equal(casArgs().p_expected, null, JSON.stringify(changes));
+    }
+  });
+
+  test('switching the bonus on while another admin sets the amount to ₦0 is a 409 naming the amount, and nothing is written', async () => {
+    harness.db.cas.beforeRun = (db) => db.config.set('signup_bonus_amount', '0');
+    const res = await patchRoute(APP_CONFIG, { changes: { signup_bonus_active: 'true' } });
+    assert.equal(res.status, 409);
+    assert.deepEqual(res.body, {
+      ...failureBody(
+        'Another admin changed Signup bonus amount after you loaded it, so nothing was saved. Reload to see the current values.',
+        'STATE_CONFLICT',
+      ),
+      details: { conflicts: [{ key: 'signup_bonus_amount', label: 'Signup bonus amount', current: '0' }] },
+    });
+    assert.equal(harness.db.config.get('signup_bonus_active'), 'false');
+    assert.deepEqual(kinds(), ['select:app_config', `rpc:${CAS}`]);
+    assert.deepEqual(harness.db.audits, []);
+  });
+
+  test('setting the amount to ₦0 while another admin switches the bonus on is a 409 naming the switch, and nothing is written', async () => {
+    harness.db.cas.beforeRun = (db) => db.config.set('signup_bonus_active', 'true');
+    const res = await patchRoute(APP_CONFIG, { changes: { signup_bonus_amount: '0' } });
+    assert.equal(res.status, 409);
+    assert.deepEqual(res.body, {
+      ...failureBody(
+        'Another admin changed Signup bonus after you loaded it, so nothing was saved. Reload to see the current values.',
+        'STATE_CONFLICT',
+      ),
+      details: { conflicts: [{ key: 'signup_bonus_active', label: 'Signup bonus', current: 'true' }] },
+    });
+    assert.equal(harness.db.config.get('signup_bonus_amount'), SEED.signup_bonus_amount);
+    assert.deepEqual(kinds(), ['select:app_config', `rpc:${CAS}`]);
+    assert.deepEqual(harness.db.audits, []);
+  });
+
+  test('a stale signup bonus value is named by its label', async () => {
+    harness.db.config.set('signup_bonus_condition', 'click_activate');
+    const res = await patchRoute(APP_CONFIG, {
+      changes: { signup_bonus_condition: 'first_trade' },
+      expected: { signup_bonus_condition: 'first_trade' },
+    });
+    assert.equal(res.status, 409);
+    assert.equal(
+      res.body.error,
+      'Another admin changed When users can claim the signup bonus after you loaded it, so nothing was saved. Reload to see the current values.',
+    );
+    assert.deepEqual(res.body.details, {
+      conflicts: [{ key: 'signup_bonus_condition', label: 'When users can claim the signup bonus', current: 'click_activate' }],
+    });
+    assert.equal(harness.db.config.get('signup_bonus_condition'), 'click_activate');
   });
 
   test('GET still filters by keys and never returns the secret', async () => {

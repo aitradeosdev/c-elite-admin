@@ -22,7 +22,11 @@ const ADMIN_SQL = fileURLToPath(new URL('../../schema_admin_app.sql', import.met
 const EDGE_DIR = fileURLToPath(new URL('../../supabase/functions/', import.meta.url));
 const RESUME_WITHDRAWAL = join(EDGE_DIR, 'resume-withdrawal', 'index.ts');
 const MOBILE_API = join(EDGE_DIR, 'admin-mobile-api', 'index.ts');
-const SIBLINGS_PRESENT = [SCHEMA_SQL, ADMIN_SQL, RESUME_WITHDRAWAL, MOBILE_API].every((file) => existsSync(file));
+const EDGE_JWT = join(EDGE_DIR, '_shared', 'adminJwt.ts');
+const EDGE_SESSION = join(EDGE_DIR, '_shared', 'adminSession.ts');
+const WEB_JWT = join(APP_DIR, 'lib', 'jwt.ts');
+const SIBLINGS_PRESENT = [SCHEMA_SQL, ADMIN_SQL, RESUME_WITHDRAWAL, MOBILE_API, EDGE_JWT, EDGE_SESSION]
+  .every((file) => existsSync(file));
 const ACCESS_UI = ['admin-accounts', 'admin-roles', 'admin-permissions', '_access']
   .map((name) => join(APP_DIR, '(dashboard)', name) + sep);
 const CATALOG_MODULES = ['permissions.ts', 'grants.ts', 'roles.ts'].map((name) => join(APP_DIR, 'lib', name));
@@ -212,6 +216,44 @@ describe('edge functions that read admin permissions', { skip: !SIBLINGS_PRESENT
     assert.ok(source.indexOf(`if (${check[1]} !== true)`, check.index) > failed, 'anything but true is refused');
     assert.doesNotMatch(source, /\.includes\(\s*['"]withdrawals['"]\s*\)/);
     assert.doesNotMatch(source, /\b(?:is_super_admin|page_permissions|is_active)\b/);
+  });
+
+  test('resume-withdrawal checks the session id through admin_auth_state before the permission and the claim', () => {
+    const source = readFileSync(RESUME_WITHDRAWAL, 'utf8');
+    assert.match(source, /import \{ isUuid \} from '\.\.\/_shared\/adminSession\.ts';/);
+    const verified = source.indexOf('await verifyAdminJWT(bearer)');
+    const unavailable = source.indexOf("if (token.kind === 'unavailable')", verified);
+    assert.ok(verified > 0 && unavailable > verified, 'a missing signing secret is told apart from a bad token');
+    assert.match(source.slice(unavailable, unavailable + 160), /\b500\b/);
+    const shape = source.indexOf('!isUuid(claims.admin_id) || !isUuid(claims.sid)', unavailable);
+    const client = source.indexOf('createClient(', verified);
+    assert.ok(shape > unavailable && shape < client, 'a token without a uuid admin id and session id is refused before any database call');
+    assert.match(source.slice(shape, shape + 160), /\b401\b/);
+    const state = source.match(
+      /const \{ data: (\w+), error: (\w+) \} = await \w+\.rpc\('admin_auth_state',\s*\{\s*p_admin_id: claims\.admin_id,\s*p_sid: claims\.sid,?\s*\}\);/,
+    );
+    assert.ok(state && state.index !== undefined, 'the session is looked up by admin id and session id, together with its error');
+    const failed = source.indexOf(`if (${state[2]} || !${state[1]} || typeof ${state[1]} !== 'object')`, state.index);
+    assert.ok(failed > state.index, 'a failed or empty lookup is checked');
+    const ended = source.indexOf(`if (${state[1]}.session?.status !== 'active')`, failed);
+    assert.ok(ended > failed, 'anything but an active session is refused');
+    assert.match(source.slice(failed, ended), /console\.error\('admin_auth_state failed:', \w+\?\.message \?\? 'no state was returned'\);/);
+    assert.match(source.slice(failed, ended), /\b500\b/);
+    assert.match(source.slice(ended, ended + 160), /\b401\b/);
+    const permission = source.indexOf("rpc('admin_has_permission'");
+    const claim = source.indexOf(".update({ status: 'processing' })");
+    assert.ok(state.index < permission && permission < claim, 'the session check comes before the permission check and the claim');
+  });
+
+  test('the edge token check requires an expiry, accepts only HS256 and reports a missing secret as a server fault, like the console', () => {
+    const verify = functionBody(readFileSync(EDGE_JWT, 'utf8'), 'export async function verifyAdminJWT(');
+    assert.match(verify, /if \(!ADMIN_JWT_SECRET\) \{[^}]*return \{ kind: 'unavailable' \};/);
+    assert.match(verify, /jwtVerify\(token, secret, \{ algorithms: \['HS256'\], requiredClaims: \['exp'\] \}\)/);
+    assert.match(verify, /catch \{\s*return \{ kind: 'invalid' \};/);
+    const web = readFileSync(WEB_JWT, 'utf8');
+    assert.match(web, /const ALGORITHMS = \['HS256'\];/);
+    assert.match(web, /jwtVerify\(token, key, \{ algorithms: ALGORITHMS, requiredClaims: \['exp'\] \}\)/);
+    assert.match(readFileSync(EDGE_SESSION, 'utf8'), /if \(read\.kind === 'unavailable'\) return fail\('lookup_failed'\);/);
   });
 
   test('admin-mobile-api asks for the display keys before opening the session, again in /me, and still signs the raw list', () => {

@@ -41,8 +41,6 @@ export const PRIVACY_URL_KEY = 'privacy_url';
 export const ANDROID_STORE_KEY = 'store_url_android';
 export const IOS_STORE_KEY = 'store_url_ios';
 
-export const DEFAULT_GATEWAY: PaymentGateway = 'paystack';
-export const DEFAULT_BILL_PROVIDER: BillProvider = 'vtpass';
 export const DEFAULT_APPROVAL_LIMIT = '5000000';
 export const DEFAULT_UPDATE_TYPE: UpdateType = 'soft';
 
@@ -281,8 +279,7 @@ export function normalizeStored(key: string, raw: StoredValue): string {
   const text = typeof raw === 'string' ? raw : '';
   if (SECRET_SET.has(key)) return text.trim() !== '' ? SECRET_MASK : '';
   if (FLAG_SET.has(key)) return text === 'true' ? 'true' : 'false';
-  if (key === PRIMARY_GATEWAY_KEY) return text.trim().toLowerCase() || DEFAULT_GATEWAY;
-  if (key === PRIMARY_BILL_KEY) return text.trim().toLowerCase() || DEFAULT_BILL_PROVIDER;
+  if (key === PRIMARY_GATEWAY_KEY || key === PRIMARY_BILL_KEY) return text.toLowerCase();
   if (key === APPROVAL_LIMIT_KEY) return typeof raw === 'string' ? text.trim() : DEFAULT_APPROVAL_LIMIT;
   if (key === UPDATE_TYPE_KEY) return text.trim().toLowerCase() || DEFAULT_UPDATE_TYPE;
   return text.trim();

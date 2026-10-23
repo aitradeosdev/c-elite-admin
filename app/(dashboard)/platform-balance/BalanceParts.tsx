@@ -9,9 +9,9 @@ import {
 } from '../../_ui';
 import { BUSINESS_TZ_LABEL, formatBusinessDateTime } from '../../lib/time';
 import {
-  BALANCE_MODES, MODE_KEY, MODE_LABELS, PROVIDER_LABELS, REFRESH_INTERVAL_MINUTES, STATIC_KEY,
-  ageText, applySaved, liveIssue, modeConsequences, saveLabel, savedHelp, sourceChoice, sourceText,
-  staticConsequences, staticProblem, workingStatus,
+  BALANCE_MODES, MODE_KEY, MODE_LABELS, REFRESH_INTERVAL_MINUTES, STATIC_KEY,
+  ageText, applySaved, liveIssue, modeConsequences, providerLabel, providerName, providerWord, saveLabel, savedHelp,
+  sourceChoice, sourceText, staticConsequences, staticProblem, workingStatus,
   type BalanceMode, type BalanceSnapshot, type SaveOutcome, type WorkPhase, type Working,
 } from './model';
 import s from './page.module.css';
@@ -55,7 +55,12 @@ function staticDescription(snapshot: BalanceSnapshot): ReactNode {
 }
 
 function liveDescription(snapshot: BalanceSnapshot): ReactNode {
-  const provider = PROVIDER_LABELS[snapshot.gateway];
+  const provider = providerWord(snapshot.gateway);
+  if (snapshot.gateway === null) {
+    return snapshot.liveAt
+      ? <>Users see the last {provider} balance fetched: <Money value={snapshot.liveAmount} /> as of {stamp(snapshot.liveAt)}.</>
+      : <>Users see the {provider} balance once one is available. None has been fetched yet.</>;
+  }
   if (!snapshot.liveAt) {
     return <>Users see the {provider} balance, refreshed every {REFRESH_INTERVAL_MINUTES} minutes. None has been fetched yet.</>;
   }
@@ -277,7 +282,7 @@ export interface LiveCardProps {
 }
 
 export function LiveCard({ snapshot, now, headingId }: LiveCardProps) {
-  const provider = PROVIDER_LABELS[snapshot.gateway];
+  const provider = providerLabel(snapshot.gateway);
   const inUse = snapshot.mode === 'live';
   const issue = inUse ? null : liveIssue(snapshot, now);
 
@@ -286,7 +291,9 @@ export function LiveCard({ snapshot, now, headingId }: LiveCardProps) {
       <Card className={s.fill}>
         <CardHeader
           title={<h2 id={headingId} className={s.heading}>Live balance</h2>}
-          subtitle={`Read from ${provider} every ${REFRESH_INTERVAL_MINUTES} minutes by a scheduled job.`}
+          subtitle={snapshot.gateway === null
+            ? `Read every ${REFRESH_INTERVAL_MINUTES} minutes by a scheduled job once a payout gateway is available.`
+            : `Read from ${providerName(snapshot.gateway)} every ${REFRESH_INTERVAL_MINUTES} minutes by a scheduled job.`}
           actions={<InUseBadge inUse={inUse} />}
         />
         <CardBody className={s.stack}>
@@ -346,7 +353,7 @@ export function BalanceSkeleton() {
 
 export function modeOptions(fresh: BalanceSnapshot, target: BalanceMode, now: number): ConfirmOptions<SaveOutcome> {
   const after = applySaved(fresh, { [MODE_KEY]: target }, new Date(now).toISOString());
-  const provider = PROVIDER_LABELS[fresh.gateway];
+  const provider = providerLabel(fresh.gateway);
   const details: ConfirmDetail[] = [
     { label: 'Source', value: <ChangeValue from={MODE_LABELS[fresh.mode]} to={MODE_LABELS[target]} /> },
     {
@@ -361,9 +368,12 @@ export function modeOptions(fresh: BalanceSnapshot, target: BalanceMode, now: nu
     },
   ];
   if (target === 'live') {
+    const fetched = fresh.liveAt ? `Last fetched ${stamp(fresh.liveAt)}` : 'Never fetched';
     details.push({
       label: 'Live balance',
-      value: fresh.liveAt ? `${provider}, refreshed ${stamp(fresh.liveAt)}` : `${provider}, never refreshed`,
+      value: fresh.gateway === null
+        ? `${fetched}; no payout gateway is available now`
+        : fresh.liveAt ? `${provider}, refreshed ${stamp(fresh.liveAt)}` : `${provider}, never refreshed`,
     });
   }
   return {

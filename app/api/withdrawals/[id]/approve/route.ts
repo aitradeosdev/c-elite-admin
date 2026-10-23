@@ -5,7 +5,9 @@ import { sessionTokenFromRequest } from '../../../../lib/jwt';
 import { writeAudit } from '../../../../lib/audit';
 import { ok, fail, isUuid } from '../../../../lib/api';
 import { readPayoutGateway } from '../../../../lib/gateway';
-import { EMERGENCY_APPROVAL, FROZEN_APPROVAL } from '../../../../(dashboard)/withdrawals/model';
+import {
+  EMERGENCY_APPROVAL, FROZEN_APPROVAL, GATEWAY_UNCHECKED_APPROVAL, NO_GATEWAY_APPROVAL,
+} from '../../../../(dashboard)/withdrawals/model';
 
 const APPROVABLE = ['pending_review', 'held'];
 
@@ -52,6 +54,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { token: adminToken } = await sessionTokenFromRequest();
   if (!adminToken) return fail('AUTH_REQUIRED', 'Your session has expired. Sign in again.');
 
+  const payout = await readPayoutGateway(supabaseAdmin);
+  if (payout.kind === 'unknown') return fail('INTERNAL_ERROR', GATEWAY_UNCHECKED_APPROVAL);
+  if (payout.kind === 'none') {
+    return fail('STATE_CONFLICT', NO_GATEWAY_APPROVAL, { details: { reason: 'no_payout_gateway' } });
+  }
+  const payoutGateway = payout.gateway;
+
   const auditBase = {
     admin,
     action: 'APPROVE_WITHDRAWAL',
@@ -85,7 +94,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return fail('STATE_CONFLICT', 'The withdrawal could not be moved out of review. Reload and try again.');
   }
 
-  const payoutLookup = readPayoutGateway(supabaseAdmin);
   const url = `${process.env.SUPABASE_URL}/functions/v1/resume-withdrawal`;
 
   let gatewayReference: string | null = null;
@@ -114,7 +122,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     gatewayError = e instanceof Error ? e.message : 'Gateway request failed';
   }
 
-  const [after, payoutGateway] = await Promise.all([currentStatus(id), payoutLookup]);
+  const after = await currentStatus(id);
 
   if (gatewayError) {
     await writeAudit({

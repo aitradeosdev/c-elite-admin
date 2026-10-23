@@ -52,8 +52,6 @@ import {
   isSecretKey,
   normalizeSettings,
   normalizeStored,
-  primaryBillProvider,
-  primaryGateway,
   settingLabel,
   settingProblem,
   type BillProvider,
@@ -457,8 +455,8 @@ export function firstInvalidKey(errors: Readonly<Record<string, string>>): strin
 
 export function formatSetting(key: string, value: string): string {
   if (isFlagKey(key)) return value === 'true' ? 'On' : 'Off';
-  if (key === PRIMARY_GATEWAY_KEY) return gatewayLabel(value);
-  if (key === PRIMARY_BILL_KEY) return billProviderLabel(value);
+  if (key === PRIMARY_GATEWAY_KEY) return value === '' ? 'Not set' : gatewayLabel(value);
+  if (key === PRIMARY_BILL_KEY) return value === '' ? 'Not set' : billProviderLabel(value);
   if (key === UPDATE_TYPE_KEY) return value === 'force' ? 'Force' : value === 'soft' ? 'Soft' : value;
   if (isSecretKey(key)) return value === '' ? 'Not set' : 'Stored';
   if (value === '') return 'Not set';
@@ -511,10 +509,12 @@ function linkName(key: string): string {
 function changeConsequence(change: ConfigChange, draft: ConfigValues): string | null {
   const { key, from, to } = change;
   if (key === PRIMARY_GATEWAY_KEY) {
-    return `Payouts approved from now on are sent through ${gatewayLabel(to)} instead of ${gatewayLabel(from)}. Payouts already sent are not moved.`;
+    const instead = from === '' ? '' : ` instead of ${gatewayLabel(from)}`;
+    return `Payouts approved from now on are sent through ${gatewayLabel(to)}${instead}. Payouts already sent are not moved.`;
   }
   if (key === PRIMARY_BILL_KEY) {
-    return `Airtime, data, cable and electricity are bought through ${billProviderLabel(to)} instead of ${billProviderLabel(from)}. Services it does not offer are hidden in the app.`;
+    const instead = from === '' ? '' : ` instead of ${billProviderLabel(from)}`;
+    return `Airtime, data, cable and electricity are bought through ${billProviderLabel(to)}${instead}. Services it does not offer are hidden in the app.`;
   }
   const gateway = PAYMENT_GATEWAYS.find((option) => gatewayFlagKey(option) === key);
   if (gateway) return to === 'false' ? `${GATEWAY_LABELS[gateway]} can no longer be chosen as the primary payout gateway.` : null;
@@ -678,39 +678,35 @@ export function savedMessage(receipt: SaveReceipt, sent: number): string {
 }
 
 export function payoutNotice(snapshot: SettingsSnapshot): LiveNotice | null {
-  const configured = primaryGateway(snapshot.raw);
-  const effective = resolvePayoutGateway(snapshot.raw);
-  if (configured === effective) return null;
-  const fallback = GATEWAY_LABELS[effective];
+  if (resolvePayoutGateway(snapshot.raw) !== null) return null;
+  const stored = snapshot.raw[PRIMARY_GATEWAY_KEY];
+  const configured = typeof stored === 'string' ? stored.toLowerCase() : '';
+  const refused = 'so withdrawals are refused and payouts cannot be approved';
   return {
-    tone: 'warning',
-    title: `Payouts are going through ${fallback}`,
-    message: isGateway(configured)
-      ? `${gatewayLabel(configured)} is the primary gateway but is turned off, so payouts fall back to ${fallback}. Turn ${gatewayLabel(configured)} on, or choose another primary gateway.`
-      : `The primary gateway is set to “${configured}”, which this console does not recognise, so payouts fall back to ${fallback}. Choose a primary gateway.`,
+    tone: 'danger',
+    title: 'Payouts are being refused',
+    message: configured === ''
+      ? `No primary payout gateway is set, ${refused}. Choose a primary gateway.`
+      : isGateway(configured)
+        ? `${GATEWAY_LABELS[configured]} is the primary gateway but is turned off, ${refused}. Turn ${GATEWAY_LABELS[configured]} on, or choose another primary gateway.`
+        : `The primary gateway is set to “${stored}”, which this console does not recognise, ${refused}. Choose a primary gateway.`,
   };
 }
 
 export function billNotice(snapshot: SettingsSnapshot): LiveNotice | null {
   const raw = snapshot.raw;
-  const configured = primaryBillProvider(raw);
-  const active: BillProvider = configured === 'novac' && raw[billFlagKey('novac')] === 'true' ? 'novac' : 'vtpass';
-  const flag = raw[billFlagKey(active)];
-  const label = BILL_PROVIDER_LABELS[active];
-  if (flag !== undefined && flag !== 'true') {
-    return {
-      tone: 'danger',
-      title: 'Bill payments are being refused',
-      message: `${label} is the provider in use but is turned off, so the app refuses airtime, data, cable and electricity purchases. Turn ${label} on, or make another provider primary.`,
-    };
-  }
-  if (configured === active) return null;
+  const stored = raw[PRIMARY_BILL_KEY];
+  const configured = typeof stored === 'string' ? stored.toLowerCase() : '';
+  if (isBillProvider(configured) && raw[billFlagKey(configured)] === 'true') return null;
+  const refused = 'so the app refuses airtime, data, cable and electricity purchases';
   return {
-    tone: 'warning',
-    title: `Bills are going through ${label}`,
-    message: isBillProvider(configured)
-      ? `${billProviderLabel(configured)} is the primary provider but is turned off, so bill payments fall back to ${label}. Turn ${billProviderLabel(configured)} on, or choose another primary provider.`
-      : `The primary bill provider is set to “${configured}”, which this console does not recognise, so bill payments go through ${label}. Choose a primary provider.`,
+    tone: 'danger',
+    title: 'Bill payments are being refused',
+    message: configured === ''
+      ? `No primary bill provider is set, ${refused}. Choose a primary provider.`
+      : isBillProvider(configured)
+        ? `${BILL_PROVIDER_LABELS[configured]} is the primary bill provider but is turned off, ${refused}. Turn ${BILL_PROVIDER_LABELS[configured]} on, or make another provider primary.`
+        : `The primary bill provider is set to “${stored}”, which this console does not recognise, ${refused}. Choose a primary provider.`,
   };
 }
 

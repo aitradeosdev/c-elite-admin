@@ -193,7 +193,7 @@ async function readDetail(id: string) {
 
   const userId: unknown = withdrawal.user_id;
   const awaitingDecision = REVIEW_STATUSES.includes(String(withdrawal.status));
-  const [userResult, flagResult, payoutGateway, emergencyMode] = await Promise.all([
+  const [userResult, flagResult, payoutLookup, emergencyMode] = await Promise.all([
     isUuid(userId)
       ? supabaseAdmin
           .from('users')
@@ -222,7 +222,8 @@ async function readDetail(id: string) {
       user: userResult.error ? 'The account holder could not be loaded.' : null,
       flag: flagResult.error ? 'The flag status could not be checked.' : null,
     },
-    payout_gateway: payoutGateway,
+    payout_gateway: payoutLookup?.kind === 'gateway' ? payoutLookup.gateway : null,
+    payout_gateway_missing: payoutLookup?.kind === 'none',
     emergency_mode: emergencyMode,
   });
 }

@@ -16,11 +16,11 @@ import { describeExportWindow, printTable, resolveExportRange } from '../../lib/
 import { businessDateKey, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
   ACTION_GROUPS, ENTITY_OPTIONS, EXPORT_CAP, PAGE_SIZE, RESULT_FILTERS, SEARCH_USER_CAP, actionLabel, entityLabel,
-  isListedAction, isListedEntity, isResultFilter, resultFilterLabel, resultKind,
+  isListedAction, isListedEntity, isResultFilter, isSystemEvent, resultFilterLabel, resultKind,
   type ActivityEvent, type AdminInfo,
 } from './rules';
 import {
-  ACTIVITY_ENDPOINT, ACTIVITY_URL, PRINT_COLUMNS, adminHandle, adminOptionLabel, ageText, cleanSearch,
+  ACTIVITY_ENDPOINT, ACTIVITY_URL, PRINT_COLUMNS, actorName, adminOptionLabel, ageText, cleanSearch,
   describeFilters, exportFiltersFor, exportQuery, isFiltered, listQuery, messageOf, printCells, targetSummary,
   toEventResult, toListResult, toPrintBatch,
   type ActivityList, type ActivityView, type ExportResponse,
@@ -413,7 +413,9 @@ function ActivityLog() {
                       <Td>
                         <div className={s.stack}>
                           <AdminName event={event} />
-                          <span className={s.sub}>{event.admin_role || event.admin_role_title || 'Role not recorded'}</span>
+                          {isSystemEvent(event) ? null : (
+                            <span className={s.sub}>{event.admin_role || event.admin_role_title || 'Role not recorded'}</span>
+                          )}
                         </div>
                       </Td>
                       <Td>
@@ -467,7 +469,7 @@ function ActivityLog() {
         const kind = resultKind(event.result);
         return {
           primary: actionLabel(event.action),
-          secondary: `${adminHandle(event.admin_username)} · ${target.primary}`,
+          secondary: `${actorName(event)} · ${target.primary}`,
           status: <ResultDot value={event.result} />,
           meta: `${formatBusinessDateTime(event.created_at)} WAT · ${ageText(event.created_at)}`,
           flag: kind === 'failure' ? 'danger' : kind === 'partial' ? 'warning' : null,
@@ -623,7 +625,7 @@ function ActivityLog() {
         title={shownEvent ? actionLabel(shownEvent.action) : 'Activity event'}
         subtitle={
           shownEvent
-            ? `${formatBusinessDateTime(shownEvent.created_at)} WAT · ${adminHandle(shownEvent.admin_username)}`
+            ? `${formatBusinessDateTime(shownEvent.created_at)} WAT · ${actorName(shownEvent)}`
             : undefined
         }
         returnFocusTo={drawerReturn}

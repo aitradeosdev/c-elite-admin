@@ -123,6 +123,7 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
     ['REJECT_WITHDRAWAL', 'Rejected withdrawal'],
     ['RESUME_WITHDRAWAL_OK', 'Payout sent to provider'],
     ['RESUME_WITHDRAWAL_FAILED', 'Payout could not be sent'],
+    ['RESUME_WITHDRAWAL_UNCONFIRMED', 'Payout could not be confirmed, stays processing, do not pay again by hand'],
     ['CLEAR_FLAG', 'Cleared flag'],
     ['ESCALATE_FLAG', 'Escalated flag'],
     ['REJECT_FLAG', 'Rejected flagged transaction'],
@@ -228,6 +229,9 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
     ['EXPORT_CSV', 'Exported CSV'],
     ['EXPORT_PDF', 'Exported PDF'],
   ]],
+  ['System', [
+    ['PURGE_DELETED_ACCOUNT_WITHDRAWALS', 'Deleted-account withdrawal data purged'],
+  ]],
   ['Retired actions', [
     ['BATCH_UPDATE_RATES', 'Updated rates'],
     ['CREATE_CARD_TYPE', 'Created card type'],
@@ -322,6 +326,37 @@ export function actionsMatching(query: string): string[] {
     if (label.toLowerCase().includes(needle)) keys.push(key);
   }
   return keys;
+}
+
+export const SYSTEM_ACTION = 'PURGE_DELETED_ACCOUNT_WITHDRAWALS';
+export const SYSTEM_ACTOR = 'System';
+
+export function isSystemEvent(event: Pick<StoredAuditRow, 'admin_id' | 'action'>): boolean {
+  return text(event.admin_id) === null && event.action === SYSTEM_ACTION;
+}
+
+const PURGE_COUNTS: ReadonlyArray<readonly [key: string, one: string, many: string]> = [
+  ['withdrawals', 'withdrawal', 'withdrawals'],
+  ['transactions', 'transaction', 'transactions'],
+  ['flagged_transactions', 'flagged transaction', 'flagged transactions'],
+  ['anomaly_check_queue', 'anomaly check', 'anomaly checks'],
+  ['admin_alerts', 'admin alert', 'admin alerts'],
+  ['security_alerts', 'security alert', 'security alerts'],
+  ['notifications', 'notification', 'notifications'],
+];
+
+const COUNT_FORMAT = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 0 });
+
+export function actionDescription(event: Pick<ActivityEvent, 'action' | 'after_value'>): string | null {
+  const after = event.after_value;
+  if (event.action !== SYSTEM_ACTION || !isRecord(after)) return null;
+  const counts: string[] = [];
+  for (const [key, one, many] of PURGE_COUNTS) {
+    const value = after[key];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return null;
+    counts.push(`${COUNT_FORMAT.format(value)} ${value === 1 ? one : many}`);
+  }
+  return `Removed from deleted accounts after the retention period: ${counts.slice(0, -1).join(', ')} and ${counts[counts.length - 1]}.`;
 }
 
 const ENTITY_TEXT: Readonly<Record<string, string>> = {

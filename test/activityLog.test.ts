@@ -581,24 +581,26 @@ function splitSql(inner: string): string[] {
   return cells;
 }
 
-function sqlAdminInserts(file: string, text = readFileSync(file, 'utf8')): DerivedInsert[] {
+function sqlInserts(file: string, text: string, attributed: boolean): DerivedInsert[] {
   const found: DerivedInsert[] = [];
   for (const match of text.matchAll(/insert\s+into\s+(?:public\.)?audit_log\s*\(/gi)) {
     const offset = match.index ?? 0;
     const at = `${file}:${text.slice(0, offset).split('\n').length}`;
     const columns = sqlGroup(text, offset + match[0].length - 1);
     const names = splitSql(columns.inner).map((name) => name.toLowerCase());
-    if (!names.includes('admin_id')) continue;
+    const named = names.includes('admin_id');
+    if (attributed && !named) continue;
     const values = /^\s*values\s*/i.exec(text.slice(columns.close + 1));
     if (!values) {
-      found.push({ at, actions: [] });
+      if (attributed) found.push({ at, actions: [] });
       continue;
     }
     let cursor = columns.close + 1 + values[0].length;
     while (text[cursor] === '(') {
       const row = sqlGroup(text, cursor);
       const cells = splitSql(row.inner);
-      if (!/^null$/i.test(cells[names.indexOf('admin_id')] ?? '')) {
+      const anonymous = !named || /^null$/i.test(cells[names.indexOf('admin_id')] ?? '');
+      if (anonymous !== attributed) {
         const expression = cells[names.indexOf('action')] ?? '';
         const actions = [...expression.matchAll(/'([^']*)'/g)].map((literal) => literal[1]).filter((value) => rules.isActionKey(value));
         found.push({ at, actions });
@@ -608,6 +610,20 @@ function sqlAdminInserts(file: string, text = readFileSync(file, 'utf8')): Deriv
     }
   }
   return found;
+}
+
+function sqlAdminInserts(file: string, text = readFileSync(file, 'utf8')): DerivedInsert[] {
+  return sqlInserts(file, text, true);
+}
+
+function sqlUnattributedInserts(file: string, text = readFileSync(file, 'utf8')): DerivedInsert[] {
+  return sqlInserts(file, text, false);
+}
+
+function systemWrites(): string[] {
+  return SQL_FILES.flatMap((file) => sqlUnattributedInserts(file))
+    .flatMap((insert) => insert.actions)
+    .filter((action) => action === rules.SYSTEM_ACTION);
 }
 
 function isAuditInsert(node: ts.CallExpression): boolean {
@@ -764,7 +780,7 @@ describe('action labels', () => {
     const written = new Set([...sql, ...edge].flatMap((insert) => insert.actions));
     for (const expected of [
       'APPROVE_CARD', 'APPROVE_CARD_CORRECTED', 'LOGIN', 'RESUME_WITHDRAWAL_OK', 'RESUME_WITHDRAWAL_FAILED',
-      'LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED', 'ADMIN_AUTO_DEACTIVATION_SKIPPED', 'MFA_BREAK_GLASS_RESET',
+      'RESUME_WITHDRAWAL_UNCONFIRMED', 'LOGIN_FAILED', 'ADMIN_AUTO_DEACTIVATED', 'ADMIN_AUTO_DEACTIVATION_SKIPPED', 'MFA_BREAK_GLASS_RESET',
       'MFA_CHALLENGE_FAILED', 'MFA_LOCKED', 'LOGIN_MFA_SETUP_REQUIRED', 'LOGOUT',
       'CREATE_ADMIN_ROLE', 'EDIT_ADMIN_ROLE', 'ARCHIVE_ADMIN_ROLE', 'RESTORE_ADMIN_ROLE', 'EDIT_ADMIN_ACCESS',
     ]) {
@@ -775,7 +791,11 @@ describe('action labels', () => {
 
   test('files an action under Retired actions exactly when nothing writes it any more', { skip: !SIBLINGS_PRESENT }, () => {
     const { sql, edge } = databaseAndEdgeInserts();
-    const written = new Set([...consoleActions().actions, ...[...sql, ...edge].flatMap((insert) => insert.actions)]);
+    const written = new Set([
+      ...consoleActions().actions,
+      ...[...sql, ...edge].flatMap((insert) => insert.actions),
+      ...systemWrites(),
+    ]);
     assert.ok(rules.ACTION_GROUPS.some((group) => group.label === RETIRED_GROUP));
     for (const group of rules.ACTION_GROUPS) {
       for (const option of group.options) {
@@ -923,6 +943,25 @@ describe('action labels', () => {
     ]);
   });
 
+  test('reads the actions the database writes with no admin, and only those', () => {
+    const sql = [
+      "INSERT INTO audit_log (user_id, action, entity) VALUES (p_user_id, 'ZZ_USER_ROW', 'users');",
+      "INSERT INTO public.audit_log (admin_id, action, entity) VALUES (NULL, 'ZZ_NO_ADMIN', 'x');",
+      'INSERT INTO audit_log (admin_id, action, entity)',
+      "  VALUES (p_admin_id, 'ZZ_SQL_ADMIN', 'x'),",
+      "         (NULL, 'ZZ_SQL_NOBODY', 'y');",
+      "INSERT INTO audit_log (action, entity, after_value) VALUES ('ZZ_SYSTEM_RUN', 'x', jsonb_build_object('n', 1));",
+      "INSERT INTO audit_log (action, entity) SELECT 'ZZ_SELECTED', 'x';",
+    ].join('\n');
+    assert.deepEqual(sqlUnattributedInserts('fixture.sql', sql), [
+      { at: 'fixture.sql:1', actions: ['ZZ_USER_ROW'] },
+      { at: 'fixture.sql:2', actions: ['ZZ_NO_ADMIN'] },
+      { at: 'fixture.sql:3', actions: ['ZZ_SQL_NOBODY'] },
+      { at: 'fixture.sql:6', actions: ['ZZ_SYSTEM_RUN'] },
+    ]);
+    assert.deepEqual(sqlAdminInserts('fixture.sql', sql), [{ at: 'fixture.sql:3', actions: ['ZZ_SQL_ADMIN'] }]);
+  });
+
   test('labels every catalogued action in plain words, once, under a named group', () => {
     const groupLabels = rules.ACTION_GROUPS.map((group) => group.label);
     assert.equal(new Set(groupLabels).size, groupLabels.length);
@@ -945,6 +984,17 @@ describe('action labels', () => {
     assert.equal(rules.actionLabel('CREATE_DENOMINATION'), 'Created rate range');
     assert.equal(rules.actionLabel('APPROVE_CARD_CORRECTED'), 'Approved card with corrections');
     assert.equal(rules.actionLabel('RESUME_WITHDRAWAL_FAILED'), 'Payout could not be sent');
+  });
+
+  test('names an unconfirmed payout so that nobody pays it again by hand', () => {
+    assert.equal(
+      rules.actionLabel('RESUME_WITHDRAWAL_UNCONFIRMED'),
+      'Payout could not be confirmed, stays processing, do not pay again by hand',
+    );
+    const risk = rules.ACTION_GROUPS.find((group) => group.label === 'Withdrawals and risk');
+    const values = risk?.options.map((option) => option.value) ?? [];
+    assert.equal(values.indexOf('RESUME_WITHDRAWAL_UNCONFIRMED'), values.indexOf('RESUME_WITHDRAWAL_FAILED') + 1);
+    assert.ok(rules.actionsMatching('do not pay again').includes('RESUME_WITHDRAWAL_UNCONFIRMED'));
   });
 
   test('names wallet adjustments under Users, in plain words', () => {
@@ -1635,14 +1685,125 @@ describe('event drawer', () => {
 
   test('marks super, deleted and unknown admins', () => {
     const named = textOf(render(createElement(parts.AdminName, {
-      event: { admin_username: 'ops', admin_is_super: true, admin_deleted: true },
+      event: { admin_id: ADMIN_ID, admin_username: 'ops', admin_is_super: true, admin_deleted: true, action: 'LOGIN' },
     })));
     assert.ok(named.includes('@ops') && named.includes('Super') && named.includes('Deleted'));
     const unknown = textOf(render(createElement(parts.AdminName, {
-      event: { admin_username: null, admin_is_super: false, admin_deleted: false },
+      event: { admin_id: null, admin_username: null, admin_is_super: false, admin_deleted: false, action: 'LOGIN' },
     })));
     assert.equal(unknown, 'Unknown admin');
     assert.equal(textOf(render(createElement(parts.ResultDot, { value: null }))), 'Not recorded');
+  });
+
+  test('names the system as the actor of the purge record, never an unknown admin', () => {
+    const system = render(createElement(parts.AdminName, {
+      event: { admin_id: null, admin_username: null, admin_is_super: false, admin_deleted: false, action: rules.SYSTEM_ACTION },
+    }));
+    assert.equal(textOf(system), 'System');
+    assert.equal(withClass(system, 'span', 'muted').length, 0);
+    const claimed = textOf(render(createElement(parts.AdminName, {
+      event: { admin_id: ADMIN_ID, admin_username: 'ops', admin_is_super: false, admin_deleted: false, action: rules.SYSTEM_ACTION },
+    })));
+    assert.equal(claimed, '@ops');
+  });
+});
+
+describe('the deleted-account withdrawal purge record', () => {
+  const COUNTS = {
+    withdrawals: 3, transactions: 4, flagged_transactions: 1, anomaly_check_queue: 3, admin_alerts: 3, security_alerts: 1,
+    notifications: 2,
+  };
+  const SUMMARY = 'Removed from deleted accounts after the retention period: 3 withdrawals, 4 transactions, '
+    + '1 flagged transaction, 3 anomaly checks, 3 admin alerts, 1 security alert and 2 notifications.';
+  const purge = (after: unknown = COUNTS): ActivityEvent => rules.presentEvent(
+    stored({
+      admin_id: null, action: rules.SYSTEM_ACTION, entity: 'withdrawals', entity_id: null, before_value: null,
+      after_value: after, ip_address: null, result: 'success', sensitivity: 'financial',
+    }),
+    undefined,
+    { username: null, label: null },
+  );
+
+  test('is written by the database with no admin, and is catalogued under System', { skip: !SIBLINGS_PRESENT }, () => {
+    const writes = SQL_FILES.flatMap((file) => sqlUnattributedInserts(file)).filter((insert) => insert.actions.includes(rules.SYSTEM_ACTION));
+    assert.equal(writes.length, 1);
+    assert.ok(writes[0].at.startsWith(`${SQL_FILES[0]}:`), writes[0].at);
+    assert.deepEqual(writes[0].actions, [rules.SYSTEM_ACTION]);
+    const { sql, edge } = databaseAndEdgeInserts();
+    assert.ok(![...sql, ...edge].some((insert) => insert.actions.includes(rules.SYSTEM_ACTION)));
+    assert.ok(!consoleActions().actions.has(rules.SYSTEM_ACTION));
+    assert.deepEqual(catalogueGaps([rules.SYSTEM_ACTION]), []);
+    assert.equal(rules.actionLabel(rules.SYSTEM_ACTION), 'Deleted-account withdrawal data purged');
+    const group = rules.ACTION_GROUPS.find((entry) => entry.label === 'System');
+    assert.deepEqual(group?.options.map((option) => option.value), [rules.SYSTEM_ACTION]);
+    assert.ok(rules.actionsMatching('withdrawal data').includes(rules.SYSTEM_ACTION));
+  });
+
+  test('describes every count the purge records, in plain words', { skip: !SIBLINGS_PRESENT }, () => {
+    const sql = readFileSync(SQL_FILES[0], 'utf8');
+    const start = sql.indexOf('CREATE OR REPLACE FUNCTION purge_deleted_account_withdrawals(');
+    const body = sql.slice(start, sql.indexOf('$$;', start));
+    const insert = body.slice(body.indexOf('INSERT INTO audit_log'));
+    assert.match(insert, /^INSERT INTO audit_log \(action, entity, after_value, result, sensitivity\)/);
+    const keys = [...insert.matchAll(/'([a-z_]+)', v_[a-z_]+/g)].map((match) => match[1]);
+    assert.deepEqual(keys, Object.keys(COUNTS));
+    assert.equal(rules.actionDescription(purge()), SUMMARY);
+    for (const key of keys) {
+      const partial = Object.fromEntries(Object.entries(COUNTS).filter(([name]) => name !== key));
+      assert.equal(rules.actionDescription(purge(partial)), null, key);
+    }
+  });
+
+  test('shows zero and large counts as recorded, and no summary for a malformed record or another action', () => {
+    const zero = Object.fromEntries(Object.keys(COUNTS).map((key) => [key, 0]));
+    assert.equal(
+      rules.actionDescription(purge(zero)),
+      'Removed from deleted accounts after the retention period: 0 withdrawals, 0 transactions, 0 flagged transactions, '
+        + '0 anomaly checks, 0 admin alerts, 0 security alerts and 0 notifications.',
+    );
+    assert.match(rules.actionDescription(purge({ ...COUNTS, withdrawals: 12500 })) ?? '', /: 12,500 withdrawals, 4 transactions, /);
+    for (const bad of [-1, 1.5, '3', null]) {
+      assert.equal(rules.actionDescription(purge({ ...COUNTS, transactions: bad })), null, String(bad));
+    }
+    assert.equal(rules.actionDescription(purge(null)), null);
+    assert.equal(rules.actionDescription(purge([3, 4])), null);
+    assert.equal(rules.actionDescription({ action: 'APPROVE_WITHDRAWAL', after_value: COUNTS }), null);
+  });
+
+  test('names the system as the actor in the list, the drawer and the printout', () => {
+    const shown = purge();
+    assert.equal(rules.isSystemEvent(shown), true);
+    assert.equal(model.actorName(shown), 'System');
+    assert.equal(rules.isSystemEvent({ admin_id: null, action: 'APPROVE_WITHDRAWAL' }), false);
+    assert.equal(rules.isSystemEvent({ admin_id: ADMIN_ID, action: rules.SYSTEM_ACTION }), false);
+    assert.equal(model.actorName(event({ admin_id: null, admin_username: null })), 'Unknown admin');
+    const cells = model.printCells(rules.toPrintable(shown));
+    assert.deepEqual(cells.slice(1, 5), ['System', 'Deleted-account withdrawal data purged', 'Withdrawal', 'Succeeded']);
+    const text = textOf(render(createElement(parts.EventDetail, { event: rules.forScreen(shown), userHref: null })));
+    for (const expected of [
+      'Deleted-account withdrawal data purged', rules.SYSTEM_ACTION, 'Summary', SUMMARY, 'System', 'Financial', 'Withdrawal',
+    ]) {
+      assert.ok(text.includes(expected), expected);
+    }
+    assert.ok(!text.includes('Unknown admin'));
+    assert.ok(!textOf(render(createElement(parts.EventDetail, { event: event(), userHref: null }))).includes('Summary'));
+    const page = readFileSync(join(OWNED_DIR, 'page.tsx'), 'utf8');
+    assert.match(
+      page,
+      /\{isSystemEvent\(event\) \? null : \(\s*<span className=\{s\.sub\}>\{event\.admin_role \|\| event\.admin_role_title \|\| 'Role not recorded'\}<\/span>\s*\)\}/,
+    );
+    assert.match(page, /secondary: `\$\{actorName\(event\)\} · \$\{target\.primary\}`/);
+    assert.match(page, /WAT · \$\{actorName\(shownEvent\)\}`/);
+    assert.doesNotMatch(page, /adminHandle\(/);
+  });
+
+  test('reads the record back from an API response unchanged', () => {
+    const list = model.toListResult({ success: true, activity: [rules.forScreen(purge())], admins: [], total: 1 });
+    assert.ok(list);
+    assert.equal(list.events.length, 1);
+    assert.equal(model.actorName(list.events[0]), 'System');
+    assert.equal(rules.actionDescription(list.events[0]), SUMMARY);
+    assert.equal(model.toEventResult({ event: rules.forScreen(purge()) })?.admin_id, null);
   });
 });
 
@@ -1672,6 +1833,42 @@ describe('route contract', () => {
     assert.match(body, /IF NOT \(v_super = TRUE OR 'audit\.read' = ANY \(admin_expand_grants\(v_perms\)\)\) THEN/);
     assert.doesNotMatch(body, /'activity' = ANY/);
     assert.match(source, /if \(\/forbidden\/i\.test\(listed\.error\.message \|\| ''\)\) return fail\('PERMISSION_DENIED', DENIED\);/);
+  });
+
+  test('lists admin rows plus exactly one system action, the deleted-account purge, and keeps every other filter', () => {
+    assert.equal(rules.SYSTEM_ACTION, 'PURGE_DELETED_ACCOUNT_WITHDRAWALS');
+    assert.match(source, /^const ADMIN_OR_SYSTEM = `admin_id\.not\.is\.null,action\.eq\.\$\{SYSTEM_ACTION\}`;$/m);
+    assert.doesNotMatch(source, /\.not\('admin_id'/);
+    assert.equal((source.match(/\.or\(ADMIN_OR_SYSTEM\)/g) ?? []).length, 2);
+    const scope = source.slice(source.indexOf('function scoped('), source.indexOf('async function fetchTargetRows('));
+    assert.match(scope, /let query = supabaseAdmin\.from\('audit_log'\)\.select\(columns, \{ count, head \}\)\.or\(ADMIN_OR_SYSTEM\);/);
+    for (const kept of [
+      "if (filters.adminId) query = query.eq('admin_id', filters.adminId);",
+      "if (filters.entity) query = query.eq('entity', filters.entity);",
+      "if (filters.result === 'unrecorded') query = query.is('result', null).is(META_RESULT, null);",
+      "if (filters.fromIso) query = query.gte('created_at', filters.fromIso);",
+      "if (filters.through) query = query.lte('created_at', filters.through);",
+      'if (clause) query = query.or(clause);',
+    ]) {
+      assert.ok(scope.includes(kept), kept);
+    }
+    const reader = source.slice(source.indexOf('async function readEvent('), source.indexOf('async function prepareSearch('));
+    assert.match(reader, /\.eq\('id', id\.toLowerCase\(\)\)\s*\.or\(ADMIN_OR_SYSTEM\)\s*\.limit\(1\),/);
+  });
+
+  test('the database list behind the mobile app admits the same system action and keeps its filters', { skip: !SIBLINGS_PRESENT }, () => {
+    const sql = readFileSync(SQL_FILES[1], 'utf8');
+    const list = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION list_admin_activity('));
+    const body = list.slice(0, list.indexOf('$$;'));
+    assert.equal(body.slice(body.indexOf('  FROM audit_log al'), body.indexOf('  ORDER BY al.created_at DESC')), [
+      '  FROM audit_log al',
+      '  LEFT JOIN admin_users u ON u.id = al.admin_id',
+      `  WHERE (al.admin_id IS NOT NULL OR al.action = '${rules.SYSTEM_ACTION}')`,
+      '    AND (p_before IS NULL OR al.created_at < p_before)',
+      '    AND (p_after  IS NULL OR al.created_at >= p_after)',
+      '    AND (p_admin_filter IS NULL OR al.admin_id = p_admin_filter)',
+      '',
+    ].join('\n'));
   });
 
   test('still answers the mobile app’s request shape', () => {

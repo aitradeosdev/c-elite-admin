@@ -13,12 +13,11 @@ export type PayoutGatewayConfig = Readonly<Record<string, string | null | undefi
 
 const CONFIG_KEYS: ReadonlySet<string> = new Set(PAYOUT_GATEWAY_KEYS);
 
-export function resolvePayoutGateway(config: PayoutGatewayConfig): PayoutGateway {
+export function resolvePayoutGateway(config: PayoutGatewayConfig): PayoutGateway | null {
   const configured = config.active_payment_gateway;
-  const active = (typeof configured === 'string' && configured !== '' ? configured : 'paystack').toLowerCase();
-  if (active === 'monnify' && config.gateway_monnify_enabled === 'true') return 'monnify';
-  if (active === 'novac' && config.gateway_novac_enabled === 'true') return 'novac';
-  return 'paystack';
+  const active = typeof configured === 'string' ? configured.toLowerCase() : '';
+  if (active !== 'paystack' && active !== 'monnify' && active !== 'novac') return null;
+  return config[`gateway_${active}_enabled`] === 'true' ? active : null;
 }
 
 export function payoutGatewayConfig(rows: unknown): Record<string, string | null> {
@@ -33,7 +32,12 @@ export function payoutGatewayConfig(rows: unknown): Record<string, string | null
   return config;
 }
 
-export async function readPayoutGateway(client: typeof supabaseAdmin): Promise<PayoutGateway | null> {
+export type PayoutGatewayLookup =
+  | { kind: 'gateway'; gateway: PayoutGateway }
+  | { kind: 'none' }
+  | { kind: 'unknown' };
+
+export async function readPayoutGateway(client: typeof supabaseAdmin): Promise<PayoutGatewayLookup> {
   try {
     const { data, error } = await client
       .from('app_config')
@@ -41,11 +45,12 @@ export async function readPayoutGateway(client: typeof supabaseAdmin): Promise<P
       .in('key', [...PAYOUT_GATEWAY_KEYS]);
     if (error) {
       console.error('payout gateway lookup:', error.message);
-      return null;
+      return { kind: 'unknown' };
     }
-    return resolvePayoutGateway(payoutGatewayConfig(data));
+    const gateway = resolvePayoutGateway(payoutGatewayConfig(data));
+    return gateway === null ? { kind: 'none' } : { kind: 'gateway', gateway };
   } catch (error) {
     console.error('payout gateway lookup:', error instanceof Error ? error.message : String(error));
-    return null;
+    return { kind: 'unknown' };
   }
 }

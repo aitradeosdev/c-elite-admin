@@ -1,9 +1,10 @@
 import { before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
+import ts from 'typescript';
 import { classesOf, loadAppModule, render, tagsOf, textOf, type Attrs } from './support/uiHarness.ts';
 import type { ApiFailure, ApiResult } from '../app/lib/apiClient.ts';
 import type {
@@ -38,6 +39,50 @@ before(async () => {
 const OWNED_DIR = fileURLToPath(new URL('../app/(dashboard)/admin-settings/', import.meta.url));
 const ROUTE_FILE = fileURLToPath(new URL('../app/api/admin-settings/route.ts', import.meta.url));
 const PAGE_FILE = join(OWNED_DIR, 'page.tsx');
+const EDGE_BILLS = fileURLToPath(new URL('../../supabase/functions/_shared/bills.ts', import.meta.url));
+
+type EdgeBillResolver = (admin: unknown) => Promise<string>;
+
+async function edgeBillResolver(): Promise<EdgeBillResolver> {
+  const source = readFileSync(EDGE_BILLS, 'utf8');
+  const signature = 'async function getActiveBillProviderName(';
+  const start = source.indexOf(signature);
+  assert.ok(start >= 0, 'getActiveBillProviderName was not found in supabase/functions/_shared/bills.ts');
+  let depth = 0;
+  let end = -1;
+  for (let index = source.indexOf('{', start); index < source.length && end < 0; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') depth -= 1;
+    if (depth === 0) end = index + 1;
+  }
+  const { outputText } = ts.transpileModule(`export ${source.slice(start, end)}`, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  });
+  const module = (await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)) as {
+    getActiveBillProviderName: EdgeBillResolver;
+  };
+  return module.getActiveBillProviderName;
+}
+
+const BILL_REFUSAL = /^(?:The bill provider settings could not be read \(.*\)|No bill provider is set|The bill provider is set to ".*", which is not supported|(?:VTPass|Novac) is the bill provider but is turned off)$/;
+
+async function edgeBillBuys(edge: EdgeBillResolver, admin: unknown): Promise<boolean> {
+  try {
+    await edge(admin);
+    return true;
+  } catch (error) {
+    assert.ok(error instanceof Error, 'the edge bill resolver refuses with an Error');
+    assert.match(error.message, BILL_REFUSAL, 'the edge bill resolver refuses with one of its own reasons, not a crash');
+    return false;
+  }
+}
+
+function billRows(values: Record<string, string | null | undefined>) {
+  const data = Object.entries(values)
+    .filter((entry): entry is [string, string | null] => entry[1] !== undefined)
+    .map(([key, value]) => ({ key, value }));
+  return { from: () => ({ select: () => ({ in: () => Promise.resolve({ data, error: null }) }) }) };
+}
 
 const PREVIOUS_ROUTE_KEYS = [
   'gateway_paystack_enabled', 'gateway_monnify_enabled', 'gateway_novac_enabled', 'active_payment_gateway',
@@ -281,10 +326,27 @@ describe('PATCH validation', () => {
     assert.ok(plan({ active_payment_gateway: 'novac', gateway_paystack_enabled: 'false' }));
   });
 
-  test('bill providers follow the same rules, and a missing primary means VTPass', () => {
-    const current = without(LIVE, 'active_bill_provider');
-    assert.match(refusal({ bill_vtpass_enabled: 'false' }, current).message, /VTPass is the primary bill provider/);
+  test('bill providers follow the same rules, and a missing primary names no provider', () => {
+    assert.match(refusal({ bill_vtpass_enabled: 'false' }).message, /VTPass is the primary bill provider/);
     assert.match(refusal({ active_bill_provider: 'novac' }).message, /Turn on Novac/);
+    const current = without(LIVE, 'active_bill_provider');
+    assert.deepEqual(plan({ bill_vtpass_enabled: 'false' }, current).updates, { bill_vtpass_enabled: 'false' });
+    assert.deepEqual(plan({ active_bill_provider: 'vtpass' }, current).updates, { active_bill_provider: 'vtpass' });
+  });
+
+  test('a missing primary gateway names no gateway, so any gateway can be turned off and choosing one is a real change', () => {
+    const current = without(LIVE, 'active_payment_gateway');
+    assert.deepEqual(plan({ gateway_paystack_enabled: 'false' }, current).updates, { gateway_paystack_enabled: 'false' });
+    assert.deepEqual(plan({ active_payment_gateway: 'paystack' }, current).updates, { active_payment_gateway: 'paystack' });
+    for (const raw of [undefined, null, '']) {
+      assert.equal(rules.normalizeStored('active_payment_gateway', raw), '', String(raw));
+      assert.equal(rules.normalizeStored('active_bill_provider', raw), '', String(raw));
+    }
+    assert.equal(rules.normalizeStored('active_payment_gateway', ' Novac '), ' novac ');
+    assert.equal(rules.primaryGateway({}), '');
+    assert.equal(rules.primaryBillProvider({}), '');
+    assert.equal('DEFAULT_GATEWAY' in rules, false);
+    assert.equal('DEFAULT_BILL_PROVIDER' in rules, false);
   });
 
   test('unknown primaries and malformed switches are refused', () => {
@@ -355,8 +417,10 @@ describe('conflict detection', () => {
   test('expected values are compared the way the page normalises them', () => {
     const current = without(LIVE, 'gateway_monnify_enabled', 'active_payment_gateway', 'max_card_approval_naira');
     assert.ok(plan({ gateway_monnify_enabled: 'true' }, current, { expected: { gateway_monnify_enabled: 'false' } }));
-    assert.ok(plan({ active_payment_gateway: 'novac' }, current, { expected: { active_payment_gateway: 'paystack' } }));
+    assert.ok(plan({ active_payment_gateway: 'novac' }, current, { expected: { active_payment_gateway: '' } }));
     assert.ok(plan({ max_card_approval_naira: '7000000' }, current, { expected: { max_card_approval_naira: '5000000' } }));
+    const invented = refusal({ active_payment_gateway: 'novac' }, current, { expected: { active_payment_gateway: 'paystack' } });
+    assert.equal(invented.code, 'STATE_CONFLICT');
   });
 
   test('a secret conflict compares whether a key is stored, never the key itself', () => {
@@ -467,8 +531,8 @@ describe('page model', () => {
       LIVE, 'active_payment_gateway', 'active_bill_provider', 'max_card_approval_naira', 'app_update_type',
       'gateway_monnify_enabled',
     ));
-    assert.equal(snap.values.active_payment_gateway, 'paystack');
-    assert.equal(snap.values.active_bill_provider, 'vtpass');
+    assert.equal(snap.values.active_payment_gateway, '');
+    assert.equal(snap.values.active_bill_provider, '');
     assert.equal(snap.values.max_card_approval_naira, '5000000');
     assert.equal(snap.values.app_update_type, 'soft');
     assert.equal(snap.values.gateway_monnify_enabled, 'false');
@@ -616,15 +680,203 @@ describe('page model', () => {
     assert.match(notes({}, { mode: 'clear' }), /no longer verified/);
   });
 
-  test('live notices explain payouts that fall back and bills that are refused', () => {
-    const fallback = model.payoutNotice(snapshot({ ...LIVE, active_payment_gateway: 'monnify' }));
-    assert.equal(fallback?.title, 'Payouts are going through Paystack');
-    assert.match(fallback?.message ?? '', /Monnify is the primary gateway but is turned off/);
+  test('with no primary stored, choosing one is a change that names no previous provider', () => {
+    const missing = without(LIVE, 'active_payment_gateway', 'active_bill_provider');
+    const base = model.startEdit(snapshot(missing));
+    assert.equal(base.draft.active_payment_gateway, '');
+    assert.equal(base.draft.active_bill_provider, '');
+    assert.deepEqual(model.editErrors(base), {});
+    const chosen = editOf({ active_payment_gateway: 'paystack', active_bill_provider: 'vtpass' }, { mode: 'keep' }, missing);
+    assert.deepEqual(model.editErrors(chosen), {});
+    assert.deepEqual(
+      model.reviewRows(chosen).map((row) => [row.key, row.from, row.to, row.fromMissing]),
+      [['active_payment_gateway', 'Not set', 'Paystack', true], ['active_bill_provider', 'Not set', 'VTPass', true]],
+    );
+    assert.deepEqual(model.reviewConsequences(chosen), [
+      'Payouts approved from now on are sent through Paystack. Payouts already sent are not moved.',
+      'Airtime, data, cable and electricity are bought through VTPass. Services it does not offer are hidden in the app.',
+    ]);
+    const html = render(createElement(parts.ProviderCard, {
+      section: model.sectionById('payouts'),
+      headingId: 'pg',
+      primaryKey: 'active_payment_gateway',
+      providers: [
+        { value: 'paystack', label: 'Paystack', flagKey: 'gateway_paystack_enabled' },
+        { value: 'monnify', label: 'Monnify', flagKey: 'gateway_monnify_enabled' },
+        { value: 'novac', label: 'Novac', flagKey: 'gateway_novac_enabled' },
+      ],
+      noun: 'gateway',
+      values: snapshot(missing).values,
+      errors: {},
+      modified: new Set<string>(),
+      notice: model.payoutNotice(snapshot(missing)),
+      fieldId: (key: string) => `f-${key}`,
+      onChange: noop,
+      onBlur: noop,
+    }));
+    const inputs = tagsOf(html, 'input');
+    assert.equal(inputs.filter((attrs) => attrs.type === 'radio' && 'checked' in attrs).length, 0);
+    const paystack = inputs.find((attrs) => attrs.id === 'f-gateway_paystack_enabled');
+    assert.ok(paystack && !('disabled' in paystack));
+    assert.doesNotMatch(textOf(html), /Primary(?! payout gateway)/);
+    assert.match(textOf(html), /No primary payout gateway is set, so withdrawals are refused and payouts cannot be approved\./);
+  });
+
+  test('a padded primary shows as the unrecognised value the edge refuses, and choosing the provider stores its plain name', () => {
+    for (const key of ['active_payment_gateway', 'active_bill_provider']) {
+      assert.equal(rules.normalizeStored(key, '  '), '  ', key);
+      assert.equal(rules.normalizeStored(key, 'NOVAC '), 'novac ', key);
+    }
+    const padded = {
+      ...LIVE,
+      gateway_paystack_enabled: 'false',
+      active_payment_gateway: ' novac',
+      bill_novac_enabled: 'true',
+      active_bill_provider: 'novac ',
+    };
+    const snap = snapshot(padded);
+    assert.equal(snap.values.active_payment_gateway, ' novac');
+    assert.equal(snap.values.active_bill_provider, 'novac ');
+    assert.equal(
+      model.payoutNotice(snap)?.message,
+      'The primary gateway is set to “ novac”, which this console does not recognise, so withdrawals are refused and payouts cannot be approved. Choose a primary gateway.',
+    );
+    assert.equal(
+      model.billNotice(snap)?.message,
+      'The primary bill provider is set to “novac ”, which this console does not recognise, so the app refuses airtime, data, cable and electricity purchases. Choose a primary provider.',
+    );
+    const html = render(createElement(parts.ProviderCard, {
+      section: model.sectionById('payouts'),
+      headingId: 'pg',
+      primaryKey: 'active_payment_gateway',
+      providers: [
+        { value: 'paystack', label: 'Paystack', flagKey: 'gateway_paystack_enabled' },
+        { value: 'monnify', label: 'Monnify', flagKey: 'gateway_monnify_enabled' },
+        { value: 'novac', label: 'Novac', flagKey: 'gateway_novac_enabled' },
+      ],
+      noun: 'gateway',
+      values: snap.values,
+      errors: {},
+      modified: new Set<string>(),
+      notice: model.payoutNotice(snap),
+      fieldId: (key: string) => `f-${key}`,
+      onChange: noop,
+      onBlur: noop,
+    }));
+    const inputs = tagsOf(html, 'input');
+    assert.deepEqual(
+      inputs.filter((attrs) => attrs.type === 'radio').map((attrs) => [attrs.value, 'checked' in attrs, 'disabled' in attrs]),
+      [[' novac', true, true], ['paystack', false, true], ['monnify', false, true], ['novac', false, false]],
+    );
+    const novac = inputs.find((attrs) => attrs.id === 'f-gateway_novac_enabled');
+    assert.ok(novac && !('disabled' in novac));
+    assert.doesNotMatch(textOf(html), /Primary(?! payout gateway)/);
+    const chosen = editOf({ active_payment_gateway: 'novac', active_bill_provider: 'novac' }, { mode: 'keep' }, padded);
+    assert.deepEqual(model.editErrors(chosen), {});
+    const payload = model.savePayload(chosen);
+    assert.deepEqual(payload, {
+      changes: { active_payment_gateway: 'novac', active_bill_provider: 'novac' },
+      expected: { active_payment_gateway: ' novac', active_bill_provider: 'novac ' },
+    });
+    assert.deepEqual(
+      plan(payload.changes, padded, { expected: payload.expected }).updates,
+      { active_payment_gateway: 'novac', active_bill_provider: 'novac' },
+    );
+  });
+
+  test('live notices say when payouts or bill payments are refused, and never name a fallback provider', () => {
     assert.equal(model.payoutNotice(snapshot()), null);
+    assert.equal(model.payoutNotice(snapshot({ ...LIVE, active_payment_gateway: 'novac' })), null);
+    const off = model.payoutNotice(snapshot({ ...LIVE, active_payment_gateway: 'monnify' }));
+    assert.equal(off?.tone, 'danger');
+    assert.equal(off?.title, 'Payouts are being refused');
+    assert.equal(
+      off?.message,
+      'Monnify is the primary gateway but is turned off, so withdrawals are refused and payouts cannot be approved. Turn Monnify on, or choose another primary gateway.',
+    );
+    assert.equal(
+      model.payoutNotice(snapshot(without(LIVE, 'gateway_paystack_enabled')))?.message,
+      'Paystack is the primary gateway but is turned off, so withdrawals are refused and payouts cannot be approved. Turn Paystack on, or choose another primary gateway.',
+    );
+    assert.equal(
+      model.payoutNotice(snapshot(without(LIVE, 'active_payment_gateway')))?.message,
+      'No primary payout gateway is set, so withdrawals are refused and payouts cannot be approved. Choose a primary gateway.',
+    );
+    assert.equal(
+      model.payoutNotice(snapshot({ ...LIVE, active_payment_gateway: 'flutterwave' }))?.message,
+      'The primary gateway is set to “flutterwave”, which this console does not recognise, so withdrawals are refused and payouts cannot be approved. Choose a primary gateway.',
+    );
+
+    assert.equal(model.billNotice(snapshot()), null);
+    assert.equal(model.billNotice(snapshot({ ...LIVE, active_bill_provider: 'novac', bill_novac_enabled: 'true' })), null);
     const refused = model.billNotice(snapshot({ ...LIVE, bill_vtpass_enabled: 'false' }));
     assert.equal(refused?.tone, 'danger');
-    assert.equal(model.billNotice(snapshot(without(LIVE, 'bill_vtpass_enabled'))), null);
-    assert.equal(model.billNotice(snapshot({ ...LIVE, active_bill_provider: 'novac' }))?.title, 'Bills are going through VTPass');
+    assert.equal(refused?.title, 'Bill payments are being refused');
+    assert.equal(
+      refused?.message,
+      'VTPass is the primary bill provider but is turned off, so the app refuses airtime, data, cable and electricity purchases. Turn VTPass on, or make another provider primary.',
+    );
+    assert.equal(model.billNotice(snapshot(without(LIVE, 'bill_vtpass_enabled')))?.message, refused?.message);
+    const novacOff = model.billNotice(snapshot({ ...LIVE, active_bill_provider: 'novac' }));
+    assert.equal(novacOff?.title, 'Bill payments are being refused');
+    assert.equal(
+      novacOff?.message,
+      'Novac is the primary bill provider but is turned off, so the app refuses airtime, data, cable and electricity purchases. Turn Novac on, or make another provider primary.',
+    );
+    assert.equal(
+      model.billNotice(snapshot(without(LIVE, 'active_bill_provider')))?.message,
+      'No primary bill provider is set, so the app refuses airtime, data, cable and electricity purchases. Choose a primary provider.',
+    );
+    assert.equal(
+      model.billNotice(snapshot({ ...LIVE, active_bill_provider: 'flutterwave' }))?.message,
+      'The primary bill provider is set to “flutterwave”, which this console does not recognise, so the app refuses airtime, data, cable and electricity purchases. Choose a primary provider.',
+    );
+    for (const notice of [off, refused, novacOff]) {
+      assert.doesNotMatch(notice?.message ?? '', /fall back|going through|go through|in use/);
+    }
+  });
+
+  test('the bill notice is silent exactly when the edge bill resolver would buy', { skip: !existsSync(EDGE_BILLS) }, async () => {
+    const edge = await edgeBillResolver();
+    const ACTIVE = [undefined, '', 'vtpass', 'VTPass', 'novac', 'NOVAC', ' novac', 'flutterwave'];
+    const FLAGS = [undefined, '', 'true', 'TRUE', 'false', ' true'];
+    let checked = 0;
+    let refused = 0;
+    for (const active of ACTIVE) {
+      for (const vtpass of FLAGS) {
+        for (const novac of FLAGS) {
+          const values = { ...without(LIVE, 'active_bill_provider', 'bill_vtpass_enabled', 'bill_novac_enabled') };
+          const patch = { active_bill_provider: active, bill_vtpass_enabled: vtpass, bill_novac_enabled: novac };
+          for (const [key, value] of Object.entries(patch)) if (value !== undefined) values[key] = value;
+          const buys = await edgeBillBuys(edge, billRows(patch));
+          assert.equal(model.billNotice(snapshot(values)) === null, buys, JSON.stringify(patch));
+          if (!buys) refused += 1;
+          checked += 1;
+        }
+      }
+    }
+    assert.equal(checked, ACTIVE.length * FLAGS.length * FLAGS.length);
+    assert.ok(refused > 0 && refused < checked, `${refused} of ${checked} combinations refused`);
+  });
+
+  test('the bill refusal check rejects a crash, so a broken resolver cannot pass for a refusal', async () => {
+    const crashing: EdgeBillResolver = async () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'toLowerCase')");
+    };
+    await assert.rejects(edgeBillBuys(crashing, billRows({})), assert.AssertionError);
+    for (const reason of [
+      'The bill provider settings could not be read (permission denied)',
+      'No bill provider is set',
+      'The bill provider is set to "flutterwave", which is not supported',
+      'VTPass is the bill provider but is turned off',
+      'Novac is the bill provider but is turned off',
+    ]) {
+      const refusing: EdgeBillResolver = async () => {
+        throw new Error(reason);
+      };
+      assert.equal(await edgeBillBuys(refusing, billRows({})), false, reason);
+    }
+    assert.equal(await edgeBillBuys(async () => 'novac', billRows({})), true);
   });
 
   test('a save that could not be reloaded is applied locally without storing the key', () => {

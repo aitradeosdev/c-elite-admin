@@ -980,6 +980,7 @@ function WithdrawalsQueue() {
               withdrawal={detail.data.withdrawal}
               partial={detail.data.partial}
               payoutGateway={detail.data.payoutGateway}
+              payoutMissing={detail.data.payoutMissing}
               emergencyMode={shown?.emergencyMode ?? detail.data.emergencyMode}
             />
           </div>
