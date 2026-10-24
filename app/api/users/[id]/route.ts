@@ -50,6 +50,7 @@ const AVATAR_TTL_SECONDS = 3600;
 const REVIEW_STATES = ['pending_review', 'held'];
 const REASON_MAX = 500;
 const DELETION_FREEZE_REASON = 'Account deletion in progress';
+const DELETION_UNCHECKED = 'Whether this account’s deletion finished could not be checked. Refresh to try again.';
 
 type Row = Record<string, unknown>;
 
@@ -209,6 +210,17 @@ async function signAvatar(path: string | null): Promise<string | null> {
   return null;
 }
 
+async function readDeletionUnfinished(id: string): Promise<boolean | null> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('admin_deletion_unfinished', { p_uid: id });
+    if (!error && typeof data === 'boolean') return data;
+    console.error('user detail deletion state:', error ? error.message : 'no answer was returned');
+  } catch (error) {
+    console.error('user detail deletion state:', describe(error));
+  }
+  return null;
+}
+
 async function readProfile(id: string, admin: AdminContext) {
   const { data: user, error } = await supabaseAdmin
     .from('users')
@@ -222,7 +234,8 @@ async function readProfile(id: string, admin: AdminContext) {
   }
   if (!user) return fail('RESOURCE_NOT_FOUND', 'User not found.');
 
-  const [transactions, devices, logins, withdrawals, awaitingReview, cardSubmissions, referred, avatarUrl] =
+  const checkDeletion = Boolean(user.deleted_at) && admin.can('users.delete');
+  const [transactions, devices, logins, withdrawals, awaitingReview, cardSubmissions, referred, avatarUrl, unfinished] =
     await Promise.all([
       loadSection(id, 'transactions', 1, SECTIONS.transactions.pageSize, DEFAULT_SORTING),
       loadSection(id, 'devices', 1, SECTIONS.devices.pageSize, DEFAULT_SORTING),
@@ -232,6 +245,7 @@ async function readProfile(id: string, admin: AdminContext) {
       countFor('card_submissions', id),
       loadReferrer(user.referred_by),
       signAvatar(user.avatar_path),
+      checkDeletion ? readDeletionUnfinished(id) : Promise.resolve(null),
     ]);
 
   const uncounted = [
@@ -244,6 +258,7 @@ async function readProfile(id: string, admin: AdminContext) {
   return ok({
     user: { ...user, balance: walletBalance(user.wallets), avatar_url: avatarUrl },
     referrer: referred.referrer,
+    deletion_unfinished: unfinished,
     stats: {
       trades: transactions.total,
       withdrawals,
@@ -269,6 +284,7 @@ async function readProfile(id: string, admin: AdminContext) {
       recent_transactions: transactions.error,
       stats: uncounted.length ? `These totals could not be counted: ${uncounted.join(', ')}.` : null,
       referrer: referred.error,
+      deletion: checkDeletion && unfinished === null ? DELETION_UNCHECKED : null,
     },
     can: {
       freeze: admin.can('users.freeze'),

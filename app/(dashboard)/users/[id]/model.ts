@@ -6,7 +6,9 @@ export type SectionKey = 'transactions' | 'devices' | 'logins';
 
 export type AccountState = 'deleted' | 'frozen' | 'active' | 'inactive';
 
-export type ActionKind = 'freeze' | 'unfreeze';
+export type ActionKind = 'freeze' | 'unfreeze' | 'delete' | 'finish';
+
+export type DeletionKind = Extract<ActionKind, 'delete' | 'finish'>;
 
 export interface UserProfile {
   id: string;
@@ -81,7 +83,8 @@ export interface ProfileData {
   user: UserProfile;
   referrer: Referrer | null;
   stats: UserStats;
-  partial: { stats: string | null; referrer: string | null };
+  deletionUnfinished: boolean | null;
+  partial: { stats: string | null; referrer: string | null; deletion: string | null };
 }
 
 export interface ProfileResource {
@@ -276,6 +279,11 @@ export function canAdjustWallet(user: Pick<UserProfile, 'deleted_at' | 'is_froze
   return accountState(user) !== 'deleted';
 }
 
+export function deletionKind(profile: { user: Pick<UserProfile, 'deleted_at' | 'email'>; deletionUnfinished: boolean | null }): DeletionKind | null {
+  if (!profile.user.deleted_at) return profile.user.email ? 'delete' : null;
+  return profile.deletionUnfinished === true ? 'finish' : null;
+}
+
 export function displayName(user: Pick<UserProfile, 'full_name' | 'username'>): string {
   if (user.full_name) return user.full_name;
   if (user.username) return `@${user.username}`;
@@ -361,9 +369,11 @@ export function readProfile(body: ApiBody): ProfileData | null {
     user,
     referrer: toReferrer(body.referrer),
     stats: toStats(body.stats),
+    deletionUnfinished: flag(body.deletion_unfinished),
     partial: {
       stats: text(partial.stats),
       referrer: text(partial.referrer),
+      deletion: text(partial.deletion),
     },
   };
 }
@@ -401,7 +411,7 @@ export function planSeed(spec: SectionSpec, view: SectionView, seed: SectionSeed
 export function classifyAction(result: ApiResult<ApiBody>): ActionAttempt {
   if (result.ok) return { kind: 'done', warning: text(result.data.warning) };
   const { error } = result;
-  if (error.outcomeUnknown) return { kind: 'unknown' };
+  if (error.outcomeUnknown || record(error.details).outcome_unknown === true) return { kind: 'unknown' };
   if (error.status !== null && FINAL_ACTION_STATUSES.has(error.status)) {
     return { kind: 'refused', status: error.status, message: error.message };
   }
@@ -417,6 +427,8 @@ export function actionNotice(
   if (outcome.kind === 'refused') return outcome.status === 401 ? null : { text: outcome.message, tone: 'error' };
   if (outcome.warning) return { text: outcome.warning, tone: 'warning' };
   const handle = userHandle(user);
+  if (kind === 'delete') return { text: `${handle} was deleted.`, tone: 'success' };
+  if (kind === 'finish') return { text: `The deletion of ${handle} is finished.`, tone: 'success' };
   return kind === 'freeze'
     ? { text: `${handle} is frozen. Withdrawals and bill payments are now refused.`, tone: 'success' }
     : { text: `${handle} is unfrozen. Withdrawals and bill payments are allowed again.`, tone: 'success' };

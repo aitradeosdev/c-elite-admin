@@ -661,6 +661,7 @@ export const ENFORCED_PERMISSIONS: readonly Permission[] = [
   'users.read',
   'users.freeze',
   'users.export',
+  'users.delete',
   'user_activity.read',
   'wallets.read',
   'wallets.adjust',

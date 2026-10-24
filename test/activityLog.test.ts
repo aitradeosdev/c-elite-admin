@@ -1008,6 +1008,15 @@ describe('action labels', () => {
     assert.ok(wallet.includes('CREDIT_WALLET') && wallet.includes('DEBIT_WALLET'));
   });
 
+  test('names staff account deletions under Users, written by the database', { skip: !SIBLINGS_PRESENT }, () => {
+    assert.equal(rules.actionLabel('DELETE_USER_ACCOUNT'), 'Deleted user account');
+    const users = rules.ACTION_GROUPS.find((group) => group.label === 'Users');
+    const values = users?.options.map((option) => option.value) ?? [];
+    assert.equal(values.indexOf('DELETE_USER_ACCOUNT'), values.indexOf('UNFREEZE_USER') + 1);
+    const written = new Set(databaseAndEdgeInserts().sql.flatMap((insert) => insert.actions));
+    assert.ok(written.has('DELETE_USER_ACCOUNT'));
+  });
+
   test('names own password changes under Admins and sign-in, written by the password route', () => {
     assert.equal(rules.actionLabel('PASSWORD_CHANGED'), 'Changed own password');
     assert.equal(rules.actionLabel('PASSWORD_CHANGE_FAILED'), 'Password change failed');

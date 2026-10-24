@@ -263,6 +263,8 @@ describe('permission statuses', () => {
     assert.equal(permissionStatus('roles.read'), 'super_only');
     assert.equal(permissionStatus('audit.read'), 'enforced');
     assert.equal(permissionStatus('withdrawals.retry'), 'reserved');
+    assert.equal(permissionStatus('users.delete'), 'enforced');
+    assert.equal(PERMISSION_CATALOG['users.delete'].risk, 'critical');
   });
 });
 

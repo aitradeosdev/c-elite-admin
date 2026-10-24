@@ -695,7 +695,7 @@ describe('additional permissions', () => {
       rules.ADDITIONAL_PERMISSIONS.filter((key) => permissionStatus(key) === 'enforced'),
     );
     assert.deepEqual(new Set(model.ENFORCED_ADDITIONAL), new Set([
-      'flags.read', 'flags.resolve', 'sensitive_data.download', 'sensitive_data.share', 'wallets.adjust',
+      'flags.read', 'flags.resolve', 'sensitive_data.download', 'sensitive_data.share', 'users.delete', 'wallets.adjust',
     ]));
     for (const key of model.RESERVED_ADDITIONAL) assert.notEqual(permissionStatus(key), 'enforced', key);
   });

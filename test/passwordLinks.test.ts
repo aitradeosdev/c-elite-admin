@@ -715,6 +715,11 @@ describe('lib/passwordLinks: sending the email', () => {
     assert.deepEqual(answer, { kind: 'answered', status: 200, body: { success: true } });
     assert.equal(state.fetches[0]?.url, `${SUPABASE_URL}/functions/v1/broadcast-notification`);
     assert.equal(state.fetches[0]?.init.body, JSON.stringify({ title: 'Hello' }));
+    assert.equal(new Headers(state.fetches[0]?.init.headers).has('authorization'), false);
+    reset();
+    await edge.callEdgeFunction('admin-delete-account', { user_id: 'x' }, 1000, 'admin.token');
+    assert.equal(new Headers(state.fetches[0]?.init.headers).get('authorization'), 'Bearer admin.token');
+    assert.equal(new Headers(state.fetches[0]?.init.headers).get('x-admin-secret'), FUNCTION_SECRET);
   });
 
   test('nothing is sent when the console address or the edge settings are missing', async () => {

@@ -14,12 +14,15 @@ import {
   DEFAULT_SECTION, FREEZE_REASONS, SECTIONS, SECTION_ORDER, UNKNOWN_ACTION_OUTCOME, accountState, actionNotice,
   classifyAction, countText, plural, toProfileResource, userHandle, userSummary, validUserId,
   type ActionAttempt, type ActionKind, type ActionOutcome, type ProfileData, type ProfileResource, type SectionKey,
+  type UserProfile,
 } from './model';
 import { useUserSection } from './useUserSection';
 import {
-  AccountNotices, AdjustWalletButton, NotFoundState, ProfileCard, ProfileKpis, UserDetailSkeleton, UserSubtitle,
-  UserTitle,
+  AccountNotices, AdjustWalletButton, DeleteAccountButton, NotFoundState, ProfileCard, ProfileKpis, UserDetailSkeleton,
+  UserSubtitle, UserTitle,
 } from './UserParts';
+import { deleteOptions, finishOptions } from './deleteOptions';
+import { DELETE_REQUEST_TIMEOUT_MS, deleteAccountPath } from './accountDeletion';
 import { DevicesPanel, LoginsPanel, TransactionsPanel } from './ActivityPanels';
 import { WalletAdjustPanel } from './WalletAdjustPanel';
 import s from './page.module.css';
@@ -33,6 +36,8 @@ const NOT_SENT = 'The request could not be started, so nothing was changed. Try 
 const PENDING_LABELS: Readonly<Record<ActionKind, string>> = {
   freeze: 'Freezing the account…',
   unfreeze: 'Unfreezing the account…',
+  delete: 'Deleting the account…',
+  finish: 'Finishing the deletion…',
 };
 
 function failureText(failure: ApiFailure): string {
@@ -102,11 +107,30 @@ function unfreezeOptions({ user }: ProfileData): ConfirmOptions {
   };
 }
 
-async function patchAccount(id: string, kind: ActionKind, reason: string): Promise<ActionAttempt> {
+const ACTION_OPTIONS: Readonly<Record<ActionKind, (profile: ProfileData) => ConfirmOptions>> = {
+  freeze: freezeOptions,
+  unfreeze: unfreezeOptions,
+  delete: deleteOptions,
+  finish: finishOptions,
+};
+
+async function patchAccount(id: string, kind: 'freeze' | 'unfreeze', reason: string): Promise<ActionAttempt> {
   return classifyAction(await apiRequest(`/api/users/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: reason ? { action: kind, reason } : { action: kind },
   }));
+}
+
+async function deleteAccount(id: string, kind: 'delete' | 'finish', reason: string, user: UserProfile): Promise<ActionAttempt> {
+  return classifyAction(await apiRequest(deleteAccountPath(id), {
+    method: 'POST',
+    body: kind === 'delete' ? { reason, request_email: user.email } : { reason },
+    timeoutMs: DELETE_REQUEST_TIMEOUT_MS,
+  }));
+}
+
+function sendAction(id: string, kind: ActionKind, reason: string, user: UserProfile): Promise<ActionAttempt> {
+  return kind === 'delete' || kind === 'finish' ? deleteAccount(id, kind, reason, user) : patchAccount(id, kind, reason);
 }
 
 export default function UserDetailPage() {
@@ -158,15 +182,16 @@ function UserDetail({ id }: { id: string }) {
   const act = useCallback(async (kind: ActionKind) => {
     if (!current || actingRef.current) return;
     actingRef.current = true;
+    const target = current.user;
     let sent = false;
     let settled = false;
     try {
       const decision = await confirm<ActionOutcome>({
-        ...(kind === 'freeze' ? freezeOptions(current) : unfreezeOptions(current)),
+        ...ACTION_OPTIONS[kind](current),
         pendingLabel: PENDING_LABELS[kind],
         action: async ({ reason }) => {
           sent = true;
-          const attempt = await patchAccount(id, kind, reason.trim());
+          const attempt = await sendAction(id, kind, reason.trim(), target);
           if (attempt.kind === 'retry') throw new Error(attempt.message);
           if (attempt.kind !== 'unknown') {
             settled = true;
@@ -245,6 +270,7 @@ function UserDetail({ id }: { id: string }) {
                 {frozen ? 'Unfreeze account' : 'Freeze account'}
               </Button>
             ) : null}
+            <DeleteAccountButton profile={current} onOpen={(kind) => void act(kind)} />
           </>
         }
       />
@@ -259,6 +285,8 @@ function UserDetail({ id }: { id: string }) {
           The profile could not be refreshed. {failureText(failure)} Showing what was loaded earlier.
         </Notice>
       ) : null}
+
+      {partial.deletion ? <Notice tone="warning" compact announce="polite">{partial.deletion}</Notice> : null}
 
       <AccountNotices user={user} stats={stats} />
 

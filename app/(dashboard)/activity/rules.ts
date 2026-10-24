@@ -131,6 +131,7 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
   ['Users', [
     ['FREEZE_USER', 'Froze user'],
     ['UNFREEZE_USER', 'Unfroze user'],
+    ['DELETE_USER_ACCOUNT', 'Deleted user account'],
     ['TERMINATE_USER_SESSIONS', 'Ended user sessions'],
     ['CREDIT_WALLET', 'Credited wallet'],
     ['DEBIT_WALLET', 'Debited wallet'],

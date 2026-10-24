@@ -973,7 +973,7 @@ describe('panel rendering', () => {
     assert.equal(withClass(skeleton(['users.read']), 'div', 'pageHeaderAction').length, 1);
     assert.equal(withClass(skeleton(['users.read', 'wallets.adjust']), 'div', 'pageHeaderAction').length, 2);
     assert.equal(withClass(skeleton(['users.read', 'users.freeze']), 'div', 'pageHeaderAction').length, 2);
-    assert.equal(withClass(skeleton([], true), 'div', 'pageHeaderAction').length, 3);
+    assert.equal(withClass(skeleton([], true), 'div', 'pageHeaderAction').length, 4);
   });
 
   test('notices: deletion in progress is stronger than a plain freeze, and each risk has its own line', () => {

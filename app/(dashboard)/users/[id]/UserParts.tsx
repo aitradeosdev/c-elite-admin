@@ -3,7 +3,7 @@
 import type { Ref as ReactRef } from 'react';
 import Link from 'next/link';
 import {
-  Activity, ArrowDownToLine, ArrowUpRight, ClipboardList, Lock, Receipt, UserX, Wallet,
+  Activity, ArrowDownToLine, ArrowUpRight, ClipboardList, Lock, Receipt, Trash2, UserX, Wallet,
 } from 'lucide-react';
 import {
   Avatar, Badge, Button, Card, CardBody, CardHeader, DetailRow, EmptyState, Kpi, KpiGrid, KpiSkeleton, LinkButton,
@@ -11,8 +11,8 @@ import {
 } from '../../../_ui';
 import { formatAge, formatBusinessDate, formatBusinessDateTime } from '../../../lib/time';
 import {
-  ACCOUNT_STATES, accountState, canAdjustWallet, countText, displayName, plural, referrerName, userTransactionsHref,
-  type Referrer, type UserProfile, type UserStats,
+  ACCOUNT_STATES, accountState, canAdjustWallet, countText, deletionKind, displayName, plural, referrerName,
+  userTransactionsHref, type DeletionKind, type ProfileData, type Referrer, type UserProfile, type UserStats,
 } from './model';
 import s from './page.module.css';
 
@@ -21,6 +21,7 @@ const PROFILE_SKELETON = ['46%', '38%', '52%', '44%', '30%', '41%', '35%', '48%'
 const REFRESH_SKELETON = 86;
 const ADJUST_SKELETON = 116;
 const FREEZE_SKELETON = 128;
+const DELETE_SKELETON = 124;
 
 export function AdjustWalletButton({
   user, onOpen, buttonRef,
@@ -34,6 +35,22 @@ export function AdjustWalletButton({
   return (
     <Button ref={buttonRef} variant="secondary" size="sm" leftIcon={<Wallet size={14} />} onClick={onOpen}>
       Adjust wallet
+    </Button>
+  );
+}
+
+export function DeleteAccountButton({
+  profile, onOpen,
+}: {
+  profile: Pick<ProfileData, 'user' | 'deletionUnfinished'>;
+  onOpen: (kind: DeletionKind) => void;
+}) {
+  const allowed = useCan(['users.read', 'users.delete']);
+  const kind = deletionKind(profile);
+  if (!allowed || !kind) return null;
+  return (
+    <Button variant="dangerSubtle" size="sm" leftIcon={<Trash2 size={14} />} onClick={() => onOpen(kind)}>
+      {kind === 'finish' ? 'Finish deletion' : 'Delete account'}
     </Button>
   );
 }
@@ -234,10 +251,12 @@ export function NotFoundState() {
 export function UserDetailSkeleton() {
   const canFreeze = useCan('users.freeze');
   const canAdjust = useCan(['users.read', 'wallets.adjust']);
+  const canDelete = useCan(['users.read', 'users.delete']);
   const actions = [
     REFRESH_SKELETON,
     ...(canAdjust ? [ADJUST_SKELETON] : []),
     ...(canFreeze ? [FREEZE_SKELETON] : []),
+    ...(canDelete ? [DELETE_SKELETON] : []),
   ];
   return (
     <div className={s.page}>

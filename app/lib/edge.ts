@@ -21,6 +21,7 @@ export async function callEdgeFunction(
   slug: string,
   payload: Record<string, unknown>,
   timeoutMs: number,
+  bearer?: string,
 ): Promise<EdgeAnswer> {
   const url = edgeUrl(slug);
   const secret = process.env.ADMIN_FUNCTION_SECRET || '';
@@ -29,7 +30,11 @@ export async function callEdgeFunction(
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-secret': secret },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-secret': secret,
+        ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      },
       body: JSON.stringify(payload),
       cache: 'no-store',
       signal: AbortSignal.timeout(timeoutMs),

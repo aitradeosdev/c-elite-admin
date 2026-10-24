@@ -91,7 +91,8 @@ describe('readProfile', () => {
     assert.equal(profile.user.full_name, 'Ada Obi');
     assert.deepEqual(profile.referrer, { id: REFERRER_ID, username: 'tolu', full_name: 'Tolu Ade' });
     assert.deepEqual(profile.stats, { trades: 12, withdrawals: 4, withdrawals_pending: 2, card_submissions: 7 });
-    assert.deepEqual(profile.partial, { stats: null, referrer: null });
+    assert.deepEqual(profile.partial, { stats: null, referrer: null, deletion: null });
+    assert.equal(profile.deletionUnfinished, null);
   });
 
   test('no longer carries the server capability block', () => {
@@ -333,6 +334,8 @@ describe('UserParts', () => {
     ));
     assert.equal(withClass(skeleton(['users.read', 'wallets.adjust']), 'div', 'pageHeaderAction').length, 2);
     assert.equal(withClass(skeleton(['users.read', 'users.freeze', 'wallets.adjust']), 'div', 'pageHeaderAction').length, 3);
+    assert.equal(withClass(skeleton(['users.read', 'users.delete']), 'div', 'pageHeaderAction').length, 2);
+    assert.equal(withClass(skeleton(['users.read', 'users.freeze', 'wallets.adjust', 'users.delete']), 'div', 'pageHeaderAction').length, 4);
   });
 
   test('the Adjust wallet button sits in the header for admins who can adjust and accounts not being deleted', () => {

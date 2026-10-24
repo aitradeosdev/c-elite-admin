@@ -22,6 +22,7 @@ const ADMIN_SQL = fileURLToPath(new URL('../../schema_admin_app.sql', import.met
 const EDGE_DIR = fileURLToPath(new URL('../../supabase/functions/', import.meta.url));
 const RESUME_WITHDRAWAL = join(EDGE_DIR, 'resume-withdrawal', 'index.ts');
 const MOBILE_API = join(EDGE_DIR, 'admin-mobile-api', 'index.ts');
+const ADMIN_DELETE = join(EDGE_DIR, 'admin-delete-account', 'index.ts');
 const EDGE_JWT = join(EDGE_DIR, '_shared', 'adminJwt.ts');
 const EDGE_SESSION = join(EDGE_DIR, '_shared', 'adminSession.ts');
 const WEB_JWT = join(APP_DIR, 'lib', 'jwt.ts');
@@ -243,6 +244,27 @@ describe('edge functions that read admin permissions', { skip: !SIBLINGS_PRESENT
     const permission = source.indexOf("rpc('admin_has_permission'");
     const claim = source.indexOf(".update({ status: 'processing' })");
     assert.ok(state.index < permission && permission < claim, 'the session check comes before the permission check and the claim');
+  });
+
+  test('admin-delete-account checks the secret, a web session, then users.delete through admin_has_permission before deleting', () => {
+    const source = readFileSync(ADMIN_DELETE, 'utf8');
+    assert.match(source, /import \{ authenticateConsoleAdmin, isUuid \} from '\.\.\/_shared\/adminSession\.ts';/);
+    assert.match(source, /return timingSafeEqual\(a, b\);/);
+    const secret = source.indexOf("secretEq(req.headers.get('x-admin-secret') || '', ADMIN_SECRET)");
+    const session = source.indexOf('await authenticateConsoleAdmin(req, admin)');
+    const check = source.match(/const \{ data: (\w+), error: (\w+) \} = await \w+\.rpc\('admin_has_permission',\s*\{[^}]*p_permission:\s*'users\.delete'/);
+    assert.ok(check && check.index !== undefined, 'users.delete is checked through admin_has_permission together with its error');
+    const failed = source.indexOf(`if (${check[2]})`, check.index);
+    assert.match(source.slice(failed, failed + 200), /\b500\b/);
+    assert.ok(source.indexOf(`if (${check[1]} !== true)`, check.index) > failed, 'anything but true is refused');
+    const deletion = source.indexOf("rpc('admin_delete_account'");
+    assert.ok(secret > 0 && secret < session && session < check.index && check.index < deletion, 'secret, session, permission, then the deletion');
+    assert.doesNotMatch(source, /\b(?:is_super_admin|page_permissions)\b/);
+    const body = sqlBody(readFileSync(ADMIN_SQL, 'utf8'), 'admin_delete_account');
+    assert.match(body, /admin_has_permission\(p_actor, 'users\.delete'\) IS NOT TRUE THEN\s+RAISE EXCEPTION 'Not authorized';/);
+    const sessionModule = readFileSync(EDGE_SESSION, 'utf8');
+    assert.match(sessionModule, /return readAdminAuth\(req, supabase, 'web'\);/);
+    assert.match(sessionModule, /return readAdminAuth\(req, supabase, 'mobile'\);/);
   });
 
   test('the edge token check requires an expiry, accepts only HS256 and reports a missing secret as a server fault, like the console', () => {
