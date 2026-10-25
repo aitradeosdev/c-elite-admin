@@ -319,7 +319,7 @@ export function CardQueue() {
       consequences: [
         `${userHandle(target.users)} is notified and sees the reason you choose.`,
         'The pending credit is marked failed. No money moves.',
-        'The user can dispute the decision within 14 days of submitting.',
+        'The user can dispute the decision within 24 hours of the rejection.',
       ],
       reason: {
         label: 'Rejection reason',
