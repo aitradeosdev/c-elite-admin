@@ -1,6 +1,6 @@
 import type { ConfirmDetail, ConfirmOptions } from '../../_ui';
 import type { ApiBody, ApiResult } from '../../lib/apiClient';
-import { inputTypeLabel, sameCountryCode, textKey } from './rules';
+import { formatLabel, inputTypeLabel, sameCountryCode, textKey } from './rules';
 
 export interface BrandSummary {
   id: string;
@@ -24,6 +24,8 @@ export interface BrandCountry {
 export interface InstallField {
   label: string;
   input_type: string;
+  input_format: string | null;
+  format_pattern: string | null;
   is_required: boolean;
 }
 
@@ -40,6 +42,8 @@ export interface TemplateField {
   id: string;
   label: string;
   input_type: string;
+  input_format: string | null;
+  format_pattern: string | null;
   is_required: boolean;
 }
 
@@ -126,7 +130,13 @@ function toInstallFields(value: unknown): InstallField[] | null {
   return value.flatMap((raw) => {
     const row = record(raw);
     if (!row) return [];
-    return [{ label: text(row.label) ?? '', input_type: text(row.input_type) ?? '', is_required: row.is_required !== false }];
+    return [{
+      label: text(row.label) ?? '',
+      input_type: text(row.input_type) ?? '',
+      input_format: text(row.input_format),
+      format_pattern: text(row.format_pattern),
+      is_required: row.is_required !== false,
+    }];
   });
 }
 
@@ -142,6 +152,8 @@ function toTemplate(raw: unknown): Template | null {
       id: fieldId,
       label: text(field.label) ?? '',
       input_type: text(field.input_type) ?? '',
+      input_format: text(field.input_format),
+      format_pattern: text(field.format_pattern),
       is_required: field.is_required !== false,
     }];
   });
@@ -211,12 +223,17 @@ export function templateSummary(template: Template): string {
   return `${fields} · Live in ${live} of ${total} countries`;
 }
 
-export function fieldSummary(field: Pick<TemplateField, 'input_type' | 'is_required'>): string {
-  return `${inputTypeLabel(field.input_type)} · ${field.is_required ? 'Required' : 'Optional'}`;
+export function fieldSummary(
+  field: Pick<TemplateField, 'input_type' | 'input_format' | 'format_pattern' | 'is_required'>,
+): string {
+  const parts = [inputTypeLabel(field.input_type)];
+  if (field.input_format !== null) parts.push(formatLabel(field.input_format, field.format_pattern));
+  parts.push(field.is_required ? 'Required' : 'Optional');
+  return parts.join(' · ');
 }
 
 function fieldKey(field: InstallField | TemplateField): string {
-  return JSON.stringify([textKey(field.label), field.input_type, field.is_required]);
+  return JSON.stringify([textKey(field.label), field.input_type, field.input_format, field.format_pattern, field.is_required]);
 }
 
 export function sameFields(template: readonly TemplateField[], install: readonly InstallField[]): boolean {
@@ -331,6 +348,7 @@ export function deleteFieldConfirm(
     details: [
       { label: 'Field', value: field.label, emphasis: true },
       { label: 'Type', value: inputTypeLabel(field.input_type) },
+      ...(field.input_format !== null ? [{ label: 'Format', value: formatLabel(field.input_format, field.format_pattern) }] : []),
       { label: 'Users must fill it in', value: field.is_required ? 'Yes' : 'No' },
       { label: 'Card type', value: template.name },
     ],

@@ -8,7 +8,7 @@ import { createElement, type ElementType } from 'react';
 import { loadAppModule, render, tagsOf, textOf } from './support/uiHarness.ts';
 import type { ApiBody, ApiFailure, ApiResult } from '../app/lib/apiClient.ts';
 import type {
-  BrandCountry, BuilderData, Install, Template, TemplateField,
+  BrandCountry, BuilderData, Install, InstallField, Template, TemplateField,
 } from '../app/(dashboard)/field-builder/model.ts';
 import type { TemplateCardProps } from '../app/(dashboard)/field-builder/BuilderParts.tsx';
 import type { ReorderRefusal } from '../app/(dashboard)/field-builder/rules.ts';
@@ -43,7 +43,11 @@ const COUNTRIES: BrandCountry[] = [
 ];
 
 function field(id: string, label: string, patch: Partial<TemplateField> = {}): TemplateField {
-  return { id, label, input_type: 'text', is_required: true, ...patch };
+  return { id, label, input_type: 'text', input_format: null, format_pattern: null, is_required: true, ...patch };
+}
+
+function copied(label: string, inputType: string, isRequired: boolean, patch: Partial<InstallField> = {}): InstallField {
+  return { label, input_type: inputType, input_format: null, format_pattern: null, is_required: isRequired, ...patch };
 }
 
 function install(id: string, code: string, patch: Partial<Install> = {}): Install {
@@ -53,7 +57,7 @@ function install(id: string, code: string, patch: Partial<Install> = {}): Instal
     country_name: COUNTRIES.find((country) => country.country_code === code)?.country_name ?? null,
     is_active: true,
     active_rate_count: 3,
-    fields: [{ label: 'Card code', input_type: 'text', is_required: true }],
+    fields: [copied('Card code', 'text', true)],
     ...patch,
   };
 }
@@ -226,7 +230,9 @@ describe('field-builder model: reading responses', () => {
     assert.deepEqual(data.card, { id: T3, name: 'Amazon', is_active: true });
     assert.deepEqual(data.templates.map((item) => item.id), [T2, T1]);
     const [physical] = data.templates;
-    assert.deepEqual(physical.fields, [{ id: F2, label: 'Front photo', input_type: 'image', is_required: false }]);
+    assert.deepEqual(physical.fields, [
+      { id: F2, label: 'Front photo', input_type: 'image', input_format: null, format_pattern: null, is_required: false },
+    ]);
     assert.deepEqual(physical.countries[0], {
       id: I1, country_code: 'NG', country_name: 'Nigeria', is_active: true, active_rate_count: 4, fields: [],
     });
@@ -275,8 +281,11 @@ describe('field-builder model: summaries', () => {
   });
 
   test('fieldSummary and rateText describe a row in plain words', () => {
-    assert.equal(model.fieldSummary({ input_type: 'image_text', is_required: false }), 'Image and text · Optional');
-    assert.equal(model.fieldSummary({ input_type: 'text', is_required: true }), 'Text · Required');
+    assert.equal(
+      model.fieldSummary({ input_type: 'image_text', input_format: null, format_pattern: null, is_required: false }),
+      'Image and text · Optional',
+    );
+    assert.equal(model.fieldSummary({ input_type: 'text', input_format: null, format_pattern: null, is_required: true }), 'Text · Required');
     assert.equal(model.rateText(install(I1, 'NG', { active_rate_count: 0 })), 'No rates');
     assert.equal(model.rateText(install(I1, 'NG', { active_rate_count: 1 })), '1 rate');
     assert.equal(model.rateText(install(I1, 'NG', { active_rate_count: null })), 'Rates not checked');
@@ -286,15 +295,15 @@ describe('field-builder model: summaries', () => {
     const tpl = template({ fields: [field(F1, 'Card code'), field(F2, 'Photo', { input_type: 'image' })] });
     const same = install(I1, 'NG', {
       fields: [
-        { label: 'photo', input_type: 'image', is_required: true },
-        { label: 'Card code', input_type: 'text', is_required: true },
+        copied('photo', 'image', true),
+        copied('Card code', 'text', true),
       ],
     });
-    const older = install(I2, 'GH', { fields: [{ label: 'Card code', input_type: 'text', is_required: true }] });
+    const older = install(I2, 'GH', { fields: [copied('Card code', 'text', true)] });
     const optional = install(I2, 'GH', {
       fields: [
-        { label: 'Card code', input_type: 'text', is_required: false },
-        { label: 'Photo', input_type: 'image', is_required: true },
+        copied('Card code', 'text', false),
+        copied('Photo', 'image', true),
       ],
     });
     assert.equal(model.fieldsDiffer(tpl, same), false);
@@ -348,8 +357,8 @@ describe('field-builder model: confirmations', () => {
     const tpl = template({
       fields: [field(F1, 'Card code'), field(F2, 'Photo')],
       countries: [
-        install(I1, 'NG', { fields: [{ label: 'card code', input_type: 'text', is_required: true }] }),
-        install(I2, 'GH', { fields: [{ label: 'Photo', input_type: 'image', is_required: true }] }),
+        install(I1, 'NG', { fields: [copied('card code', 'text', true)] }),
+        install(I2, 'GH', { fields: [copied('Photo', 'image', true)] }),
       ],
     });
     const options = model.deleteFieldConfirm(tpl, tpl.fields[0], COUNTRIES);
@@ -1221,5 +1230,453 @@ describe('field-builder route: adding a card type to a country through the datab
       assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR', { field }), message);
     }
     assert.deepEqual(route.calls, []);
+  });
+});
+
+type FormatModule = typeof import('../app/lib/fieldFormat.ts');
+
+const PATTERN_REFUSAL = 'Use only #, A and * for what users type, with spaces or symbols such as - / . between them.';
+
+describe('field-builder formats: rules', () => {
+  let formats: FormatModule;
+
+  before(async () => {
+    formats = await loadAppModule<FormatModule>('lib/fieldFormat.ts');
+  });
+
+  test('only text and image-and-text fields take a format', () => {
+    assert.deepEqual(rules.FORMATTED_TYPES, ['text', 'image_text']);
+    assert.equal(rules.takesFormat('text'), true);
+    assert.equal(rules.takesFormat('image_text'), true);
+    assert.equal(rules.takesFormat('image'), false);
+    assert.equal(rules.takesFormat(null), false);
+    assert.equal(rules.formatTypeProblem('image', 'cvv'), rules.FORMAT_TYPE_PROBLEM);
+    assert.equal(rules.formatTypeProblem(null, 'cvv'), rules.FORMAT_TYPE_PROBLEM);
+    assert.equal(rules.formatTypeProblem('image', null), null);
+    assert.equal(rules.formatTypeProblem('image_text', 'custom'), null);
+  });
+
+  test('the choices are free text and the shared formats, each with a label and a hint', () => {
+    assert.deepEqual(rules.FORMAT_CHOICES, ['free', ...formats.INPUT_FORMATS]);
+    for (const choice of rules.FORMAT_CHOICES) {
+      assert.ok(rules.FORMAT_LABELS[choice], choice);
+      assert.ok(rules.FORMAT_HINTS[choice], choice);
+    }
+    assert.equal(rules.formatChoiceOf(null), 'free');
+    assert.equal(rules.formatChoiceOf('cvv'), 'cvv');
+    assert.equal(rules.formatChoiceOf('iban'), null);
+    assert.equal(rules.isFormatChoice('free'), true);
+    assert.equal(rules.isFormatChoice('expiry_date'), true);
+    assert.equal(rules.isFormatChoice(''), false);
+  });
+
+  test('formatLabel names the format, the pattern, or an unknown value', () => {
+    assert.equal(rules.formatLabel(null, null), 'Free text');
+    assert.equal(rules.formatLabel('card_number', null), 'Card number');
+    assert.equal(rules.formatLabel('expiry_date', null), 'Expiry date (MM/YY)');
+    assert.equal(rules.formatLabel('cvv', null), 'CVV');
+    assert.equal(rules.formatLabel('custom', '####-AAAA'), 'Pattern ####-AAAA');
+    assert.equal(rules.formatLabel('custom', null), 'Unknown format');
+    assert.equal(rules.formatLabel('iban', null), 'Unknown format');
+  });
+
+  test('readFieldFormat reads the format and its pattern as one pair', () => {
+    const none = { ok: true, input_format: null, format_pattern: null };
+    assert.deepEqual(rules.readFieldFormat(undefined, undefined), none);
+    assert.deepEqual(rules.readFieldFormat(null, null), none);
+    assert.deepEqual(rules.readFieldFormat('cvv', undefined), { ok: true, input_format: 'cvv', format_pattern: null });
+    assert.deepEqual(
+      rules.readFieldFormat('custom', '####-AAAA'),
+      { ok: true, input_format: 'custom', format_pattern: '####-AAAA' },
+    );
+    const badFormat = { ok: false, message: 'Choose a format from the list.', field: 'input_format' };
+    for (const value of ['iban', '', 'CVV', 3]) assert.deepEqual(rules.readFieldFormat(value, null), badFormat, String(value));
+    const noPattern = { ok: false, message: 'Enter the pattern users must follow.', field: 'format_pattern' };
+    assert.deepEqual(rules.readFieldFormat('custom', undefined), noPattern);
+    assert.deepEqual(rules.readFieldFormat('custom', null), noPattern);
+    assert.deepEqual(rules.readFieldFormat('custom', 42), noPattern);
+    assert.deepEqual(rules.readFieldFormat('custom', ''), noPattern);
+    assert.deepEqual(
+      rules.readFieldFormat('custom', 'GC-####'),
+      { ok: false, message: PATTERN_REFUSAL, field: 'format_pattern' },
+    );
+    const strayPattern = { ok: false, message: 'Only a custom pattern takes a pattern.', field: 'format_pattern' };
+    assert.deepEqual(rules.readFieldFormat('cvv', '###'), strayPattern);
+    assert.deepEqual(rules.readFieldFormat(undefined, '###'), strayPattern);
+    assert.deepEqual(rules.readFieldFormat(null, ''), strayPattern);
+  });
+
+  test('previewStatus tells the admin what users see', () => {
+    const card = formats.fieldFormatOf('card_number', null);
+    assert.ok(card);
+    assert.equal(rules.previewStatus(card, ''), 'Type an example to try the format.');
+    assert.equal(rules.previewStatus(card, '4242 4242 4242 4242'), 'Complete. Users can continue.');
+    assert.equal(
+      rules.previewStatus(card, '4242 4242 4242 4241'),
+      'Not complete, so users cannot continue. They see: Check the card number.',
+    );
+  });
+});
+
+describe('field-builder formats: model and markup', () => {
+  const noop = () => {};
+
+  test('toBuilderData keeps each field format and pattern, for the card type and for its countries', () => {
+    const data = model.toBuilderData({
+      card: { id: CARD, name: 'Visa', is_active: true },
+      templates: [{
+        id: T1,
+        name: 'Physical',
+        fields: [
+          { id: F1, label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true },
+          { id: F2, label: 'Code', input_type: 'image_text', input_format: 'custom', format_pattern: '####-AAAA', is_required: false },
+        ],
+        countries: [{
+          id: I1,
+          country_code: 'US',
+          is_active: true,
+          fields: [{ label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true }],
+        }],
+      }],
+      countries: [],
+    });
+    assert.ok(data);
+    const [physical] = data.templates;
+    assert.deepEqual(physical.fields, [
+      { id: F1, label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true },
+      { id: F2, label: 'Code', input_type: 'image_text', input_format: 'custom', format_pattern: '####-AAAA', is_required: false },
+    ]);
+    assert.deepEqual(physical.countries[0].fields, [copied('Card number', 'text', true, { input_format: 'card_number' })]);
+    const legacy = model.toBuilderData({ templates: [{ id: T1, name: 'E-code', fields: [{ id: F1, label: 'Card code', input_type: 'text' }] }] });
+    assert.equal(legacy?.templates[0].fields[0].input_format, null);
+    assert.equal(legacy?.templates[0].fields[0].format_pattern, null);
+  });
+
+  test('fieldSummary puts the format between the type and whether it is required', () => {
+    assert.equal(model.fieldSummary(field(F1, 'Card number', { input_format: 'card_number' })), 'Text · Card number · Required');
+    assert.equal(
+      model.fieldSummary(field(F1, 'Code', { input_type: 'image_text', input_format: 'custom', format_pattern: '####-AAAA', is_required: false })),
+      'Image and text · Pattern ####-AAAA · Optional',
+    );
+    assert.equal(model.fieldSummary(field(F1, 'Odd', { input_format: 'iban' })), 'Text · Unknown format · Required');
+    assert.equal(model.fieldSummary(field(F1, 'Card code')), 'Text · Required');
+  });
+
+  test('a format or pattern difference counts as fields that differ', () => {
+    const tpl = template({ fields: [field(F1, 'Card number', { input_format: 'card_number' })] });
+    assert.equal(model.fieldsDiffer(tpl, install(I1, 'US', { fields: [copied('Card number', 'text', true, { input_format: 'card_number' })] })), false);
+    assert.equal(model.fieldsDiffer(tpl, install(I1, 'US', { fields: [copied('Card number', 'text', true)] })), true);
+    const custom = template({ fields: [field(F1, 'Code', { input_format: 'custom', format_pattern: '####' })] });
+    assert.equal(
+      model.fieldsDiffer(custom, install(I1, 'US', { fields: [copied('Code', 'text', true, { input_format: 'custom', format_pattern: '#####' })] })),
+      true,
+    );
+  });
+
+  test('deleting a formatted field shows its format, and a free-text field shows none', () => {
+    const tpl = template({ fields: [field(F1, 'CVV', { input_format: 'cvv' }), field(F2, 'Card code')] });
+    const formatted = Object.fromEntries((model.deleteFieldConfirm(tpl, tpl.fields[0], COUNTRIES).details ?? []).map((d) => [d.label, d.value]));
+    assert.equal(formatted['Format'], 'CVV');
+    const plain = (model.deleteFieldConfirm(tpl, tpl.fields[1], COUNTRIES).details ?? []).map((d) => d.label);
+    assert.deepEqual(plain, ['Field', 'Type', 'Users must fill it in', 'Card type']);
+  });
+
+  test('the field row shows the format', () => {
+    const props: TemplateCardProps = {
+      template: template({
+        fields: [
+          field(F1, 'Card number', { input_format: 'card_number' }),
+          field(F2, 'Code', { input_format: 'custom', format_pattern: '####-AAAA', is_required: false }),
+        ],
+      }),
+      index: 0,
+      total: 1,
+      countries: COUNTRIES,
+      expanded: true,
+      canWrite: true,
+      moving: false,
+      onToggleExpanded: noop,
+      onMove: noop,
+      onRename: noop,
+      onDelete: noop,
+      onSwitchCountry: noop,
+      onAddCountry: noop,
+      onAddField: noop,
+      onEditField: noop,
+      onDeleteField: noop,
+      onMoveField: noop,
+    };
+    const text = textOf(render(createElement(TemplateCard, props)));
+    assert.match(text, /Text · Card number · Required/);
+    assert.match(text, /Text · Pattern ####-AAAA · Optional/);
+  });
+});
+
+describe('field-builder route: field formats refused before the database', () => {
+  before(async () => {
+    builderRoute = (await import(await bundleRoute(resolve(APP_DIR, 'api', 'field-builder', 'route.ts')))) as BuilderRoute;
+  });
+
+  beforeEach(resetRoute);
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  test('a bad format, a bad pattern or a format on an image upload never reaches the database', async () => {
+    const create = { type: 'field', template_id: T1, label: 'Card number', input_type: 'text', is_required: true };
+    const cases: Array<['POST' | 'PATCH', Record<string, unknown>, string, string]> = [
+      ['POST', { ...create, input_format: 'iban' }, 'Choose a format from the list.', 'input_format'],
+      ['POST', { ...create, input_format: 'custom' }, 'Enter the pattern users must follow.', 'format_pattern'],
+      ['POST', { ...create, input_format: 'custom', format_pattern: 'GC-####' }, PATTERN_REFUSAL, 'format_pattern'],
+      ['POST', { ...create, input_format: 'cvv', format_pattern: '###' }, 'Only a custom pattern takes a pattern.', 'format_pattern'],
+      ['POST', { ...create, input_type: 'image', input_format: 'cvv' }, rules.FORMAT_TYPE_PROBLEM, 'input_format'],
+      ['PATCH', { type: 'field', id: F1, input_format: 'expiry' }, 'Choose a format from the list.', 'input_format'],
+      ['PATCH', { type: 'field', id: F1, input_format: 'custom', format_pattern: '####-' }, 'End the pattern with #, A or *.', 'format_pattern'],
+      ['PATCH', { type: 'field', id: F1, format_pattern: '####' }, 'Only a custom pattern takes a pattern.', 'format_pattern'],
+    ];
+    for (const [method, body, message, fieldName] of cases) {
+      const reply = await send(method, body);
+      assert.equal(reply.status, 400, message);
+      assert.deepEqual(reply.body, failureBody(message, 'VALIDATION_ERROR', { field: fieldName }), message);
+    }
+    assert.deepEqual(route.tables, []);
+    assert.deepEqual(route.calls, []);
+  });
+});
+
+interface DbOp {
+  table: string;
+  kind: 'select' | 'insert' | 'update' | 'delete';
+  columns: string | null;
+  payload: unknown;
+  filters: Array<[string, string, unknown]>;
+}
+
+interface DbReply {
+  data: unknown;
+  error: { message: string } | null;
+}
+
+interface FakeQuery extends PromiseLike<DbReply> {
+  select(columns?: string): FakeQuery;
+  insert(rows: unknown): FakeQuery;
+  update(values: unknown): FakeQuery;
+  delete(): FakeQuery;
+  eq(column: string, value: unknown): FakeQuery;
+  in(column: string, values: unknown): FakeQuery;
+  is(column: string, value: unknown): FakeQuery;
+  order(column: string, options?: unknown): FakeQuery;
+  maybeSingle(): FakeQuery;
+  single(): FakeQuery;
+}
+
+describe('field-builder route: field formats through the tables', () => {
+  const ops: DbOp[] = [];
+  let stored: Record<string, unknown> | null = null;
+  let original: RouteState['from'];
+
+  const formatted = {
+    id: F1,
+    template_id: T1,
+    label: 'Card number',
+    input_type: 'text',
+    input_format: 'card_number',
+    format_pattern: null,
+    is_required: true,
+    sort_order: 0,
+  };
+
+  function respond(op: DbOp): DbReply {
+    ops.push(op);
+    if (op.table === 'audit_log') {
+      route.audits.push(op.payload as Record<string, unknown>);
+      return { data: null, error: null };
+    }
+    if (op.table === 'cards') return { data: { id: CARD, name: 'Visa', logo_url: null, is_active: true }, error: null };
+    if (op.table === 'card_countries') {
+      return { data: [{ country_code: 'US', country_name: 'United States', is_active: true }], error: null };
+    }
+    if (op.table === 'card_type_templates') {
+      return op.filters.some(([, column]) => column === 'id')
+        ? { data: { id: T1, card_id: CARD, name: 'Physical' }, error: null }
+        : { data: [{ id: T1, card_id: CARD, name: 'Physical', is_active: true, sort_order: 0 }], error: null };
+    }
+    if (op.table === 'card_types') return { data: [{ id: I1, template_id: T1, country_code: 'US', is_active: true }], error: null };
+    if (op.table === 'card_type_fields') {
+      return {
+        data: [{ card_type_id: I1, label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true, sort_order: 0 }],
+        error: null,
+      };
+    }
+    if (op.table === 'denominations') return { data: [{ card_type_id: I1, is_active: true }], error: null };
+    if (op.table === 'card_type_template_fields') {
+      if (op.kind === 'insert') return { data: { id: F2 }, error: null };
+      if (op.kind === 'update') return { data: null, error: null };
+      if (op.kind === 'delete') return { data: [{ id: F1 }], error: null };
+      if (op.filters.some(([, column]) => column === 'id')) return { data: stored ? { ...stored } : null, error: null };
+      if (op.filters.some(([kind]) => kind === 'in')) return { data: [formatted], error: null };
+      return { data: [], error: null };
+    }
+    throw new Error(`unexpected ${op.kind} on ${op.table}`);
+  }
+
+  function fakeQuery(table: string): FakeQuery {
+    const op: DbOp = { table, kind: 'select', columns: null, payload: null, filters: [] };
+    const query: FakeQuery = {
+      select(columns) {
+        if (op.kind === 'select') op.columns = columns ?? null;
+        return query;
+      },
+      insert(rows) {
+        op.kind = 'insert';
+        op.payload = rows;
+        return query;
+      },
+      update(values) {
+        op.kind = 'update';
+        op.payload = values;
+        return query;
+      },
+      delete() {
+        op.kind = 'delete';
+        return query;
+      },
+      eq(column, value) {
+        op.filters.push(['eq', column, value]);
+        return query;
+      },
+      in(column, values) {
+        op.filters.push(['in', column, values]);
+        return query;
+      },
+      is(column, value) {
+        op.filters.push(['is', column, value]);
+        return query;
+      },
+      order() {
+        return query;
+      },
+      maybeSingle() {
+        return query;
+      },
+      single() {
+        return query;
+      },
+      then(onFulfilled, onRejected) {
+        return Promise.resolve().then(() => respond(op)).then(onFulfilled, onRejected);
+      },
+    };
+    return query;
+  }
+
+  before(async () => {
+    builderRoute = (await import(await bundleRoute(resolve(APP_DIR, 'api', 'field-builder', 'route.ts')))) as BuilderRoute;
+  });
+
+  beforeEach(() => {
+    resetRoute();
+    ops.length = 0;
+    stored = { ...formatted };
+    original = route.from;
+    (route as unknown as { from: (table: string) => FakeQuery }).from = fakeQuery;
+  });
+
+  afterEach(() => {
+    route.from = original;
+    mock.restoreAll();
+  });
+
+  const writes = () => ops.filter((op) => op.table === 'card_type_template_fields' && op.kind !== 'select');
+
+  test('a new field is stored and audited with its format and pattern', async () => {
+    const reply = await send('POST', {
+      type: 'field', template_id: T1, label: 'Code', input_type: 'image_text', is_required: false,
+      input_format: 'custom', format_pattern: '####-AAAA',
+    });
+    assert.equal(reply.status, 200);
+    const row = { template_id: T1, label: 'Code', input_type: 'image_text', input_format: 'custom', format_pattern: '####-AAAA', is_required: false, sort_order: 0 };
+    assert.deepEqual(writes().map((op) => op.payload), [row]);
+    assert.deepEqual(route.audits.map((audit) => audit.after_value), [{ ...row, template_name: 'Physical' }]);
+  });
+
+  test('a new field from the phone app, which sends no format, is free text', async () => {
+    const reply = await send('POST', { type: 'field', template_id: T1, label: 'Card code', input_type: 'text', is_required: true });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(writes().map((op) => op.payload), [
+      { template_id: T1, label: 'Card code', input_type: 'text', input_format: null, format_pattern: null, is_required: true, sort_order: 0 },
+    ]);
+  });
+
+  test('an edit that sends no format keeps the stored one, and the audit records it before the change', async () => {
+    const reply = await send('PATCH', { type: 'field', id: F1, label: 'Card number', input_type: 'image_text', is_required: false });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(writes().map((op) => op.payload), [{ label: 'Card number', input_type: 'image_text', is_required: false }]);
+    const [audit] = route.audits;
+    assert.deepEqual(audit.before_value, {
+      template_id: T1, label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true, sort_order: 0,
+    });
+    const read = ops.find((op) => op.table === 'card_type_template_fields' && op.kind === 'select');
+    assert.equal(read?.columns, 'id, template_id, label, input_type, input_format, format_pattern, is_required, sort_order');
+  });
+
+  test('switching a formatted field to an image upload is refused unless the format is cleared in the same change', async () => {
+    const refused = await send('PATCH', { type: 'field', id: F1, input_type: 'image' });
+    assert.equal(refused.status, 400);
+    assert.deepEqual(refused.body, failureBody(rules.FORMAT_TYPE_PROBLEM, 'VALIDATION_ERROR', { field: 'input_type' }));
+    assert.deepEqual(writes(), []);
+    const cleared = await send('PATCH', { type: 'field', id: F1, input_type: 'image', input_format: null, format_pattern: null });
+    assert.equal(cleared.status, 200);
+    assert.deepEqual(writes().map((op) => op.payload), [{ input_type: 'image', input_format: null, format_pattern: null }]);
+  });
+
+  test('setting a format on a stored image upload is refused against the format', async () => {
+    stored = { ...formatted, input_type: 'image', input_format: null };
+    const reply = await send('PATCH', { type: 'field', id: F1, input_format: 'cvv' });
+    assert.equal(reply.status, 400);
+    assert.deepEqual(reply.body, failureBody(rules.FORMAT_TYPE_PROBLEM, 'VALIDATION_ERROR', { field: 'input_format' }));
+    assert.deepEqual(writes(), []);
+  });
+
+  test('a new pattern is saved with its format, and a preset clears the pattern', async () => {
+    await send('PATCH', { type: 'field', id: F1, input_format: 'custom', format_pattern: '#### ####' });
+    stored = { ...formatted, input_format: 'custom', format_pattern: '#### ####' };
+    await send('PATCH', { type: 'field', id: F1, input_format: 'cvv', format_pattern: null });
+    assert.deepEqual(writes().map((op) => op.payload), [
+      { input_format: 'custom', format_pattern: '#### ####' },
+      { input_format: 'cvv', format_pattern: null },
+    ]);
+    assert.deepEqual(route.audits[1].before_value, {
+      template_id: T1, label: 'Card number', input_type: 'text', input_format: 'custom', format_pattern: '#### ####', is_required: true, sort_order: 0,
+    });
+  });
+
+  test('the builder lists each field format and pattern, for the card type and for its countries', async () => {
+    const getRoute = builderRoute as unknown as { GET: (req: Request) => Promise<Response> };
+    const response = await getRoute.GET(new Request(`http://admin.test/api/field-builder?card_id=${CARD}`));
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { templates: Array<{ fields: unknown[]; countries: Array<{ fields: unknown[] }> }> };
+    assert.deepEqual(body.templates[0].fields, [
+      { id: F1, label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true, sort_order: 0 },
+    ]);
+    assert.deepEqual(body.templates[0].countries[0].fields, [
+      { label: 'Card number', input_type: 'text', input_format: 'card_number', format_pattern: null, is_required: true, sort_order: 0 },
+    ]);
+    const columns = Object.fromEntries(ops.filter((op) => op.kind === 'select').map((op) => [op.table, op.columns]));
+    assert.equal(columns['card_type_template_fields'], 'id, template_id, label, input_type, input_format, format_pattern, is_required, sort_order');
+    assert.equal(columns['card_type_fields'], 'card_type_id, label, input_type, input_format, format_pattern, is_required, sort_order');
+  });
+
+  test('a deleted field is audited with its format', async () => {
+    const deleteRoute = builderRoute as unknown as { DELETE: (req: Request) => Promise<Response> };
+    const response = await deleteRoute.DELETE(new Request('http://admin.test/api/field-builder', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'field', id: F1 }),
+    }));
+    assert.equal(response.status, 200);
+    const read = ops.find((op) => op.table === 'card_type_template_fields' && op.kind === 'select');
+    assert.equal(read?.columns, 'id, template_id, label, input_type, input_format, format_pattern, is_required, sort_order');
+    assert.deepEqual(route.audits.map((audit) => audit.before_value), [formatted]);
   });
 });

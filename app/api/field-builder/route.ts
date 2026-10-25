@@ -4,10 +4,11 @@ import { requireAdmin, type AdminContext } from '../../lib/guard';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { fail, isUuid, ok } from '../../lib/api';
 import {
-  cleanText, findDuplicate, isInputType, labelProblem, nameProblem, normalizeCountryCode, parseIdList,
-  parseSortOrder, reorderRefusalText, sameCountryCode,
+  cleanText, findDuplicate, formatTypeProblem, isInputType, labelProblem, nameProblem, normalizeCountryCode, parseIdList,
+  parseSortOrder, readFieldFormat, reorderRefusalText, sameCountryCode,
   type InputType, type ReorderRefusal,
 } from '../../(dashboard)/field-builder/rules';
+import type { InputFormat } from '../../lib/fieldFormat';
 
 const TEMPLATES = 'card_type_templates';
 const FIELDS = 'card_type_template_fields';
@@ -47,6 +48,8 @@ interface FieldRow {
   template_id: string;
   label: string | null;
   input_type: string | null;
+  input_format: string | null;
+  format_pattern: string | null;
   is_required: boolean | null;
   sort_order: number | null;
 }
@@ -64,6 +67,8 @@ interface InstallFieldRow {
   card_type_id: string;
   label: string | null;
   input_type: string | null;
+  input_format: string | null;
+  format_pattern: string | null;
   is_required: boolean | null;
   sort_order: number | null;
 }
@@ -275,7 +280,7 @@ async function readBuilder(cardId: string) {
     const [fields, installs] = await Promise.all([
       supabaseAdmin
         .from(FIELDS)
-        .select('id, template_id, label, input_type, is_required, sort_order')
+        .select('id, template_id, label, input_type, input_format, format_pattern, is_required, sort_order')
         .in('template_id', templateIds)
         .order('sort_order', { ascending: true })
         .order('id', { ascending: true }),
@@ -300,7 +305,7 @@ async function readBuilder(cardId: string) {
     const [installFields, denominations] = await Promise.all([
       supabaseAdmin
         .from('card_type_fields')
-        .select('card_type_id, label, input_type, is_required, sort_order')
+        .select('card_type_id, label, input_type, input_format, format_pattern, is_required, sort_order')
         .in('card_type_id', installIds)
         .order('sort_order', { ascending: true })
         .order('id', { ascending: true }),
@@ -344,6 +349,8 @@ async function readBuilder(cardId: string) {
         id: field.id,
         label: field.label,
         input_type: field.input_type,
+        input_format: field.input_format,
+        format_pattern: field.format_pattern,
         is_required: field.is_required,
         sort_order: field.sort_order,
       })),
@@ -357,6 +364,8 @@ async function readBuilder(cardId: string) {
           ? (detail.fields.get(install.id) ?? []).map((field) => ({
               label: field.label,
               input_type: field.input_type,
+              input_format: field.input_format,
+              format_pattern: field.format_pattern,
               is_required: field.is_required,
               sort_order: field.sort_order,
             }))
@@ -444,6 +453,10 @@ async function createField(admin: AdminContext, body: Body) {
   if (!isInputType(inputType)) return invalid('Choose text, image upload, or image and text.', 'input_type');
   const isRequired: unknown = body.is_required === undefined || body.is_required === null ? true : body.is_required;
   if (typeof isRequired !== 'boolean') return invalid('Say whether users must fill in this field.', 'is_required');
+  const format = readFieldFormat(body.input_format, body.format_pattern);
+  if (!format.ok) return invalid(format.message, format.field);
+  const typeProblem = formatTypeProblem(inputType, format.input_format);
+  if (typeProblem) return invalid(typeProblem, 'input_format');
 
   const [template, siblings] = await Promise.all([
     supabaseAdmin.from(TEMPLATES).select('id, card_id, name').eq('id', templateId).maybeSingle<TemplateRow>(),
@@ -469,6 +482,8 @@ async function createField(admin: AdminContext, body: Body) {
     template_id: templateId,
     label,
     input_type: inputType,
+    input_format: format.input_format,
+    format_pattern: format.format_pattern,
     is_required: isRequired,
     sort_order: nextSortOrder(existing),
   };
@@ -668,7 +683,14 @@ async function updateField(admin: AdminContext, body: Body) {
   const id = uuidOf(body.id);
   if (!id) return invalid('Choose the field to change.', 'id');
 
-  const updates: { label?: string; input_type?: InputType; is_required?: boolean; sort_order?: number } = {};
+  const updates: {
+    label?: string;
+    input_type?: InputType;
+    input_format?: InputFormat | null;
+    format_pattern?: string | null;
+    is_required?: boolean;
+    sort_order?: number;
+  } = {};
   if (body.label !== undefined) {
     const label = cleanText(body.label);
     const problem = labelProblem(label);
@@ -678,6 +700,12 @@ async function updateField(admin: AdminContext, body: Body) {
   if (body.input_type !== undefined && body.input_type !== null) {
     if (!isInputType(body.input_type)) return invalid('Choose text, image upload, or image and text.', 'input_type');
     updates.input_type = body.input_type;
+  }
+  if (body.input_format !== undefined || body.format_pattern !== undefined) {
+    const format = readFieldFormat(body.input_format, body.format_pattern);
+    if (!format.ok) return invalid(format.message, format.field);
+    updates.input_format = format.input_format;
+    updates.format_pattern = format.format_pattern;
   }
   if (body.is_required !== undefined) {
     if (typeof body.is_required !== 'boolean') return invalid('Say whether users must fill in this field.', 'is_required');
@@ -692,11 +720,16 @@ async function updateField(admin: AdminContext, body: Body) {
 
   const { data: before, error: readError } = await supabaseAdmin
     .from(FIELDS)
-    .select('id, template_id, label, input_type, is_required, sort_order')
+    .select('id, template_id, label, input_type, input_format, format_pattern, is_required, sort_order')
     .eq('id', id)
     .maybeSingle<FieldRow>();
   if (readError) return serverError('update field read', 'The field could not be read, so nothing changed.', readError);
   if (!before) return fail('RESOURCE_NOT_FOUND', 'That field no longer exists.');
+  const typeProblem = formatTypeProblem(
+    updates.input_type ?? before.input_type,
+    updates.input_format !== undefined ? updates.input_format : before.input_format,
+  );
+  if (typeProblem) return invalid(typeProblem, updates.input_format !== undefined ? 'input_format' : 'input_type');
 
   if (updates.label !== undefined && updates.label !== before.label) {
     const { data: siblings, error: siblingsError } = await supabaseAdmin
@@ -720,6 +753,8 @@ async function updateField(admin: AdminContext, body: Body) {
       template_id: before.template_id,
       label: before.label,
       input_type: before.input_type,
+      input_format: before.input_format,
+      format_pattern: before.format_pattern,
       is_required: before.is_required,
       sort_order: before.sort_order,
     },
@@ -938,7 +973,7 @@ async function deleteField(admin: AdminContext, body: Body) {
 
   const { data: before, error: readError } = await supabaseAdmin
     .from(FIELDS)
-    .select('id, template_id, label, input_type, is_required, sort_order')
+    .select('id, template_id, label, input_type, input_format, format_pattern, is_required, sort_order')
     .eq('id', id)
     .maybeSingle<FieldRow>();
   if (readError) return serverError('delete field read', 'The field could not be read, so nothing was deleted.', readError);

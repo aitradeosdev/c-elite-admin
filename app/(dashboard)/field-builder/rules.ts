@@ -1,4 +1,7 @@
 import { isUuid } from '../../lib/http';
+import {
+  INPUT_FORMATS, fieldValueProblem, isInputFormat, patternProblem, type FieldFormat, type InputFormat,
+} from '../../lib/fieldFormat';
 
 export const INPUT_TYPES = ['text', 'image', 'image_text'] as const;
 
@@ -33,6 +36,80 @@ export function isInputType(value: unknown): value is InputType {
 
 export function inputTypeLabel(value: string | null | undefined): string {
   return isInputType(value) ? INPUT_TYPE_LABELS[value] : 'Unknown type';
+}
+
+export const FORMATTED_TYPES: readonly InputType[] = ['text', 'image_text'];
+
+export type FormatChoice = 'free' | InputFormat;
+
+export const FORMAT_CHOICES: readonly FormatChoice[] = ['free', ...INPUT_FORMATS];
+
+export const FORMAT_LABELS: Readonly<Record<FormatChoice, string>> = {
+  free: 'Free text',
+  card_number: 'Card number',
+  expiry_date: 'Expiry date (MM/YY)',
+  cvv: 'CVV',
+  custom: 'Custom pattern',
+};
+
+export const FORMAT_HINTS: Readonly<Record<FormatChoice, string>> = {
+  free: 'Users can type anything, up to 200 characters.',
+  card_number: '13 to 19 digits, grouped in fours as users type. Users can continue only when the number passes the check used by Visa, Mastercard and American Express. For other card numbers, use Custom pattern.',
+  expiry_date: 'Month and year as MM/YY. The slash is added as users type. Expired dates are accepted.',
+  cvv: '3 or 4 digits.',
+  custom: 'Users must fill in the whole pattern below.',
+};
+
+export const PATTERN_HELP = 'Use # for a digit, A for a letter and * for a letter or digit. Spaces and symbols such as - / . are added for users as they type, for example ####-####-AAAA.';
+
+export const FORMAT_TYPE_PROBLEM = 'Image upload fields cannot have a format. Set the format to Free text in the web console first.';
+
+export type FieldFormatRead =
+  | { ok: true; input_format: InputFormat | null; format_pattern: string | null }
+  | { ok: false; message: string; field: 'input_format' | 'format_pattern' };
+
+export function takesFormat(type: string | null | undefined): boolean {
+  return isInputType(type) && FORMATTED_TYPES.includes(type);
+}
+
+export function isFormatChoice(value: unknown): value is FormatChoice {
+  return value === 'free' || isInputFormat(value);
+}
+
+export function formatChoiceOf(format: string | null): FormatChoice | null {
+  if (format === null) return 'free';
+  return isInputFormat(format) ? format : null;
+}
+
+export function formatLabel(format: string | null, pattern: string | null): string {
+  if (format === null) return FORMAT_LABELS.free;
+  if (format === 'custom') return pattern ? `Pattern ${pattern}` : 'Unknown format';
+  return isInputFormat(format) ? FORMAT_LABELS[format] : 'Unknown format';
+}
+
+export function readFieldFormat(format: unknown, pattern: unknown): FieldFormatRead {
+  if (format !== undefined && format !== null && !isInputFormat(format)) {
+    return { ok: false, message: 'Choose a format from the list.', field: 'input_format' };
+  }
+  const kind = isInputFormat(format) ? format : null;
+  if (kind !== 'custom') {
+    return pattern === undefined || pattern === null
+      ? { ok: true, input_format: kind, format_pattern: null }
+      : { ok: false, message: 'Only a custom pattern takes a pattern.', field: 'format_pattern' };
+  }
+  if (typeof pattern !== 'string') return { ok: false, message: 'Enter the pattern users must follow.', field: 'format_pattern' };
+  const problem = patternProblem(pattern);
+  return problem ? { ok: false, message: problem, field: 'format_pattern' } : { ok: true, input_format: kind, format_pattern: pattern };
+}
+
+export function formatTypeProblem(type: string | null, format: string | null): string | null {
+  return format !== null && !takesFormat(type) ? FORMAT_TYPE_PROBLEM : null;
+}
+
+export function previewStatus(format: FieldFormat, value: string): string {
+  if (value === '') return 'Type an example to try the format.';
+  const problem = fieldValueProblem(format, value);
+  return problem ? `Not complete, so users cannot continue. They see: ${problem}` : 'Complete. Users can continue.';
 }
 
 export function cleanText(value: unknown): string {
