@@ -93,7 +93,7 @@ function submission(patch: Partial<Submission> = {}): Submission {
     card_type_id: 'type-1',
     cards: { id: 'card-1', name: 'Amazon' },
     card_types: { id: 'type-1', name: 'Physical', country_code: 'US' },
-    denominations: { range_label: '$25 - $500' },
+    range_label_at_submission: '$25 - $500',
     country_name: 'United States',
     currency_symbol: '$',
     card_types_for_card: [],
@@ -178,6 +178,24 @@ describe('card queue list query', () => {
     assert.equal(model.sameQueueTab(key({}), key({ tab: 'disputed' })), false);
     assert.equal(model.sameQueueTab(key({}), key({ tab: 'all' })), false);
     assert.equal(model.sameQueueTab(key({ tab: 'all' }), key({ tab: 'all', page: 4 })), true);
+  });
+});
+
+describe('correction range match', () => {
+  test('a correction picks the range the server pays: highest minimum, then the greater id', () => {
+    const range = (id: string, label: string, min: number | string, max: number) => ({
+      id: `0a000000-0000-4000-8000-00000000000${id}`, range_label: label, min_value: min, max_value: max, rate_naira: 1500,
+    });
+    const type = {
+      id: 't', name: 'Physical', country_code: 'US',
+      denominations: [range('1', '$25–$100', 25, 100), range('b', '$50–$200', '50.00', 200), range('3', '$50–$150', 50, 150)],
+    };
+    const label = (amount: string) => model.matchDenomination(type, model.parseDecimal(amount))?.range_label ?? null;
+    assert.equal(label('30'), '$25–$100');
+    assert.equal(label('75'), '$50–$200');
+    assert.equal(label('175'), '$50–$200');
+    assert.equal(label('201'), null);
+    assert.equal(model.matchDenomination({ ...type, denominations: [...type.denominations].reverse() }, model.parseDecimal('75'))?.range_label, '$50–$200');
   });
 });
 
@@ -379,6 +397,11 @@ describe('submission drawer', () => {
     const closedNotice = withClass(closed, 'div', 'callout')[0];
     assert.ok(classesOf(closedNotice).includes('neutral'));
     assert.match(textOf(closed), /Dispute Please check again\./);
+  });
+
+  test('the denomination is the range stored on the trade', () => {
+    assert.match(textOf(drawer()), /Denomination \$25 - \$500/);
+    assert.match(textOf(drawer({ submission: submission({ range_label_at_submission: null }) })), /Denomination —/);
   });
 
   test('the user is shown with a decorative initials avatar', () => {

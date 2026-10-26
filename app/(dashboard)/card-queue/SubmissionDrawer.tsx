@@ -144,7 +144,7 @@ function SubmissionBody({ submission, onOpenImage }: { submission: Submission; o
         <DetailRow label="Card" value={cardName(submission)} />
         <DetailRow label="Type" value={submission.card_types?.name || '—'} />
         <DetailRow label="Country" value={submission.country_name || submission.card_types?.country_code || '—'} />
-        <DetailRow label="Denomination" value={submission.denominations?.range_label || '—'} />
+        <DetailRow label="Denomination" value={submission.range_label_at_submission || '—'} />
         <DetailRow label="Card value" value={formatForeignAmount(submission.amount_foreign, submission.currency_symbol)} mono />
         <DetailRow
           label="Rate"

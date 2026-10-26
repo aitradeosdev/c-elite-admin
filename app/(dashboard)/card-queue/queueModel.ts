@@ -171,7 +171,7 @@ export interface Submission extends QueueRow {
   card_type_id: string | null;
   cards: { id?: string | null; name?: string | null } | null;
   card_types: { id?: string | null; name?: string | null; country_code?: string | null } | null;
-  denominations: { range_label?: string | null } | null;
+  range_label_at_submission: string | null;
   country_name: string | null;
   currency_symbol: string | null;
   card_types_for_card: CardTypeOption[];
@@ -305,7 +305,7 @@ export function matchDenomination(type: CardTypeOption | undefined, amount: Deci
     const max = parseDecimal(denomination.max_value);
     if (!min || !max) continue;
     if (compareDecimal(amount, min) < 0 || compareDecimal(amount, max) > 0) continue;
-    if (!bestMin || compareDecimal(min, bestMin) > 0) {
+    if (!best || !bestMin || compareDecimal(min, bestMin) > 0 || (compareDecimal(min, bestMin) === 0 && denomination.id > best.id)) {
       best = denomination;
       bestMin = min;
     }

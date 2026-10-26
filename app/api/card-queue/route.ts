@@ -33,7 +33,7 @@ const DETAIL_FIELDS = `
   users(id, full_name, username, email),
   cards(id, name),
   card_types(id, name, country_code),
-  denominations(range_label)
+  range_label_at_submission
 `;
 
 const DECISION_FIELDS = 'id, status, user_id, card_id, card_type_id, amount_foreign, payout_naira, coupon_code, coupon_bonus';
@@ -475,6 +475,7 @@ async function correctionLacksRate(cardTypeId: string | null, amount: number | n
     .lte('min_value', amount)
     .gte('max_value', amount)
     .order('min_value', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error || !data) return false;
