@@ -61,6 +61,8 @@ const TYPE_ID = '55555555-6666-4777-8888-999999999999';
 const RANGE_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 const ROLE_ID = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
 const STAMP = '2026-10-02T13:05:33.000Z';
+const PURGE = 'PURGE_DELETED_ACCOUNT_WITHDRAWALS';
+const SYNC = 'SYNC_PROVIDER_RATES';
 
 const ADMIN: AdminInfo = {
   id: ADMIN_ID,
@@ -623,7 +625,7 @@ function sqlUnattributedInserts(file: string, text = readFileSync(file, 'utf8'))
 function systemWrites(): string[] {
   return SQL_FILES.flatMap((file) => sqlUnattributedInserts(file))
     .flatMap((insert) => insert.actions)
-    .filter((action) => action === rules.SYSTEM_ACTION);
+    .filter((action) => rules.SYSTEM_ACTIONS.includes(action));
 }
 
 function isAuditInsert(node: ts.CallExpression): boolean {
@@ -1707,12 +1709,12 @@ describe('event drawer', () => {
 
   test('names the system as the actor of the purge record, never an unknown admin', () => {
     const system = render(createElement(parts.AdminName, {
-      event: { admin_id: null, admin_username: null, admin_is_super: false, admin_deleted: false, action: rules.SYSTEM_ACTION },
+      event: { admin_id: null, admin_username: null, admin_is_super: false, admin_deleted: false, action: PURGE },
     }));
     assert.equal(textOf(system), 'System');
     assert.equal(withClass(system, 'span', 'muted').length, 0);
     const claimed = textOf(render(createElement(parts.AdminName, {
-      event: { admin_id: ADMIN_ID, admin_username: 'ops', admin_is_super: false, admin_deleted: false, action: rules.SYSTEM_ACTION },
+      event: { admin_id: ADMIN_ID, admin_username: 'ops', admin_is_super: false, admin_deleted: false, action: PURGE },
     })));
     assert.equal(claimed, '@ops');
   });
@@ -1727,7 +1729,7 @@ describe('the deleted-account withdrawal purge record', () => {
     + '1 flagged transaction, 3 anomaly checks, 3 admin alerts, 1 security alert and 2 notifications.';
   const purge = (after: unknown = COUNTS): ActivityEvent => rules.presentEvent(
     stored({
-      admin_id: null, action: rules.SYSTEM_ACTION, entity: 'withdrawals', entity_id: null, before_value: null,
+      admin_id: null, action: PURGE, entity: 'withdrawals', entity_id: null, before_value: null,
       after_value: after, ip_address: null, result: 'success', sensitivity: 'financial',
     }),
     undefined,
@@ -1735,18 +1737,18 @@ describe('the deleted-account withdrawal purge record', () => {
   );
 
   test('is written by the database with no admin, and is catalogued under System', { skip: !SIBLINGS_PRESENT }, () => {
-    const writes = SQL_FILES.flatMap((file) => sqlUnattributedInserts(file)).filter((insert) => insert.actions.includes(rules.SYSTEM_ACTION));
+    const writes = SQL_FILES.flatMap((file) => sqlUnattributedInserts(file)).filter((insert) => insert.actions.includes(PURGE));
     assert.equal(writes.length, 1);
     assert.ok(writes[0].at.startsWith(`${SQL_FILES[0]}:`), writes[0].at);
-    assert.deepEqual(writes[0].actions, [rules.SYSTEM_ACTION]);
+    assert.deepEqual(writes[0].actions, [PURGE]);
     const { sql, edge } = databaseAndEdgeInserts();
-    assert.ok(![...sql, ...edge].some((insert) => insert.actions.includes(rules.SYSTEM_ACTION)));
-    assert.ok(!consoleActions().actions.has(rules.SYSTEM_ACTION));
-    assert.deepEqual(catalogueGaps([rules.SYSTEM_ACTION]), []);
-    assert.equal(rules.actionLabel(rules.SYSTEM_ACTION), 'Deleted-account withdrawal data purged');
+    assert.ok(![...sql, ...edge].some((insert) => insert.actions.includes(PURGE)));
+    assert.ok(!consoleActions().actions.has(PURGE));
+    assert.deepEqual(catalogueGaps([PURGE]), []);
+    assert.equal(rules.actionLabel(PURGE), 'Deleted-account withdrawal data purged');
     const group = rules.ACTION_GROUPS.find((entry) => entry.label === 'System');
-    assert.deepEqual(group?.options.map((option) => option.value), [rules.SYSTEM_ACTION]);
-    assert.ok(rules.actionsMatching('withdrawal data').includes(rules.SYSTEM_ACTION));
+    assert.deepEqual(group?.options.map((option) => option.value), [PURGE]);
+    assert.ok(rules.actionsMatching('withdrawal data').includes(PURGE));
   });
 
   test('describes every count the purge records, in plain words', { skip: !SIBLINGS_PRESENT }, () => {
@@ -1785,13 +1787,13 @@ describe('the deleted-account withdrawal purge record', () => {
     assert.equal(rules.isSystemEvent(shown), true);
     assert.equal(model.actorName(shown), 'System');
     assert.equal(rules.isSystemEvent({ admin_id: null, action: 'APPROVE_WITHDRAWAL' }), false);
-    assert.equal(rules.isSystemEvent({ admin_id: ADMIN_ID, action: rules.SYSTEM_ACTION }), false);
+    assert.equal(rules.isSystemEvent({ admin_id: ADMIN_ID, action: PURGE }), false);
     assert.equal(model.actorName(event({ admin_id: null, admin_username: null })), 'Unknown admin');
     const cells = model.printCells(rules.toPrintable(shown));
     assert.deepEqual(cells.slice(1, 5), ['System', 'Deleted-account withdrawal data purged', 'Withdrawal', 'Succeeded']);
     const text = textOf(render(createElement(parts.EventDetail, { event: rules.forScreen(shown), userHref: null })));
     for (const expected of [
-      'Deleted-account withdrawal data purged', rules.SYSTEM_ACTION, 'Summary', SUMMARY, 'System', 'Financial', 'Withdrawal',
+      'Deleted-account withdrawal data purged', PURGE, 'Summary', SUMMARY, 'System', 'Financial', 'Withdrawal',
     ]) {
       assert.ok(text.includes(expected), expected);
     }
@@ -1814,6 +1816,160 @@ describe('the deleted-account withdrawal purge record', () => {
     assert.equal(model.actorName(list.events[0]), 'System');
     assert.equal(rules.actionDescription(list.events[0]), SUMMARY);
     assert.equal(model.toEventResult({ event: rules.forScreen(purge()) })?.admin_id, null);
+  });
+});
+
+describe('the automatic rate records', () => {
+  const RUN = '88888888-9999-4aaa-8bbb-cccccccccccc';
+  const AUTOMATIC_ACTIONS = [
+    'ENABLE_AUTOMATIC_RATES', 'DISABLE_AUTOMATIC_RATES', 'UPDATE_AUTOMATIC_RATES', 'LINK_RATE_PRODUCT', 'UNLINK_RATE_PRODUCT',
+    'SET_CARD_EXTRA_PERCENTAGE', SYNC,
+  ];
+  const SYNC_SUMMARY = {
+    lines: 40, linked: 3, priced: 2, unpriced: [{ card_type_id: TYPE_ID, reason: 'missing', listed: true }],
+    created: 1, updated: 12, relabelled: 0, reactivated: 0, deactivated: 2, unchanged: 30,
+  };
+  const update = (adminId: string | null, after: unknown = { ...SYNC_SUMMARY, provider: 'acme', requested_via: 'schedule', changes: [] }) => (
+    rules.presentEvent(
+      stored({
+        admin_id: adminId, action: SYNC, entity: 'rate_sync_runs', entity_id: RUN, before_value: null, after_value: after,
+        result: 'success', sensitivity: 'financial',
+      }),
+      adminId ? ADMIN : undefined,
+      { username: null, label: null },
+    )
+  );
+
+  test('the update and the link and percentage actions are filed under Rates, the switch and settings under Settings, and System keeps only the purge', () => {
+    const groups = actionGroups();
+    for (const action of ['LINK_RATE_PRODUCT', 'UNLINK_RATE_PRODUCT', 'SET_CARD_EXTRA_PERCENTAGE', SYNC]) assert.equal(groups.get(action), 'Rates', action);
+    for (const action of ['ENABLE_AUTOMATIC_RATES', 'DISABLE_AUTOMATIC_RATES', 'UPDATE_AUTOMATIC_RATES']) {
+      assert.equal(groups.get(action), 'Settings', action);
+    }
+    assert.deepEqual(AUTOMATIC_ACTIONS.map((action) => rules.actionLabel(action)), [
+      'Turned on automatic rates', 'Turned off automatic rates', 'Updated automatic rate settings',
+      'Linked card type to rate provider product', 'Unlinked card type from rate provider product', 'Changed card extra percentage',
+      'Updated rates from rate provider',
+    ]);
+    assert.deepEqual(catalogueGaps(AUTOMATIC_ACTIONS), []);
+    assert.deepEqual(rules.ACTION_GROUPS.find((group) => group.label === 'System')?.options.map((option) => option.value), [PURGE]);
+    assert.equal(rules.entityLabel('rate_sync_runs'), 'Automatic rate update');
+    assert.equal(rules.entityLabel('rate_sync_settings'), 'Automatic rate settings');
+  });
+
+  test('the database writes every automatic rate action with a literal name, under the admin or the scheduled run', { skip: !SIBLINGS_PRESENT }, () => {
+    const written = new Set(databaseAndEdgeInserts().sql.flatMap((insert) => insert.actions));
+    for (const action of AUTOMATIC_ACTIONS) assert.ok(written.has(action), action);
+    assert.ok(!consoleActions().actions.has(SYNC));
+  });
+
+  test('a scheduled update names the system as the actor, and an update started in the console names its admin', () => {
+    const scheduled = update(null);
+    assert.equal(rules.isSystemEvent(scheduled), true);
+    assert.equal(model.actorName(scheduled), 'System');
+    const started = update(ADMIN_ID);
+    assert.equal(rules.isSystemEvent(started), false);
+    assert.equal(model.actorName(started), '@ops');
+    assert.equal(rules.isSystemEvent({ admin_id: null, action: 'LINK_RATE_PRODUCT' }), false);
+  });
+
+  test('describes the update in plain words, read strictly from the recorded summary', () => {
+    const summary = 'Updated from the rate provider: 12 rates changed, 1 range added and 2 ranges switched off, across 3 linked card types. '
+      + '1 linked card type got no usable rates and was switched off.';
+    assert.equal(rules.actionDescription(update(null)), summary);
+    assert.equal(
+      rules.actionDescription(update(ADMIN_ID, { ...SYNC_SUMMARY, linked: 1, priced: 1, updated: 1, created: 0, deactivated: 0, unpriced: [] })),
+      'Updated from the rate provider: 1 rate changed, across 1 linked card type.',
+    );
+    assert.equal(
+      rules.actionDescription(update(null, { ...SYNC_SUMMARY, unpriced: [{ card_type_id: TYPE_ID, reason: 'missing', listed: false }] })),
+      'Updated from the rate provider: 12 rates changed, 1 range added and 2 ranges switched off, across 3 linked card types.',
+    );
+    assert.equal(
+      rules.actionDescription(update(null, { ...SYNC_SUMMARY, linked: 1, priced: 0, created: 0, updated: 0, deactivated: 2 })),
+      'Updated from the rate provider: 2 ranges switched off, across 1 linked card type. 1 linked card type got no usable rates and was switched off.',
+    );
+    const offType = (reason: string, index: number) => ({ card_type_id: `0c000000-0000-4000-8000-0000000002${String(index).padStart(2, '0')}`, reason, listed: true });
+    assert.equal(
+      rules.actionDescription(update(null, { ...SYNC_SUMMARY, unpriced: [offType('markup_out_of_range', 1)] })),
+      'Updated from the rate provider: 12 rates changed, 1 range added and 2 ranges switched off, across 3 linked card types. '
+        + 'The extra percentage would make a rate ₦0.00 or less, or more than ₦100,000.00, for 1 linked card type, so their ranges were switched off.',
+    );
+    assert.equal(
+      rules.actionDescription(update(null, { ...SYNC_SUMMARY, unpriced: [offType('no_currency_symbol', 1)] })),
+      'Updated from the rate provider: 12 rates changed, 1 range added and 2 ranges switched off, across 3 linked card types. '
+        + 'No currency symbol is set in Cards for the country of 1 linked card type, so their ranges were switched off.',
+    );
+    assert.equal(
+      rules.actionDescription(update(null, {
+        ...SYNC_SUMMARY,
+        linked: 7,
+        unpriced: [
+          offType('no_currency_symbol', 1), offType('markup_out_of_range', 2), offType('bands_overlap', 3), offType('missing', 4),
+          offType('markup_out_of_range', 5), offType('no_currency_symbol', 6), { ...offType('markup_out_of_range', 7), listed: false },
+        ],
+      })),
+      'Updated from the rate provider: 12 rates changed, 1 range added and 2 ranges switched off, across 7 linked card types. '
+        + '2 linked card types got no usable rates and were switched off. '
+        + 'The extra percentage would make a rate ₦0.00 or less, or more than ₦100,000.00, for 2 linked card types, so their ranges were switched off. '
+        + 'No currency symbol is set in Cards for the country of 2 linked card types, so their ranges were switched off.',
+    );
+    const withoutRelabelled = Object.fromEntries(Object.entries(SYNC_SUMMARY).filter(([key]) => key !== 'relabelled'));
+    for (const broken of [null, [], { ...SYNC_SUMMARY, updated: -1 }, { ...SYNC_SUMMARY, relabelled: -1 }, withoutRelabelled, { ...SYNC_SUMMARY, unpriced: null }, { lines: 40 }]) {
+      assert.equal(rules.actionDescription(update(null, broken)), null, JSON.stringify(broken));
+    }
+    assert.equal(rules.actionDescription(update(null, { ...SYNC_SUMMARY, created: 0, updated: 0, deactivated: 0 })), null);
+    assert.equal(
+      rules.actionDescription(update(null, { ...SYNC_SUMMARY, created: 0, updated: 0, deactivated: 0, relabelled: 2, unpriced: [] })),
+      'Updated from the rate provider: 2 range labels updated, across 3 linked card types.',
+    );
+    assert.equal(
+      rules.actionDescription(update(null, { ...SYNC_SUMMARY, created: 0, updated: 1, deactivated: 0, relabelled: 1, linked: 1, priced: 1, unpriced: [] })),
+      'Updated from the rate provider: 1 rate changed and 1 range label updated, across 1 linked card type.',
+    );
+    const text = textOf(render(createElement(parts.EventDetail, { event: rules.forScreen(update(null)), userHref: null })));
+    for (const expected of ['Updated rates from rate provider', SYNC, 'Summary', summary, 'System', 'Automatic rate update']) {
+      assert.ok(text.includes(expected), expected);
+    }
+  });
+
+  test('list responses carry only the number of changed ranges, and the drawer reads the full update by its id', () => {
+    const after = { ...SYNC_SUMMARY, provider: 'acme', requested_via: 'schedule', changes: [{ id: RANGE_ID, change: 'rate' }, { id: RANGE_ID, change: 'label' }] };
+    assert.deepEqual(rules.listAfterValue(SYNC, after), { ...SYNC_SUMMARY, provider: 'acme', requested_via: 'schedule', changes: 2 });
+    assert.equal(rules.listAfterValue('UPDATE_AUTOMATIC_RATES', after), after);
+    assert.equal(rules.listAfterValue(SYNC, null), null);
+    assert.deepEqual(rules.listAfterValue(SYNC, { changes: 'x' }), { changes: 'x' });
+    assert.equal(
+      rules.actionDescription({ action: SYNC, after_value: rules.listAfterValue(SYNC, after) }),
+      rules.actionDescription({ action: SYNC, after_value: after }),
+    );
+    assert.equal(rules.opensFromList({ action: SYNC }), false);
+    assert.equal(rules.opensFromList({ action: 'LINK_RATE_PRODUCT' }), true);
+    const route = readFileSync(ROUTE_FILE, 'utf8');
+    const lister = route.slice(route.indexOf('async function listEvents('), route.indexOf('async function collectExport('));
+    assert.match(lister, /\.map\(\(row\) => \(\{ \.\.\.row, after_value: listAfterValue\(row\.action, row\.after_value\) \}\)\);/);
+    const legacy = route.slice(route.indexOf('async function legacyList('), route.indexOf('export async function GET('));
+    assert.match(legacy, /after_value: screenValue\(listAfterValue\(typeof row\.action === 'string' \? row\.action : null, row\.after_value\)\),/);
+    const reader = route.slice(route.indexOf('async function readEvent('), route.indexOf('async function prepareSearch('));
+    const exporter = route.slice(route.indexOf('async function collectExport('), route.indexOf('async function legacyList('));
+    assert.doesNotMatch(reader + exporter, /listAfterValue/);
+    const page = readFileSync(join(OWNED_DIR, 'page.tsx'), 'utf8');
+    assert.match(page, /list\.data\?\.events\.find\(\(event\) => event\.id === openId && opensFromList\(event\)\) \?\? null/);
+  });
+
+  test('the database list behind the mobile app returns only the number of changed ranges of a rate update', { skip: !SIBLINGS_PRESENT }, () => {
+    const sql = readFileSync(SQL_FILES[1], 'utf8');
+    const list = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION list_admin_activity('));
+    const body = list.slice(0, list.indexOf('$$;'));
+    const select = body.slice(body.indexOf('    al.before_value,\n'), body.indexOf('    CASE\n      WHEN al.entity = '));
+    assert.equal(select, [
+      '    al.before_value,',
+      `    CASE WHEN al.action = '${SYNC}' AND jsonb_typeof(al.after_value -> 'changes') = 'array' THEN al.after_value || jsonb_build_object('changes', jsonb_array_length(al.after_value -> 'changes')) ELSE al.after_value END,`,
+      '',
+      '',
+    ].join('\n'));
+    const after = { ...SYNC_SUMMARY, provider: 'acme', requested_via: 'schedule', changes: 2 };
+    assert.equal(rules.listAfterValue(SYNC, after), after);
   });
 });
 
@@ -1845,9 +2001,10 @@ describe('route contract', () => {
     assert.match(source, /if \(\/forbidden\/i\.test\(listed\.error\.message \|\| ''\)\) return fail\('PERMISSION_DENIED', DENIED\);/);
   });
 
-  test('lists admin rows plus exactly one system action, the deleted-account purge, and keeps every other filter', () => {
-    assert.equal(rules.SYSTEM_ACTION, 'PURGE_DELETED_ACCOUNT_WITHDRAWALS');
-    assert.match(source, /^const ADMIN_OR_SYSTEM = `admin_id\.not\.is\.null,action\.eq\.\$\{SYSTEM_ACTION\}`;$/m);
+  test('lists admin rows plus the two system actions, the deleted-account purge and the rate update, and keeps every other filter', () => {
+    assert.deepEqual(rules.SYSTEM_ACTIONS, [PURGE, SYNC]);
+    assert.match(source, /^const ADMIN_OR_SYSTEM = `admin_id\.not\.is\.null,action\.in\.\(\$\{SYSTEM_ACTIONS\.join\(','\)\}\)`;$/m);
+    assert.match(source, /^ {2}SEARCH_USER_CAP, SYSTEM_ACTIONS, actionFilterKeys,/m);
     assert.doesNotMatch(source, /\.not\('admin_id'/);
     assert.equal((source.match(/\.or\(ADMIN_OR_SYSTEM\)/g) ?? []).length, 2);
     const scope = source.slice(source.indexOf('function scoped('), source.indexOf('async function fetchTargetRows('));
@@ -1866,14 +2023,14 @@ describe('route contract', () => {
     assert.match(reader, /\.eq\('id', id\.toLowerCase\(\)\)\s*\.or\(ADMIN_OR_SYSTEM\)\s*\.limit\(1\),/);
   });
 
-  test('the database list behind the mobile app admits the same system action and keeps its filters', { skip: !SIBLINGS_PRESENT }, () => {
+  test('the database list behind the mobile app admits the same system actions and keeps its filters', { skip: !SIBLINGS_PRESENT }, () => {
     const sql = readFileSync(SQL_FILES[1], 'utf8');
     const list = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION list_admin_activity('));
     const body = list.slice(0, list.indexOf('$$;'));
     assert.equal(body.slice(body.indexOf('  FROM audit_log al'), body.indexOf('  ORDER BY al.created_at DESC')), [
       '  FROM audit_log al',
       '  LEFT JOIN admin_users u ON u.id = al.admin_id',
-      `  WHERE (al.admin_id IS NOT NULL OR al.action = '${rules.SYSTEM_ACTION}')`,
+      `  WHERE (al.admin_id IS NOT NULL OR al.action IN (${rules.SYSTEM_ACTIONS.map((action) => `'${action}'`).join(', ')}))`,
       '    AND (p_before IS NULL OR al.created_at < p_before)',
       '    AND (p_after  IS NULL OR al.created_at >= p_after)',
       '    AND (p_admin_filter IS NULL OR al.admin_id = p_admin_filter)',

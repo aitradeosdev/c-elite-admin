@@ -185,6 +185,13 @@ span.logoTile img {
   margin-left: auto;
 }
 
+.groupNote {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--tone-info-fg);
+}
+
 .emptyNote {
   margin: 0;
   font-size: var(--text-sm);

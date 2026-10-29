@@ -27,12 +27,14 @@ const DASHBOARD_DIR = join(APP_DIR, '(dashboard)');
 const SETTINGS_DIR = join(DASHBOARD_DIR, 'admin-settings');
 const BALANCE_DIR = join(DASHBOARD_DIR, 'platform-balance');
 const SECTION_SLUGS = ['platform-balance', 'limits-fees', 'bill-settings', 'anomaly-alerts', 'security-limits'] as const;
+const ADDED_SECTION_SLUGS = ['automatic-rates'] as const;
 const CONFIG_FORM_SLUGS = ['limits-fees', 'bill-settings', 'anomaly-alerts', 'security-limits'] as const;
 const OLD_PATH_LITERAL = /['"`]\/(?:platform-balance|limits-fees|bill-settings|anomaly-alerts|security-limits)\b/;
 const SECTION_TABS: ReadonlyArray<readonly [string, string]> = [
   ['/admin-settings', 'General'],
   ['/admin-settings/platform-balance', 'Balance'],
   ['/admin-settings/limits-fees', 'Limits & Fees'],
+  ['/admin-settings/automatic-rates', 'Automatic Rates'],
   ['/admin-settings/bill-settings', 'Bill Settings'],
   ['/admin-settings/anomaly-alerts', 'Anomaly & Alerts'],
   ['/admin-settings/security-limits', 'Rate Limits & IPs'],
@@ -51,11 +53,13 @@ describe('the five pages live under Platform Settings', () => {
   test('the old page files are gone, while the sections, the Balance modules and the six API routes stay', () => {
     for (const slug of CONFIG_FORM_SLUGS) assert.equal(existsSync(join(DASHBOARD_DIR, slug)), false, slug);
     assert.equal(existsSync(join(BALANCE_DIR, 'page.tsx')), false);
-    for (const slug of SECTION_SLUGS) assert.ok(existsSync(join(SETTINGS_DIR, slug, 'page.tsx')), slug);
+    for (const slug of [...SECTION_SLUGS, ...ADDED_SECTION_SLUGS]) assert.ok(existsSync(join(SETTINGS_DIR, slug, 'page.tsx')), slug);
     for (const name of ['model.ts', 'BalanceParts.tsx', 'BalanceSection.tsx', 'page.module.css']) {
       assert.ok(existsSync(join(BALANCE_DIR, name)), name);
     }
-    for (const slug of ['admin-settings', ...SECTION_SLUGS]) assert.ok(existsSync(join(APP_DIR, 'api', slug, 'route.ts')), slug);
+    for (const slug of ['admin-settings', ...SECTION_SLUGS, ...ADDED_SECTION_SLUGS]) {
+      assert.ok(existsSync(join(APP_DIR, 'api', slug, 'route.ts')), slug);
+    }
   });
 
   test('each old address redirects with a 307 to its section, and the security headers are unchanged', async () => {
@@ -147,7 +151,7 @@ describe('the Platform Settings layout inside the shell', () => {
     assert.deepEqual(nav.links.map((link) => tagsOf(link, 'a')[0].href), SECTION_TABS.map(([href]) => href));
     assert.deepEqual(nav.links.map((link) => textOf(link)), SECTION_TABS.map(([, label]) => label));
     assert.deepEqual(nav.links.map((link) => tagsOf(link, 'a')[0]['aria-current']), [
-      undefined, undefined, 'page', undefined, undefined, undefined,
+      undefined, undefined, 'page', undefined, undefined, undefined, undefined,
     ]);
     assert.ok(main.indexOf('<p id="section-probe">section body</p>') > main.indexOf('</nav>'));
     const crumbs = /<nav aria-label="Breadcrumb"[^>]*>([\s\S]*?)<\/nav>/.exec(html);
@@ -159,7 +163,7 @@ describe('the Platform Settings layout inside the shell', () => {
   test('on General the first tab is current', () => {
     const nav = sectionNav(mainOf(inSettings('/admin-settings', superAdmin)));
     assert.deepEqual(nav.links.map((link) => tagsOf(link, 'a')[0]['aria-current']), [
-      'page', undefined, undefined, undefined, undefined, undefined,
+      'page', undefined, undefined, undefined, undefined, undefined, undefined,
     ]);
   });
 
@@ -193,13 +197,17 @@ describe('the section tabs follow the sidebar rule', () => {
     }
     assert.deepEqual(listing.sort(), [
       'admin_settings', 'anomaly.read', 'anomaly_alerts', 'bill_settings', 'configuration.read', 'limits.read', 'limits_fees',
-      'platform_balance', 'platform_balance.read', 'providers.read', 'security.read', 'security_limits',
+      'platform_balance', 'platform_balance.read', 'providers.read', 'rates.read', 'rates_management', 'security.read',
+      'security_limits',
     ]);
   });
 });
 
 describe('house rules for the Platform Settings files', () => {
-  const files = [join(SETTINGS_DIR, 'layout.tsx'), ...SECTION_SLUGS.map((slug) => join(SETTINGS_DIR, slug, 'page.tsx'))];
+  const files = [
+    join(SETTINGS_DIR, 'layout.tsx'),
+    ...[...SECTION_SLUGS, ...ADDED_SECTION_SLUGS].map((slug) => join(SETTINGS_DIR, slug, 'page.tsx')),
+  ];
 
   test('the layout and the section routes carry no prose comments and no inline styles', () => {
     for (const file of files) {
@@ -219,6 +227,14 @@ describe('house rules for the Platform Settings files', () => {
       const source = readFileSync(join(SETTINGS_DIR, slug, 'page.tsx'), 'utf8');
       assert.match(source, /^import \{ ConfigForm\b[^}]*\} from '\.\.\/\.\.\/_config\/ConfigForm';$/m, slug);
     }
+  });
+
+  test('the Automatic Rates route renders the Automatic Rates section and is not a client module', () => {
+    const route = readFileSync(join(SETTINGS_DIR, 'automatic-rates', 'page.tsx'), 'utf8');
+    assert.match(route, /^import AutomaticRatesSection from '\.\.\/\.\.\/automatic-rates\/AutomaticRatesSection';$/m);
+    assert.match(route, /return <AutomaticRatesSection \/>;/);
+    assert.doesNotMatch(route, /use client/);
+    assert.equal(existsSync(join(DASHBOARD_DIR, 'automatic-rates', 'page.tsx')), false);
   });
 
   test('the layout is a client component that builds its tabs from the menu table and the resolved permissions', () => {

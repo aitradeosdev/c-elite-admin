@@ -418,6 +418,84 @@ describe('snapshot parsing', () => {
     assert.equal(parsed.cards[0].name, 'Unnamed card');
   });
 
+  test('reads the automatic summary strictly, so an unreadable one is null and never a default', () => {
+    const automatic = {
+      enabled: true, interval_minutes: 60, next_due_at: '2026-10-26T12:30:00.000Z', stale: false, failures: 0,
+      linked_card_type_ids: [PHYSICAL.toUpperCase()],
+    };
+    const parsed = model.toRatesSnapshot({ ...treeBody(), automatic })?.automatic;
+    assert.ok(parsed);
+    assert.equal(parsed.enabled, true);
+    assert.equal(parsed.linked.has(PHYSICAL), true);
+    assert.equal(model.isLinkedType(parsed, PHYSICAL.toUpperCase()), true);
+    assert.equal(model.isLinkedType(parsed, ECODE), false);
+    assert.equal(model.toRatesSnapshot(treeBody())?.automatic, null);
+    for (const broken of [
+      { ...automatic, enabled: 'yes' }, { ...automatic, interval_minutes: 45 }, { ...automatic, next_due_at: null },
+      { ...automatic, next_due_at: 'soon' }, { ...automatic, failures: -1 }, { ...automatic, failures: 1.5 },
+      { ...automatic, linked_card_type_ids: ['x'] }, { ...automatic, stale: undefined }, null, [],
+    ]) {
+      assert.equal(model.toRatesSnapshot({ ...treeBody(), automatic: broken })?.automatic, null, JSON.stringify(broken));
+    }
+    assert.equal(model.toRatesAutomatic({ ...automatic, enabled: false, next_due_at: null })?.enabled, false);
+  });
+
+  test('the page notices say when automatic rates are on, and warn when they are failing or stale', () => {
+    const read = Date.parse('2026-10-26T12:00:00.000Z');
+    const on = model.toRatesAutomatic({
+      enabled: true, interval_minutes: 60, next_due_at: '2026-10-26T12:30:00.000Z', stale: false, failures: 0, linked_card_type_ids: [PHYSICAL],
+    });
+    assert.ok(on);
+    assert.deepEqual(model.automaticNotice(on, read), {
+      tone: 'info',
+      text: 'Automatic rates are on. 1 linked card type gets its ranges and rates from the rate provider every hour; the next update is due around 26 Oct 2026, 13:30 WAT. Changes you make to them here are replaced then.',
+    });
+    const two = model.toRatesAutomatic({
+      enabled: true, interval_minutes: 120, next_due_at: '2026-10-26T12:30:00.000Z', stale: false, failures: 2, linked_card_type_ids: [PHYSICAL, ECODE],
+    });
+    assert.ok(two);
+    assert.match(model.automaticNotice(two, read)?.text ?? '', /^Automatic rates are on\. 2 linked card types get their ranges and rates from the rate provider every 2 hours;/);
+    const warning = 'Automatic rates are on, but recent updates have not succeeded. Linked card types keep their current rates until one does.';
+    assert.deepEqual(model.automaticNotice({ ...on, stale: true }, read), { tone: 'warning', text: warning });
+    assert.deepEqual(model.automaticNotice({ ...on, failures: 3 }, read), { tone: 'warning', text: warning });
+    assert.equal(model.automaticNotice({ ...on, enabled: false, nextDueAt: null }, read), null);
+    assert.equal(model.automaticNotice({ ...on, linked: new Set<string>() }, read), null);
+    assert.equal(model.automaticNotice({ ...on, linked: new Set<string>(), failures: 3 }, read), null);
+    assert.equal(
+      model.AUTOMATIC_UNREADABLE,
+      'The automatic rate status could not be read, so this page cannot show which card types are updated automatically.',
+    );
+    const page = readFileSync(resolve(APP_DIR, '(dashboard)', 'rates', 'page.tsx'), 'utf8');
+    assert.match(page, /\{snapshot && !automatic \? \(\s*<Notice tone="warning" compact>\{AUTOMATIC_UNREADABLE\}<\/Notice>/);
+    assert.match(page, /<LinkButton href=\{AUTOMATIC_HREF\} variant="ghost" size="sm">Open Automatic Rates<\/LinkButton>/);
+    assert.match(page, /const AUTOMATIC_HREF = '\/admin-settings\/automatic-rates';/);
+  });
+
+  test('the page notice words the next update as of the last read: due around while ahead, a start within 5 minutes for 10 minutes, then overdue since', () => {
+    const read = Date.parse('2026-10-26T12:00:00.000Z');
+    const lead = 'Automatic rates are on. 1 linked card type gets its ranges and rates from the rate provider every hour; ';
+    const tail = '. Changes you make to them here are replaced then.';
+    const cases: Array<[number, string]> = [
+      [-1_800_000, 'the next update is due around 26 Oct 2026, 13:30 WAT'],
+      [0, 'the next update is due around 26 Oct 2026, 13:00 WAT'],
+      [1, 'the next update starts within 5 minutes'],
+      [599_999, 'the next update starts within 5 minutes'],
+      [600_000, 'the next update has been overdue since 26 Oct 2026, 12:50 WAT'],
+      [900_000, 'the next update has been overdue since 26 Oct 2026, 12:45 WAT'],
+    ];
+    for (const [late, due] of cases) {
+      const automatic = model.toRatesAutomatic({
+        enabled: true, interval_minutes: 60, next_due_at: new Date(read - late).toISOString(), stale: false, failures: 1,
+        linked_card_type_ids: [PHYSICAL],
+      });
+      assert.ok(automatic);
+      assert.deepEqual(model.automaticNotice(automatic, read), { tone: 'info', text: `${lead}${due}${tail}` }, `${late} ms late`);
+    }
+    const page = readFileSync(resolve(APP_DIR, '(dashboard)', 'rates', 'page.tsx'), 'utf8');
+    assert.match(page, /const updatedAt = snapshot \? rates\.lastUpdatedAt : null;/);
+    assert.match(page, /const liveNotice = automatic && updatedAt !== null \? automaticNotice\(automatic, updatedAt\) : null;/);
+  });
+
   test('formatting helpers', () => {
     assert.equal(model.currencyAmount('$', 25), '$25');
     assert.equal(model.currencyAmount('CAD', 1000.5), 'CAD 1,000.5');
@@ -991,6 +1069,97 @@ describe('confirmation dialogs', () => {
     );
     assert.equal(options.addRangeOptions(target, { ...values, active: false }, []).consequences, undefined);
   });
+
+  test('saving or adding a range on a linked card type while automatic rates are on says the next update replaces it', () => {
+    const snap = snapshot();
+    const read = Date.parse('2026-10-26T12:00:00.000Z');
+    const due = '26 Oct 2026, 13:30 WAT';
+    const on = model.toRatesAutomatic({
+      enabled: true, interval_minutes: 60, next_due_at: '2026-10-26T12:30:00.000Z', stale: false, failures: 0, linked_card_type_ids: [PHYSICAL],
+    });
+    const off = model.toRatesAutomatic({
+      enabled: false, interval_minutes: 60, next_due_at: null, stale: false, failures: 0, linked_card_type_ids: [PHYSICAL],
+    });
+    assert.ok(on && off);
+    assert.deepEqual(options.reviewOptions(edits(snap, { [D1]: '1550' }), on, read).consequences, [
+      `This change is on a linked card type. The next automatic update, due around ${due}, replaces it with the rate provider’s rate.`,
+    ]);
+    assert.deepEqual(options.reviewOptions(edits(snap, { [D1]: '1550', [D4]: '1950' }), on, read).consequences, [
+      `1 of these changes is on a linked card type. The next automatic update, due around ${due}, replaces it with the rate provider’s rate.`,
+    ]);
+    assert.deepEqual(options.reviewOptions(edits(snap, { [D1]: '1550', [D2]: '1600' }), on, read).consequences, [
+      `2 of these changes are on linked card types. The next automatic update, due around ${due}, replaces them with the rate provider’s rates.`,
+    ]);
+    assert.equal(options.reviewOptions(edits(snap, { [D1]: '1550' }), off, read).consequences, undefined);
+    assert.equal(options.reviewOptions(edits(snap, { [D4]: '1950' }), on, read).consequences, undefined);
+    assert.equal(options.reviewOptions(edits(snap, { [D1]: '1550' })).consequences, undefined);
+
+    const values = { label: '$90–$150', min: 90, max: 150, rate: 1500, active: true };
+    const linked = model.addTarget(snap.cards[0].groups[0]);
+    assert.deepEqual(options.addRangeOptions(linked, values, [], on, read).consequences, [
+      `This card type is linked to the rate provider. At the next update, due around ${due}, its ranges are replaced by the provider’s: this range is switched off, or repriced if the provider quotes exactly this range.`,
+    ]);
+    assert.equal(options.addRangeOptions(linked, values, [], off, read).consequences, undefined);
+    assert.equal(options.addRangeOptions(model.addTarget(snap.cards[1].groups[0]), values, [], on, read).consequences, undefined);
+  });
+
+  test('the save and add-range confirms word the next update like the page notice: due around while ahead, a start within 5 minutes for 10 minutes, then overdue since', () => {
+    const snap = snapshot();
+    const read = Date.parse('2026-10-26T12:00:00.000Z');
+    const changes = edits(snap, { [D1]: '1550' });
+    const target = model.addTarget(snap.cards[0].groups[0]);
+    const values = { label: '$90–$150', min: 90, max: 150, rate: 1500, active: true };
+    const lead = 'Automatic rates are on. 1 linked card type gets its ranges and rates from the rate provider every hour; the next update ';
+    const tail = '. Changes you make to them here are replaced then.';
+    const warning = 'Automatic rates are on, but recent updates have not succeeded. Linked card types keep their current rates until one does.';
+    const timing = (text: string) => text.match(
+      /due around \d{1,2} \w{3} \d{4}, \d{2}:\d{2} WAT|starts within 5 minutes|has been overdue since \d{1,2} \w{3} \d{4}, \d{2}:\d{2} WAT/,
+    )?.[0];
+    const cases: Array<[number, boolean, string, string]> = [
+      [-1_800_000, false, 'is due around 26 Oct 2026, 13:30 WAT', 'due around 26 Oct 2026, 13:30 WAT'],
+      [0, false, 'is due around 26 Oct 2026, 13:00 WAT', 'due around 26 Oct 2026, 13:00 WAT'],
+      [1, false, 'starts within 5 minutes', 'which starts within 5 minutes'],
+      [599_999, false, 'starts within 5 minutes', 'which starts within 5 minutes'],
+      [600_000, false, 'has been overdue since 26 Oct 2026, 12:50 WAT', 'which has been overdue since 26 Oct 2026, 12:50 WAT'],
+      [10_800_000, true, 'has been overdue since 26 Oct 2026, 10:00 WAT', 'which has been overdue since 26 Oct 2026, 10:00 WAT'],
+    ];
+    for (const [late, stale, predicate, aside] of cases) {
+      const automatic = model.toRatesAutomatic({
+        enabled: true, interval_minutes: 60, next_due_at: new Date(read - late).toISOString(), stale, failures: stale ? 1 : 0,
+        linked_card_type_ids: [PHYSICAL],
+      });
+      assert.ok(automatic);
+      const save = options.reviewOptions(changes, automatic, read).consequences;
+      const add = options.addRangeOptions(target, values, [], automatic, read).consequences;
+      assert.deepEqual(save, [
+        `This change is on a linked card type. The next automatic update, ${aside}, replaces it with the rate provider’s rate.`,
+      ], `save ${late} ms late`);
+      assert.deepEqual(add, [
+        `This card type is linked to the rate provider. At the next update, ${aside}, its ranges are replaced by the provider’s: this range is switched off, or repriced if the provider quotes exactly this range.`,
+      ], `add ${late} ms late`);
+      assert.ok(save && add);
+      const notice = model.automaticNotice(automatic, read);
+      const timed = stale ? model.automaticNotice({ ...automatic, stale: false, failures: 0 }, read) : notice;
+      assert.deepEqual(notice, stale ? { tone: 'warning', text: warning } : { tone: 'info', text: `${lead}${predicate}${tail}` }, `notice ${late} ms late`);
+      assert.ok(timed);
+      assert.equal(timed.text, `${lead}${predicate}${tail}`, `timed notice ${late} ms late`);
+      const said = timing(timed.text);
+      assert.ok(said, `the notice has a timing ${late} ms late`);
+      assert.equal(timing(save[0]), said, `save agrees with the notice ${late} ms late`);
+      assert.equal(timing(add[0]), said, `add agrees with the notice ${late} ms late`);
+      if (late >= 600_000) {
+        for (const text of [save[0], add[0]]) assert.doesNotMatch(text, /due around|starts within/, `no promised start ${late} ms late`);
+      }
+    }
+    assert.equal('dueText' in model, false);
+    const dialogs = readFileSync(resolve(APP_DIR, '(dashboard)', 'rates', 'confirmOptions.tsx'), 'utf8');
+    assert.doesNotMatch(dialogs, /due around|starts within|overdue since|\b(?:stamp|lateBy|overdue|dueNow)\(/);
+    const page = readFileSync(resolve(APP_DIR, '(dashboard)', 'rates', 'page.tsx'), 'utf8');
+    assert.match(page, /const fresh = await refreshRates\(\);\s*const readAt = Date\.now\(\);/);
+    assert.match(page, /\.\.\.reviewOptions\(pending\.changes, fresh\.data\.automatic, readAt\),/);
+    assert.match(page, /\.\.\.addRangeOptions\(target, values, overlapsFor\(target, values\.min, values\.max\), automatic, rates\.lastUpdatedAt\),/);
+    assert.equal(page.match(/Date\.now\(\)/g)?.length, 1);
+  });
 });
 
 describe('rendering', () => {
@@ -1092,6 +1261,30 @@ describe('rendering', () => {
     assert.match(textOf(saving), /Saving 1 rate change…/);
   });
 
+  test('a linked card type shows Automatic and the group note while automatic rates are on, and Linked while they are off', () => {
+    const snap = snapshot();
+    const summary = {
+      enabled: true, interval_minutes: 60, next_due_at: '2026-10-26T12:30:00.000Z', stale: false, failures: 0, linked_card_type_ids: [PHYSICAL],
+    };
+    const on = model.toRatesAutomatic(summary);
+    const off = model.toRatesAutomatic({ ...summary, enabled: false, next_due_at: null });
+    assert.ok(on && off);
+    const note = 'Ranges and rates come from the rate provider. Changes here are replaced at the next update.';
+    const live = section(snap, { automatic: on });
+    const liveBadges = tagsOf(live, 'span').filter((attrs) => classesOf(attrs).includes('badge'));
+    assert.deepEqual(liveBadges.map((attrs) => classesOf(attrs)), [['badge', 'info']]);
+    assert.match(textOf(live), /United States · Physical ₦ per \$1 Automatic Add range/);
+    assert.ok(textOf(live).includes(note));
+    assert.match(live, /<p class="groupNote">Ranges and rates come from the rate provider\./);
+    const quiet = section(snap, { automatic: off });
+    assert.deepEqual(tagsOf(quiet, 'span').filter((attrs) => classesOf(attrs).includes('badge')).map((attrs) => classesOf(attrs)), [['badge', 'neutral']]);
+    assert.match(textOf(quiet), /United States · Physical ₦ per \$1 Linked Add range/);
+    assert.ok(!textOf(quiet).includes(note));
+    const plain = section(snap);
+    assert.equal(tagsOf(plain, 'span').filter((attrs) => classesOf(attrs).includes('badge')).length, 0);
+    assert.ok(!textOf(plain).includes(note));
+  });
+
   test('the notice lists every affected range', () => {
     const html = render(createElement(parts.PageNoticeView, {
       notice: { tone: 'danger', title: 'Not saved', message: 'Nothing was saved.', items: [{ id: D1, title: 'Amazon US · Physical · $25–$99', detail: 'This range no longer exists.' }] },
@@ -1121,19 +1314,29 @@ interface DbReply {
   error: { message: string; code?: string } | null;
 }
 
+interface RouteChain {
+  insert(row: Record<string, unknown>): Promise<DbReply>;
+  select(): RouteChain;
+  eq(): RouteChain;
+  order(): RouteChain;
+  range(from: number, to: number): Promise<DbReply & { count: number }>;
+}
+
 interface RouteHarness {
   claims: RouteClaims | null;
   headers: Record<string, string>;
   rpcCalls: RpcCall[];
   reply: DbReply;
   tables: string[];
+  selects: Record<string, unknown[]>;
   audits: Record<string, unknown>[];
   auditFailure: string | null;
-  from(table: string): { insert(row: Record<string, unknown>): Promise<DbReply> };
+  from(table: string): RouteChain;
   rpc(name: string, args: unknown): Promise<DbReply>;
 }
 
 interface RatesRoute {
+  GET: () => Promise<Response>;
   PATCH: (req: Request) => Promise<Response>;
 }
 
@@ -1179,18 +1382,25 @@ const routeHarness: RouteHarness = {
   rpcCalls: [],
   reply: { data: null, error: null },
   tables: [],
+  selects: {},
   audits: [],
   auditFailure: null,
   from(table) {
     routeHarness.tables.push(table);
-    return {
+    const rows = Object.prototype.hasOwnProperty.call(routeHarness.selects, table) ? routeHarness.selects[table] : [];
+    const chain: RouteChain = {
       async insert(row) {
         if (table !== 'audit_log') throw new Error(`unexpected insert into ${table}`);
         if (routeHarness.auditFailure) return { data: null, error: { message: routeHarness.auditFailure } };
         routeHarness.audits.push(row);
         return { data: null, error: null };
       },
+      select: () => chain,
+      eq: () => chain,
+      order: () => chain,
+      range: (from, to) => Promise.resolve({ data: rows.slice(from, to + 1), error: null, count: rows.length }),
     };
+    return chain;
   },
   async rpc(name, args) {
     routeHarness.rpcCalls.push({ name, args });
@@ -1274,6 +1484,7 @@ function resetRoute(claims: RouteClaims | null = OWNER): void {
   routeHarness.rpcCalls = [];
   routeHarness.reply = { data: null, error: null };
   routeHarness.tables = [];
+  routeHarness.selects = {};
   routeHarness.audits = [];
   routeHarness.auditFailure = null;
 }
@@ -1670,5 +1881,92 @@ describe('PATCH /api/rates saves through admin_save_rates', () => {
       assert.deepEqual(res.body, failureBody(UNCONFIRMED, 'INTERNAL_ERROR'), JSON.stringify(data));
       assert.deepEqual(routeHarness.audits, [], JSON.stringify(data));
     }
+  });
+});
+
+describe('GET /api/rates answers the tree and the automatic summary', () => {
+  const STATUS = {
+    enabled: true,
+    provider: 'acme',
+    interval_minutes: 60,
+    universal_markup_pct: 4,
+    enabled_changed_at: '2026-10-26T09:00:00.000Z',
+    updated_at: '2026-10-26T09:00:00.000Z',
+    updated_by: null,
+    linked_card_type_ids: [PHYSICAL],
+    running: null,
+    last_success: null,
+    last_update: null,
+    last_products: null,
+    failures: 0,
+    next_due_at: '2026-10-26T12:30:00.000Z',
+    stale: false,
+  };
+  const TABLES: Record<string, unknown[]> = {
+    cards: [{ id: AMAZON, name: 'Amazon', logo_url: null, is_active: true, sort_order: 1 }],
+    card_countries: [{ id: US, card_id: AMAZON, country_code: 'US', country_name: 'United States', currency_symbol: '$' }],
+    card_types: [{ id: PHYSICAL, card_id: AMAZON, country_code: 'US', name: 'Physical', sort_order: 1 }],
+    denominations: [
+      { id: D1, card_type_id: PHYSICAL, range_label: '$25–$99', min_value: 25, max_value: 99, rate_naira: 1500, is_active: true },
+    ],
+  };
+
+  before(async () => {
+    ratesRoute = (await import(await bundleRouteModule(resolve(APP_DIR, 'api', 'rates', 'route.ts')))) as RatesRoute;
+  });
+
+  beforeEach(() => {
+    resetRoute();
+    mock.method(console, 'error', () => {});
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  test('the phone keys are kept, and automatic carries only the six summary fields from rate_sync_status', async () => {
+    routeHarness.selects = TABLES;
+    routeHarness.reply = { data: STATUS, error: null };
+    const res = await ratesRoute.GET();
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(body), ['success', 'request_id', 'cards', 'automatic']);
+    assert.deepEqual(body.cards, rules.assembleRateTree(
+      TABLES.cards as CardRow[], TABLES.card_countries as CountryRow[], TABLES.card_types as TypeRow[], TABLES.denominations as StoredDenomination[],
+    ));
+    assert.deepEqual(body.automatic, {
+      enabled: true,
+      interval_minutes: 60,
+      next_due_at: '2026-10-26T12:30:00.000Z',
+      stale: false,
+      failures: 0,
+      linked_card_type_ids: [PHYSICAL],
+    });
+    assert.deepEqual(routeHarness.rpcCalls.map((call) => call.name), ['rate_sync_status']);
+    assert.deepEqual([...routeHarness.tables].sort(), ['card_countries', 'card_types', 'cards', 'denominations']);
+    const parsed = model.toRatesSnapshot(body);
+    assert.ok(parsed?.automatic);
+    assert.equal(parsed.automatic.linked.has(PHYSICAL), true);
+  });
+
+  test('a status that cannot be read fails the read like any other', async () => {
+    routeHarness.selects = TABLES;
+    routeHarness.reply = { data: null, error: { message: 'function rate_sync_status() does not exist' } };
+    const res = await ratesRoute.GET();
+    assert.equal(res.status, 500);
+    assert.equal(((await res.json()) as Record<string, unknown>).message, 'The rates could not be loaded. Try again.');
+    routeHarness.reply = { data: [STATUS], error: null };
+    assert.equal((await ratesRoute.GET()).status, 500);
+  });
+
+  test('the route reads the tree through the shared reader, and the old in-route copy is gone', () => {
+    const source = readFileSync(resolve(APP_DIR, 'api', 'rates', 'route.ts'), 'utf8');
+    assert.match(source, /^import \{ DENOMINATION_COLUMNS, loadRateTree \} from '\.\.\/\.\.\/lib\/rateTree';$/m);
+    assert.match(source, /const \[cards, status\] = await Promise\.all\(\[loadRateTree\(\), readRateSync\('rate_sync_status'\)\]\);/);
+    assert.match(source, /return ok\(\{ cards, automatic: ratesAutomatic\(status\) \}\);/);
+    assert.doesNotMatch(source, /async function readAll|PAGE_ROWS|MAX_PAGES|assembleRateTree/);
+    const reader = readFileSync(resolve(APP_DIR, 'lib', 'rateTree.ts'), 'utf8');
+    assert.match(reader, /^export async function loadRateTree\(\): Promise<RateTreeCard\[\] \| null> \{$/m);
+    assert.match(reader, /return assembleRateTree\(cards, countries, types, denominations\);/);
   });
 });

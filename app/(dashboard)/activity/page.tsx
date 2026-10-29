@@ -16,7 +16,7 @@ import { describeExportWindow, printTable, resolveExportRange } from '../../lib/
 import { businessDateKey, formatBusinessDateTime, formatBusinessTime } from '../../lib/time';
 import {
   ACTION_GROUPS, ENTITY_OPTIONS, EXPORT_CAP, PAGE_SIZE, RESULT_FILTERS, SEARCH_USER_CAP, actionLabel, entityLabel,
-  isListedAction, isListedEntity, isResultFilter, isSystemEvent, resultFilterLabel, resultKind,
+  isListedAction, isListedEntity, isResultFilter, isSystemEvent, opensFromList, resultFilterLabel, resultKind,
   type ActivityEvent, type AdminInfo,
 } from './rules';
 import {
@@ -146,7 +146,7 @@ function ActivityLog() {
   }));
   const { refresh: refreshList } = list;
 
-  const listedEvent = openId ? list.data?.events.find((event) => event.id === openId) ?? null : null;
+  const listedEvent = openId ? list.data?.events.find((event) => event.id === openId && opensFromList(event)) ?? null : null;
   const detail = useResource<ActivityEvent>(
     openId && !listedEvent ? `activity:${openId}` : null,
     (signal) => apiRequest(ACTIVITY_ENDPOINT, { query: { id: openId }, signal, select: toEventResult }),

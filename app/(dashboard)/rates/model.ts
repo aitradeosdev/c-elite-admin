@@ -1,10 +1,12 @@
 import type { ApiBody, ApiResult } from '../../lib/apiClient';
 import type { ToastTone } from '../../_ui';
 import { formatNaira } from '../../_ui/money';
+import { isUuid } from '../../lib/http';
 import {
   amountProblem, formatAmount, isHugeMove, labelProblem, parseDecimal, rangesOverlap, rateProblem, sameRate, toAmount,
   type RateResultStatus, type RateValues,
 } from './rateRules';
+import { everyInterval, isCount, isInterval, lateBy, overdue, stamp, type IntervalMinutes } from '../automatic-rates/rules';
 
 export interface RatePath {
   cardId: string;
@@ -54,10 +56,30 @@ export interface RateTotals {
   inactive: number;
 }
 
+export interface RatesAutomatic {
+  enabled: boolean;
+  intervalMinutes: IntervalMinutes;
+  nextDueAt: string | null;
+  stale: boolean;
+  failures: number;
+  linked: ReadonlySet<string>;
+}
+
+export interface AutomaticNotice {
+  tone: 'info' | 'warning';
+  text: string;
+}
+
+export interface NextUpdatePhrase {
+  predicate: string;
+  aside: string;
+}
+
 export interface RatesSnapshot {
   cards: RateCard[];
   rows: Readonly<Record<string, RateRow>>;
   totals: RateTotals;
+  automatic: RatesAutomatic | null;
 }
 
 export interface DraftEntry {
@@ -372,6 +394,77 @@ export function toRatesSnapshot(body: ApiBody): RatesSnapshot | null {
       active: cards.reduce((sum, card) => sum + card.active, 0),
       inactive: cards.reduce((sum, card) => sum + card.inactive, 0),
     },
+    automatic: toRatesAutomatic(body.automatic),
+  };
+}
+
+export function toRatesAutomatic(raw: unknown): RatesAutomatic | null {
+  if (!isRecord(raw)) return null;
+  const { enabled, stale, failures } = raw;
+  if (typeof enabled !== 'boolean' || typeof stale !== 'boolean' || !isCount(failures) || !isInterval(raw.interval_minutes)) {
+    return null;
+  }
+  const due = raw.next_due_at;
+  const nextDueAt = due === null ? null : typeof due === 'string' && Number.isFinite(Date.parse(due)) ? due : undefined;
+  if (nextDueAt === undefined || (enabled && nextDueAt === null)) return null;
+  const ids = raw.linked_card_type_ids;
+  if (!Array.isArray(ids) || !ids.every((id) => isUuid(id))) return null;
+  return {
+    enabled,
+    intervalMinutes: raw.interval_minutes,
+    nextDueAt,
+    stale,
+    failures,
+    linked: new Set(ids.map((id) => String(id).toLowerCase())),
+  };
+}
+
+export function isLinkedType(automatic: RatesAutomatic | null | undefined, typeId: string): boolean {
+  return automatic ? automatic.linked.has(typeId.toLowerCase()) : false;
+}
+
+export function updatesLive(automatic: RatesAutomatic | null | undefined, typeId: string): boolean {
+  return automatic ? automatic.enabled && automatic.linked.has(typeId.toLowerCase()) : false;
+}
+
+export const AUTOMATIC_UNREADABLE =
+  'The automatic rate status could not be read, so this page cannot show which card types are updated automatically.';
+
+export function nextUpdatePhrase(automatic: RatesAutomatic, now: number): NextUpdatePhrase | null {
+  if (automatic.nextDueAt === null) return null;
+  if (overdue(automatic, now)) {
+    const since = `has been overdue since ${stamp(automatic.nextDueAt)}`;
+    return { predicate: since, aside: `which ${since}` };
+  }
+  const late = lateBy(automatic, now);
+  if (late !== null && late > 0) {
+    const soon = 'starts within 5 minutes';
+    return { predicate: soon, aside: `which ${soon}` };
+  }
+  const around = `due around ${stamp(automatic.nextDueAt)}`;
+  return { predicate: `is ${around}`, aside: around };
+}
+
+function nextUpdateText(automatic: RatesAutomatic, now: number): string {
+  const phrase = nextUpdatePhrase(automatic, now);
+  return phrase ? `; the next update ${phrase.predicate}` : '';
+}
+
+export function automaticNotice(automatic: RatesAutomatic, now: number): AutomaticNotice | null {
+  if (!automatic.enabled || automatic.linked.size === 0) return null;
+  if (automatic.stale || automatic.failures >= 3) {
+    return {
+      tone: 'warning',
+      text: 'Automatic rates are on, but recent updates have not succeeded. Linked card types keep their current rates until one does.',
+    };
+  }
+  const linked = automatic.linked.size;
+  const types = linked === 1
+    ? '1 linked card type gets its ranges and rates'
+    : `${linked.toLocaleString('en-NG')} linked card types get their ranges and rates`;
+  return {
+    tone: 'info',
+    text: `Automatic rates are on. ${types} from the rate provider ${everyInterval(automatic.intervalMinutes)}${nextUpdateText(automatic, now)}. Changes you make to them here are replaced then.`,
   };
 }
 

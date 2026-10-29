@@ -23,6 +23,7 @@ const EDGE_DIR = fileURLToPath(new URL('../../supabase/functions/', import.meta.
 const RESUME_WITHDRAWAL = join(EDGE_DIR, 'resume-withdrawal', 'index.ts');
 const MOBILE_API = join(EDGE_DIR, 'admin-mobile-api', 'index.ts');
 const ADMIN_DELETE = join(EDGE_DIR, 'admin-delete-account', 'index.ts');
+const SYNC_RATES = join(EDGE_DIR, 'sync-provider-rates', 'index.ts');
 const EDGE_JWT = join(EDGE_DIR, '_shared', 'adminJwt.ts');
 const EDGE_SESSION = join(EDGE_DIR, '_shared', 'adminSession.ts');
 const WEB_JWT = join(APP_DIR, 'lib', 'jwt.ts');
@@ -265,6 +266,41 @@ describe('edge functions that read admin permissions', { skip: !SIBLINGS_PRESENT
     const sessionModule = readFileSync(EDGE_SESSION, 'utf8');
     assert.match(sessionModule, /return readAdminAuth\(req, supabase, 'web'\);/);
     assert.match(sessionModule, /return readAdminAuth\(req, supabase, 'mobile'\);/);
+  });
+
+  test('sync-provider-rates checks the secret, a web session, the rates permission and the rate limit before it claims a run', { skip: !existsSync(SYNC_RATES) }, () => {
+    const source = readFileSync(SYNC_RATES, 'utf8');
+    assert.match(source, /import \{ authenticateConsoleAdmin \} from '\.\.\/_shared\/adminSession\.ts';/);
+    assert.match(source, /return timingSafeEqual\(a, b\);/);
+    const secret = source.indexOf("secretEq(req.headers.get('x-admin-secret') || '', ADMIN_SECRET)");
+    const bearer = source.indexOf("if (req.headers.get('authorization')) {");
+    const session = source.indexOf('await authenticateConsoleAdmin(req, admin)');
+    const check = source.match(
+      /const \{ data: (\w+), error: (\w+) \} = await admin\.rpc\('admin_has_permission', \{\s*p_admin_id: actor,\s*p_permission: action === 'status' \? 'rates\.read' : 'rates\.write',\s*\}\);/,
+    );
+    assert.ok(check && check.index !== undefined, 'rates.read or rates.write is checked through admin_has_permission together with its error');
+    const failed = source.indexOf(`if (${check[2]})`, check.index);
+    assert.match(source.slice(failed, failed + 200), /\b500\b/);
+    assert.ok(source.indexOf(`if (${check[1]} !== true)`, check.index) > failed, 'anything but true is refused');
+    const limit = source.indexOf("admin.rpc('check_rate_limit'");
+    const claim = source.indexOf("admin.rpc('claim_rate_sync_run'");
+    assert.ok(
+      secret > 0 && secret < bearer && bearer < session && session < check.index && check.index < limit && limit < claim,
+      'secret, web session, permission, rate limit, then the claim',
+    );
+    assert.doesNotMatch(source, /\b(?:is_super_admin|page_permissions)\b/);
+    const sql = readFileSync(ADMIN_SQL, 'utf8');
+    for (const name of ['admin_rate_sync_settings_set', 'admin_save_rate_links', 'admin_set_card_rate_markup']) {
+      assert.match(
+        sqlBody(sql, name),
+        /IF NOT FOUND OR admin_has_permission\(p_admin_id, 'rates\.write'\) IS NOT TRUE THEN\s+RAISE EXCEPTION 'Not authorized';/,
+        name,
+      );
+    }
+    assert.match(
+      sqlBody(sql, 'claim_rate_sync_run'),
+      /IF p_admin_id IS NOT NULL AND admin_has_permission\(p_admin_id, 'rates\.write'\) IS NOT TRUE THEN\s+RAISE EXCEPTION 'Not authorized';/,
+    );
   });
 
   test('the edge token check requires an expiry, accepts only HS256 and reports a missing secret as a server fault, like the console', () => {

@@ -52,6 +52,7 @@ export interface ConfigFormProps {
   subtitle?: ReactNode;
   endpoint: string;
   sections: ConfigSection[];
+  onSaved?: () => void;
 }
 
 export interface ConfigChange {
@@ -699,7 +700,7 @@ export function SectionHeading({ id, title, hint, actions }: { id?: string; titl
   );
 }
 
-export function ConfigForm({ title, subtitle, endpoint, sections }: ConfigFormProps) {
+export function ConfigForm({ title, subtitle, endpoint, sections, onSaved }: ConfigFormProps) {
   const toast = useToast();
   const confirm = useConfirm();
   const router = useRouter();
@@ -917,6 +918,7 @@ export function ConfigForm({ title, subtitle, endpoint, sections }: ConfigFormPr
       if (!latest.ok) {
         toast.show('Saved, but the latest values could not be reloaded. Refresh the page to confirm them.', 'warning');
       }
+      onSaved?.();
       return;
     }
     if (!latest.ok) {
@@ -936,6 +938,7 @@ export function ConfigForm({ title, subtitle, endpoint, sections }: ConfigFormPr
       resetInteraction();
       requestFocus(null);
       toast.show(savedMessage(pending.length), 'success');
+      onSaved?.();
       return;
     }
     toast.show('Could not reach the server, so your changes were not saved. Try again.', 'error');

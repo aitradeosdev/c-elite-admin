@@ -2,8 +2,9 @@ import { Money, formatPercent, type ConfirmDetail, type ConfirmOptions } from '.
 import { formatNaira } from '../../_ui/money';
 import { HUGE_MOVE, LARGE_MOVE, isHugeMove, isLargeMove, rateMove, type RateValues } from './rateRules';
 import {
-  changeCountText, currencyAmount, detailLabels, groupTitle, perUnit, unsavedText,
-  type AddOutcome, type AddRangeTarget, type ExistingRange, type NewRangeValues, type PendingChange, type SaveOutcome,
+  changeCountText, currencyAmount, detailLabels, groupTitle, nextUpdatePhrase, perUnit, unsavedText, updatesLive,
+  type AddOutcome, type AddRangeTarget, type ExistingRange, type NewRangeValues, type PendingChange, type RatesAutomatic,
+  type SaveOutcome,
 } from './model';
 import { RateDiff } from './RateParts';
 
@@ -77,9 +78,32 @@ export function reviewConsequences(
   return lines;
 }
 
-export function reviewOptions(changes: readonly PendingChange[]): ConfirmOptions<SaveOutcome> {
+export function automaticConsequences(
+  changes: readonly PendingChange[],
+  automatic?: RatesAutomatic | null,
+  now?: number | null,
+): string[] {
+  if (!automatic || !automatic.enabled || typeof now !== 'number') return [];
+  const phrase = nextUpdatePhrase(automatic, now);
+  if (!phrase) return [];
+  const linked = changes.filter((change) => updatesLive(automatic, change.row.path.typeId)).length;
+  if (linked === 0) return [];
+  const due = phrase.aside;
+  if (changes.length === 1) {
+    return [`This change is on a linked card type. The next automatic update, ${due}, replaces it with the rate provider’s rate.`];
+  }
+  return [linked === 1
+    ? `1 of these changes is on a linked card type. The next automatic update, ${due}, replaces it with the rate provider’s rate.`
+    : `${linked.toLocaleString('en-NG')} of these changes are on linked card types. The next automatic update, ${due}, replaces them with the rate provider’s rates.`];
+}
+
+export function reviewOptions(
+  changes: readonly PendingChange[],
+  automatic?: RatesAutomatic | null,
+  now?: number | null,
+): ConfirmOptions<SaveOutcome> {
   const labels = detailLabels(changes);
-  const consequences = reviewConsequences(changes, labels);
+  const consequences = [...reviewConsequences(changes, labels), ...automaticConsequences(changes, automatic, now)];
   const total = changes.length;
   return {
     tone: 'financial',
@@ -125,10 +149,17 @@ export function addRangeOptions(
   target: AddRangeTarget,
   values: NewRangeValues,
   overlaps: readonly ExistingRange[],
+  automatic?: RatesAutomatic | null,
+  now?: number | null,
 ): ConfirmOptions<AddOutcome> {
   const { path } = target;
   const top = currencyAmount(path.currency, values.max);
   const overlap = overlapConsequence(overlaps);
+  const notes = overlap ? [overlap] : [];
+  const phrase = automatic && typeof now === 'number' ? nextUpdatePhrase(automatic, now) : null;
+  if (phrase && updatesLive(automatic, path.typeId)) {
+    notes.push(`This card type is linked to the rate provider. At the next update, ${phrase.aside}, its ranges are replaced by the provider’s: this range is switched off, or repriced if the provider quotes exactly this range.`);
+  }
   return {
     tone: 'financial',
     title: `Add ${values.label} to ${path.cardName}?`,
@@ -151,7 +182,7 @@ export function addRangeOptions(
       { label: `Payout for a ${top} card`, value: <Money value={values.max * values.rate} /> },
       { label: 'Status', value: values.active ? 'Active' : 'Switched off' },
     ],
-    consequences: overlap ? [overlap] : undefined,
+    consequences: notes.length > 0 ? notes : undefined,
     confirmLabel: 'Add range',
     cancelLabel: 'Go back',
     pendingLabel: 'Adding the range…',

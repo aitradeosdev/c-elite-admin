@@ -641,6 +641,8 @@ describe('page grant groups', () => {
     }
     const rewards = model.PAGE_GRANT_GROUPS.flatMap((group) => group.grants).find((grant) => grant.key === 'bonuses_rewards');
     assert.equal(rewards?.label, 'Bonuses & Levels');
+    const rates = model.PAGE_GRANT_GROUPS.flatMap((group) => group.grants).find((grant) => grant.key === 'rates_management');
+    assert.equal(rates?.label, 'Rates & Automatic Rates');
   });
 
   test('pages that only open for super admins say so', () => {

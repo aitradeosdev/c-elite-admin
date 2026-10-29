@@ -7,8 +7,8 @@ import { sanitizeSearch } from '../../lib/sanitize';
 import { businessDateKey, lagosDateToRangeEnd, lagosDateToRangeStart } from '../../lib/time';
 import {
   EXPORT_CAP, LEGACY_DEFAULT_LIMIT, LEGACY_MAX_LIMIT, MAX_PAGE_SIZE, PAGE_SIZE, SEARCH_MAX,
-  SEARCH_USER_CAP, SYSTEM_ACTION, actionFilterKeys, actionsMatching, forScreen, isActionKey, isEntityKey, isResultFilter,
-  presentEvent, resolveTarget, screenValue, targetRefs, targetSpec, toCsv, toPrintable,
+  SEARCH_USER_CAP, SYSTEM_ACTIONS, actionFilterKeys, actionsMatching, forScreen, isActionKey, isEntityKey, isResultFilter,
+  listAfterValue, presentEvent, resolveTarget, screenValue, targetRefs, targetSpec, toCsv, toPrintable,
   type ActivityEvent, type AdminInfo, type LookupRow, type ResultFilter, type StoredAuditRow, type TargetLookup,
   type TargetSpec,
 } from '../../(dashboard)/activity/rules';
@@ -19,7 +19,7 @@ const EVENT_COLUMNS = [
 ].join(', ');
 const ADMIN_COLUMNS = 'id, username, role_title, is_super_admin, is_active, last_login_at, deleted_at';
 const META_RESULT = 'after_value->__meta->>result';
-const ADMIN_OR_SYSTEM = `admin_id.not.is.null,action.eq.${SYSTEM_ACTION}`;
+const ADMIN_OR_SYSTEM = `admin_id.not.is.null,action.in.(${SYSTEM_ACTIONS.join(',')})`;
 const TEXT_SEARCH_COLUMNS = ['action', 'entity', 'entity_id', 'ip_address', 'request_id', 'reason', 'error'];
 
 const EXPORT_BATCH = 1000;
@@ -362,7 +362,8 @@ async function listEvents(params: URLSearchParams) {
     .order('id', { ascending: filters.ascending })
     .range(offset, offset + limit - 1);
 
-  let rows = (data ?? []) as unknown as StoredAuditRow[];
+  let rows = ((data ?? []) as unknown as StoredAuditRow[])
+    .map((row) => ({ ...row, after_value: listAfterValue(row.action, row.after_value) }));
   let total = count ?? 0;
   if (error) {
     if (error.code !== RANGE_NOT_SATISFIABLE) {
@@ -520,7 +521,7 @@ async function legacyList(admin: AdminContext, params: URLSearchParams) {
   const activity = ((listed.data ?? []) as Record<string, unknown>[]).map((row) => ({
     ...row,
     before_value: screenValue(row.before_value),
-    after_value: screenValue(row.after_value),
+    after_value: screenValue(listAfterValue(typeof row.action === 'string' ? row.action : null, row.after_value)),
   }));
   return ok({ activity, admins });
 }

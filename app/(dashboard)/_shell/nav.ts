@@ -5,7 +5,7 @@ import {
   Gift, Trophy, TicketPercent, Share2,
   Megaphone, Bell, Mail,
   Settings, Wallet, SlidersHorizontal,
-  Receipt, ShieldAlert, Shield,
+  Receipt, ShieldAlert, Shield, RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permission } from '../../lib/permissions';
@@ -86,6 +86,7 @@ export const NAV_GROUPS: NavGroup[] = [
       PLATFORM_SETTINGS,
       { key: 'platform_balance',       label: 'Balance',           href: '/admin-settings/platform-balance', icon: Wallet, sectionOf: PLATFORM_SETTINGS },
       { key: 'limits_fees',            label: 'Limits & Fees',     href: '/admin-settings/limits-fees',      icon: SlidersHorizontal, sectionOf: PLATFORM_SETTINGS },
+      { key: 'rates_management',       label: 'Automatic Rates',   href: '/admin-settings/automatic-rates',  icon: RefreshCw, sectionOf: PLATFORM_SETTINGS },
       { key: 'bill_settings',          label: 'Bill Settings',     href: '/admin-settings/bill-settings',    icon: Receipt, sectionOf: PLATFORM_SETTINGS },
       { key: 'anomaly_alerts',         label: 'Anomaly & Alerts',  href: '/admin-settings/anomaly-alerts',   icon: ShieldAlert, sectionOf: PLATFORM_SETTINGS },
       { key: 'security_limits',        label: 'Rate Limits & IPs', href: '/admin-settings/security-limits',  icon: Shield, sectionOf: PLATFORM_SETTINGS },

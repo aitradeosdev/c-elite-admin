@@ -12,10 +12,10 @@ import { apiRequest } from '../../lib/apiClient';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { BUSINESS_TZ_LABEL, formatBusinessDate, formatBusinessTime } from '../../lib/time';
 import {
-  EMPTY_DRAFT, EMPTY_REVIEW, SHOW_OPTIONS, addTarget, changesByCard, classifyAdd, classifySave, containsRow, draftCount,
-  editActive, editRate, filterCards, filtersActive, groupTitle, issuesByCard, newRangeBody, overlapsFor, rateInputId,
-  rebaseDraft, rebaseNotice, reviewDraft, revertRow, savePayload, settleSave, toAddResponse, toRatesSnapshot,
-  toSaveResponse,
+  AUTOMATIC_UNREADABLE, EMPTY_DRAFT, EMPTY_REVIEW, SHOW_OPTIONS, addTarget, automaticNotice, changesByCard, classifyAdd,
+  classifySave, containsRow, draftCount, editActive, editRate, filterCards, filtersActive, groupTitle, issuesByCard,
+  newRangeBody, overlapsFor, rateInputId, rebaseDraft, rebaseNotice, reviewDraft, revertRow, savePayload, settleSave,
+  toAddResponse, toRatesSnapshot, toSaveResponse,
   type AddOutcome, type AddRangeTarget, type Draft, type NewRangeValues, type PageNotice, type Phase, type RateRow,
   type RatesSnapshot, type SaveOutcome, type ShowFilter,
 } from './model';
@@ -30,6 +30,7 @@ const TITLE = 'Rates';
 const SUBTITLE =
   'Naira paid per unit of card value, by card, country, type and value range. Saved changes apply to new submissions straight away.';
 const EMPTY_SET: ReadonlySet<string> = new Set<string>();
+const AUTOMATIC_HREF = '/admin-settings/automatic-rates';
 
 interface FocusRequest {
   id: string | null;
@@ -215,11 +216,14 @@ export default function RatesPage() {
     setOpen((previous) => toggled(previous, id));
   }, []);
 
+  const automatic = snapshot ? snapshot.automatic : null;
+
   const editor = useMemo<RateEditor>(() => ({
     draft,
     errors: shownErrors,
     canWrite,
     isMobile,
+    automatic,
     onRate: (row: RateRow, value: string) => {
       updateDraft((current) => editRate(current, row, value));
       setKept((previous) => withAll(previous, [row.id]));
@@ -237,7 +241,7 @@ export default function RatesPage() {
     },
     onBlur: (row: RateRow) => setTouched((previous) => withAll(previous, [row.id])),
     onAdd: (group) => setAdding(addTarget(group)),
-  }), [draft, shownErrors, canWrite, isMobile, updateDraft, requestFocus]);
+  }), [draft, shownErrors, canWrite, isMobile, automatic, updateDraft, requestFocus]);
 
   const reload = async () => {
     if (busyRef.current) return;
@@ -266,6 +270,7 @@ export default function RatesPage() {
     const settled: Settled = { snapshot: null };
     try {
       const fresh = await refreshRates();
+      const readAt = Date.now();
       if (!aliveRef.current || !fresh) return;
       if (!fresh.ok) {
         if (fresh.error.status !== 401) {
@@ -290,7 +295,7 @@ export default function RatesPage() {
       }
       setPhase('confirming');
       const decision = await confirm<SaveOutcome>({
-        ...reviewOptions(pending.changes),
+        ...reviewOptions(pending.changes, fresh.data.automatic, readAt),
         action: async () => {
           setPhase('saving');
           const outcome = classifySave(await apiRequest('/api/rates', {
@@ -350,7 +355,7 @@ export default function RatesPage() {
     const settled: Settled = { snapshot: null };
     try {
       const decision = await confirm<AddOutcome>({
-        ...addRangeOptions(target, values, overlapsFor(target, values.min, values.max)),
+        ...addRangeOptions(target, values, overlapsFor(target, values.min, values.max), automatic, rates.lastUpdatedAt),
         action: async () => {
           const outcome = classifyAdd(await apiRequest('/api/rates', {
             method: 'POST',
@@ -422,6 +427,7 @@ export default function RatesPage() {
       loading,
     },
   ];
+  const liveNotice = automatic && updatedAt !== null ? automaticNotice(automatic, updatedAt) : null;
   const visibleIds = visible.map((card) => card.id);
   const allOpen = visibleIds.length > 0 && visibleIds.every((id) => open.has(id));
   const showOptions = SHOW_OPTIONS.filter((option) => canWrite || option.value !== 'changed');
@@ -514,6 +520,20 @@ export default function RatesPage() {
       {snapshot && !canWrite ? (
         <Notice tone="neutral" compact>
           You can view rates but not change them. Changing rates needs the Draft rate changes permission (rates.write).
+        </Notice>
+      ) : null}
+
+      {snapshot && !automatic ? (
+        <Notice tone="warning" compact>{AUTOMATIC_UNREADABLE}</Notice>
+      ) : null}
+
+      {liveNotice ? (
+        <Notice
+          tone={liveNotice.tone}
+          compact
+          actions={<LinkButton href={AUTOMATIC_HREF} variant="ghost" size="sm">Open Automatic Rates</LinkButton>}
+        >
+          {liveNotice.text}
         </Notice>
       ) : null}
 

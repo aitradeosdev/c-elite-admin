@@ -2,6 +2,7 @@ import { redactAudit } from '../../lib/redact';
 import { MASK, METADATA_MASK_KEYS, isMaskable, maskMetadata } from '../../lib/mask';
 import { BUSINESS_TZ } from '../../lib/time';
 import { formatNaira } from '../../_ui/money';
+import { listedOff, readApplySummary, summaryText, typesOffText } from '../automatic-rates/rules';
 
 export const PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 100;
@@ -200,6 +201,10 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
   ['Rates', [
     ['UPDATE_RATE', 'Updated rate'],
     ['CREATE_DENOMINATION', 'Created rate range'],
+    ['LINK_RATE_PRODUCT', 'Linked card type to rate provider product'],
+    ['UNLINK_RATE_PRODUCT', 'Unlinked card type from rate provider product'],
+    ['SET_CARD_EXTRA_PERCENTAGE', 'Changed card extra percentage'],
+    ['SYNC_PROVIDER_RATES', 'Updated rates from rate provider'],
   ]],
   ['Rewards', [
     ['CREATE_COUPON', 'Created coupon'],
@@ -225,6 +230,9 @@ const CATALOGUE: ReadonlyArray<readonly [string, ReadonlyArray<ActionEntry>]> = 
     ['UPDATE_ANOMALY_ALERTS', 'Updated anomaly alerts'],
     ['UPDATE_SECURITY_LIMITS', 'Updated rate limits & IPs'],
     ['UPDATE_APP_CONFIG', 'Updated app configuration'],
+    ['ENABLE_AUTOMATIC_RATES', 'Turned on automatic rates'],
+    ['DISABLE_AUTOMATIC_RATES', 'Turned off automatic rates'],
+    ['UPDATE_AUTOMATIC_RATES', 'Updated automatic rate settings'],
   ]],
   ['Exports', [
     ['EXPORT_CSV', 'Exported CSV'],
@@ -329,11 +337,11 @@ export function actionsMatching(query: string): string[] {
   return keys;
 }
 
-export const SYSTEM_ACTION = 'PURGE_DELETED_ACCOUNT_WITHDRAWALS';
+export const SYSTEM_ACTIONS: readonly string[] = ['PURGE_DELETED_ACCOUNT_WITHDRAWALS', 'SYNC_PROVIDER_RATES'];
 export const SYSTEM_ACTOR = 'System';
 
 export function isSystemEvent(event: Pick<StoredAuditRow, 'admin_id' | 'action'>): boolean {
-  return text(event.admin_id) === null && event.action === SYSTEM_ACTION;
+  return text(event.admin_id) === null && event.action !== null && SYSTEM_ACTIONS.includes(event.action);
 }
 
 const PURGE_COUNTS: ReadonlyArray<readonly [key: string, one: string, many: string]> = [
@@ -348,9 +356,8 @@ const PURGE_COUNTS: ReadonlyArray<readonly [key: string, one: string, many: stri
 
 const COUNT_FORMAT = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 0 });
 
-export function actionDescription(event: Pick<ActivityEvent, 'action' | 'after_value'>): string | null {
-  const after = event.after_value;
-  if (event.action !== SYSTEM_ACTION || !isRecord(after)) return null;
+function purgeDescription(after: unknown): string | null {
+  if (!isRecord(after)) return null;
   const counts: string[] = [];
   for (const [key, one, many] of PURGE_COUNTS) {
     const value = after[key];
@@ -358,6 +365,32 @@ export function actionDescription(event: Pick<ActivityEvent, 'action' | 'after_v
     counts.push(`${COUNT_FORMAT.format(value)} ${value === 1 ? one : many}`);
   }
   return `Removed from deleted accounts after the retention period: ${counts.slice(0, -1).join(', ')} and ${counts[counts.length - 1]}.`;
+}
+
+function syncDescription(after: unknown): string | null {
+  const summary = readApplySummary(after);
+  if (!summary) return null;
+  const changed = summaryText(summary);
+  if (changed === null) return null;
+  const types = summary.linked === 1 ? '1 linked card type' : `${COUNT_FORMAT.format(summary.linked)} linked card types`;
+  const off = listedOff(summary);
+  const offText = off.length === 0 ? '' : ` ${typesOffText(off, 'linked card type')}`;
+  return `Updated from the rate provider: ${changed}, across ${types}.${offText}`;
+}
+
+export function actionDescription(event: Pick<ActivityEvent, 'action' | 'after_value'>): string | null {
+  if (event.action === 'PURGE_DELETED_ACCOUNT_WITHDRAWALS') return purgeDescription(event.after_value);
+  if (event.action === 'SYNC_PROVIDER_RATES') return syncDescription(event.after_value);
+  return null;
+}
+
+export function listAfterValue(action: string | null, after: unknown): unknown {
+  if (action !== 'SYNC_PROVIDER_RATES' || !isRecord(after) || !Array.isArray(after.changes)) return after;
+  return { ...after, changes: after.changes.length };
+}
+
+export function opensFromList(event: Pick<ActivityEvent, 'action'>): boolean {
+  return event.action !== 'SYNC_PROVIDER_RATES';
 }
 
 const ENTITY_TEXT: Readonly<Record<string, string>> = {
@@ -383,6 +416,8 @@ const ENTITY_TEXT: Readonly<Record<string, string>> = {
   level_tiers: 'Level tier',
   notification_broadcasts: 'Broadcast',
   notification_templates: 'Notification template',
+  rate_sync_runs: 'Automatic rate update',
+  rate_sync_settings: 'Automatic rate settings',
   transactions: 'Transactions',
   transfers: 'Transfer',
   users: 'User',

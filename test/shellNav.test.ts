@@ -59,7 +59,7 @@ const VISIBLE_BY_KEY: Readonly<Record<string, readonly string[]>> = {
   admin_accounts: ['/admin-accounts', '/admin-roles', '/admin-permissions'],
   card_management: ['/cards'],
   card_type_builder: ['/field-builder'],
-  rates_management: ['/rates'],
+  rates_management: ['/rates', '/admin-settings/automatic-rates'],
   bonuses_rewards: ['/bonuses-rewards', '/bonuses-rewards/levels'],
   coupons: ['/coupons'],
   referral_management: ['/referral-management'],
@@ -78,6 +78,7 @@ const PLATFORM_SETTINGS_HREF = '/admin-settings';
 const SETTINGS_SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['/admin-settings/platform-balance', 'Balance'],
   ['/admin-settings/limits-fees', 'Limits & Fees'],
+  ['/admin-settings/automatic-rates', 'Automatic Rates'],
   ['/admin-settings/bill-settings', 'Bill Settings'],
   ['/admin-settings/anomaly-alerts', 'Anomaly & Alerts'],
   ['/admin-settings/security-limits', 'Rate Limits & IPs'],
@@ -124,10 +125,11 @@ describe('nav table integrity', () => {
     }
   });
 
-  test('page keys stay unique to their pages, apart from Bonuses and Levels and the three admin pages', () => {
+  test('page keys stay unique to their pages, apart from Bonuses and Levels, Rates and Automatic Rates, and the three admin pages', () => {
     const shared: Readonly<Record<string, readonly string[]>> = {
       bonuses_rewards: ['Bonuses', 'Levels'],
       admin_accounts: ['Admins', 'Roles', 'Permissions'],
+      rates_management: ['Rates', 'Automatic Rates'],
     };
     const owners = new Map<string, string[]>();
     for (const leaf of leaves) owners.set(leaf.key, [...(owners.get(leaf.key) ?? []), leaf.label]);
@@ -467,22 +469,22 @@ describe('Platform Settings in the menu', () => {
   const configurationItems = (keys: readonly string[] | null) =>
     sidebarFor(keys).find((g) => g.label === 'Configuration')?.items;
 
-  test('Configuration holds Platform Settings and its five sections at their new addresses, and the Security group is gone', () => {
+  test('Configuration holds Platform Settings and its six sections at their new addresses, and the Security group is gone', () => {
     assert.deepEqual(configuration()?.items.map((i) => [i.label, i.href]), [
       ['Platform Settings', PLATFORM_SETTINGS_HREF],
       ...SETTINGS_SECTIONS.map(([href, label]) => [label, href]),
     ]);
     assert.deepEqual(configuration()?.items.map((i) => i.key), [
-      'admin_settings', 'platform_balance', 'limits_fees', 'bill_settings', 'anomaly_alerts', 'security_limits',
+      'admin_settings', 'platform_balance', 'limits_fees', 'rates_management', 'bill_settings', 'anomaly_alerts', 'security_limits',
     ]);
     assert.deepEqual(configuration()?.items.map((i) => iconName(i.icon)), [
-      'Settings', 'Wallet', 'SlidersHorizontal', 'Receipt', 'ShieldAlert', 'Shield',
+      'Settings', 'Wallet', 'SlidersHorizontal', 'RefreshCw', 'Receipt', 'ShieldAlert', 'Shield',
     ]);
     assert.equal(configuration()?.items[0], PLATFORM_SETTINGS);
     assert.equal(PLATFORM_SETTINGS.key, 'admin_settings');
     assert.equal(PLATFORM_SETTINGS.sectionOf, undefined);
     assert.ok(configuration()?.items.slice(1).every((i) => i.sectionOf === PLATFORM_SETTINGS));
-    assert.equal(leaves.filter((leaf) => leaf.sectionOf !== undefined).length, 5);
+    assert.equal(leaves.filter((leaf) => leaf.sectionOf !== undefined).length, 6);
     assert.deepEqual(NAV_GROUPS.map((g) => g.label), ['Operations', 'People', 'Catalog', 'Rewards', 'Communications', 'Configuration']);
     assert.equal(GENERAL_SECTION_LABEL, 'General');
   });

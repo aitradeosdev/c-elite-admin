@@ -7,8 +7,8 @@ import {
   Tr, type FieldSize,
 } from '../../_ui';
 import {
-  cardSummary, groupTitle, perUnit, rateInputId, rowView, valueSpan,
-  type Draft, type RateCard, type RateGroup, type RateRow, type RowView,
+  cardSummary, groupTitle, isLinkedType, perUnit, rateInputId, rowView, updatesLive, valueSpan,
+  type Draft, type RateCard, type RateGroup, type RateRow, type RatesAutomatic, type RowView,
 } from './model';
 import { BrandMark, RowChange, UnsavedMark } from './RateParts';
 import s from './page.module.css';
@@ -18,6 +18,7 @@ export interface RateEditor {
   errors: Readonly<Record<string, string>>;
   canWrite: boolean;
   isMobile: boolean;
+  automatic: RatesAutomatic | null;
   onRate: (row: RateRow, value: string) => void;
   onActive: (row: RateRow, active: boolean) => void;
   onRevert: (row: RateRow) => void;
@@ -209,11 +210,14 @@ function MobileRates({ group, editor, label }: { group: RateGroup; editor: RateE
 function RateGroupView({ group, editor }: { group: RateGroup; editor: RateEditor }) {
   const headingId = useId();
   const title = groupTitle(group.path);
+  const linked = isLinkedType(editor.automatic, group.path.typeId);
+  const live = updatesLive(editor.automatic, group.path.typeId);
   return (
     <section className={s.group} aria-labelledby={headingId}>
       <div className={s.groupHead}>
         <h3 id={headingId} className={s.groupTitle}>{title}</h3>
         <span className={s.groupMeta}>₦ {perUnit(group.path.currency)}</span>
+        {linked ? (live ? <Badge tone="info">Automatic</Badge> : <Badge tone="neutral">Linked</Badge>) : null}
         {editor.canWrite ? (
           <Button
             type="button"
@@ -228,6 +232,9 @@ function RateGroupView({ group, editor }: { group: RateGroup; editor: RateEditor
           </Button>
         ) : null}
       </div>
+      {live ? (
+        <p className={s.groupNote}>Ranges and rates come from the rate provider. Changes here are replaced at the next update.</p>
+      ) : null}
       {editor.isMobile
         ? <MobileRates group={group} editor={editor} label={`${group.path.cardName} ${title} rates`} />
         : <DesktopRates group={group} editor={editor} labelId={headingId} />}
